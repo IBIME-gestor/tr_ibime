@@ -27,12 +27,6 @@ service cloud.firestore {
       return userDoc().data.driverId;
     }
 
-    // ------------------------------------------------------------
-    // users/{uid}: perfil de acceso. Se "auto-crea" la primera vez
-    // que alguien entra con Google, solo si su correo aparece en
-    // /admins o coincide con el email de algún documento en /drivers.
-    // Una vez creado, no se puede editar ni borrar desde el cliente.
-    // ------------------------------------------------------------
     match /users/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
 
@@ -50,15 +44,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Lista blanca de administradores. El documento ID es el correo
-    // institucional en minúsculas, ej: admins/direccion@tucolegio.edu.mx
     match /admins/{email} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 
-    // Catálogos: el admin gestiona todo; los choferes solo leen
-    // lo necesario para operar su recorrido.
     match /schools/{id} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
@@ -69,9 +59,6 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Los choferes necesitan poder LEER esta colección incluso antes
-    // de tener perfil propio (para el auto-alta por correo), por eso
-    // el read solo exige estar autenticado.
     match /drivers/{id} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
@@ -79,8 +66,6 @@ service cloud.firestore {
 
     match /routes/{id} {
       allow read: if isSignedIn();
-      // El propio chofer puede actualizar el orden guardado de su ruta
-      // (se hace automáticamente al terminar cada recorrido).
       allow update: if isAdmin() ||
         (isDriver() && resource.data.driverId == myDriverId() &&
           request.resource.data.diff(resource.data).affectedKeys()
@@ -93,10 +78,8 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Recorridos: el chofer solo puede crear/editar el recorrido del día
-    // que le corresponde a él; el admin puede leer todo para reportes.
     match /trips/{tripId} {
-      allow read: if isAdmin() || (isDriver() && resource.data.driverId == myDriverId());
+      allow read: if isAdmin() || (isDriver() && (resource == null || resource.data.driverId == myDriverId()));
       allow create: if isDriver() && request.resource.data.driverId == myDriverId();
       allow update: if isAdmin() || (isDriver() && resource.data.driverId == myDriverId());
 
