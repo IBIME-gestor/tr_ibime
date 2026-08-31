@@ -1,0 +1,249 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  writeBatch,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from './config';
+import { Routes, Students } from './services';
+
+/**
+ * MODELO DE DATOS
+ * ----------------
+ * trips/{tripId}
+ *    routeId, schoolId, driverId, unitId, date ('YYYY-MM-DD'), shift ('morning'|'afternoon')
+ *    status: 'in_progress' | 'completed'
+ *    startedAt, completedAt
+ *    bulkEventAt, bulkEventLocation   // el clic de "Llegamos al colegio" / "Todos abordaron"
+ *
+ * trips/{tripId}/stops/{studentId}
+ *    studentId, matricula, name, order, addedManually
+ *    status: 'pending' | 'boarded' | 'delivered' | 'absent'
+ *    boardedAt, boardedLocation, boardedMethod   ('manual' | 'bulk')
+ *    deliveredAt, deliveredLocation, deliveredMethod ('manual' | 'bulk')
+ *
+ * En el turno de la MAÑANA:  boarded = se sube en su domicilio (manual, uno por uno)
+ *                             delivered = llega al plantel (bulk, un botón para todos)
+ * En el turno de la TARDE:   boarded = sube al camión en el plantel (bulk, un botón para todos)
+ *                             delivered = baja en su domicilio (manual, uno por uno)
+ */
+
+const todayId = (date) => date; // 'YYYY-MM-DD'
+
+function tripDocId(routeId, date, shift) {
+  return `${routeId}_${date}_${shift}`;
+}
+
+export function todayString() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Obtiene el recorrido de hoy para una ruta/turno, o lo crea si no existe,
+ * poblando las paradas en el orden guardado del día anterior (o alfabético
+ * si es la primera vez).
+ */
+export async function getOrCreateTodayTrip(route, shift, driverUid) {
+  const date = todayString();
+  const id = tripDocId(route.id, date, shift);
+  const tripRef = doc(db, 'trips', id);
+  const existing = await getDoc(tripRef);
+
+  if (existing.exists()) {
+    return { id: tripRef.id, ...existing.data() };
+  }
+
+  const students = await Students.listByRoute(route.id);
+  const savedOrder =
+    shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
+
+  const ordered = orderStudents(students, savedOrder);
+
+  const tripData = {
+    routeId: route.id,
+    schoolId: route.schoolId,
+    driverId: driverUid,
+    unitId: route.unitId,
+    date,
+    shift,
+    status: 'in_progress',
+    startedAt: serverTimestamp(),
+  };
+  await setDoc(tripRef, tripData);
+
+  const batch = writeBatch(db);
+  ordered.forEach((student, index) => {
+    const stopRef = doc(db, 'trips', id, 'stops', student.id);
+    batch.set(stopRef, {
+      studentId: student.id,
+      matricula: student.matricula,
+      name: student.name,
+      order: index,
+      addedManually: false,
+      status: 'pending',
+    });
+  });
+  await batch.commit();
+
+  return { id: tripRef.id, ...tripData };
+}
+
+function orderStudents(students, savedOrder = []) {
+  if (!savedOrder || savedOrder.length === 0) {
+    return [...students].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const byId = new Map(students.map((s) => [s.id, s]));
+  const ordered = [];
+  savedOrder.forEach((id) => {
+    if (byId.has(id)) {
+      ordered.push(byId.get(id));
+      byId.delete(id);
+    }
+  });
+  // alumnos nuevos que no estaban en el orden guardado van al final
+  const rest = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...ordered, ...rest];
+}
+
+export function subscribeTripStops(tripId, callback) {
+  const stopsRef = collection(db, 'trips', tripId, 'stops');
+  const q = query(stopsRef, orderBy('order'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+}
+
+export async function getTrip(tripId) {
+  const snap = await getDoc(doc(db, 'trips', tripId));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
+/**
+ * Marca a UN alumno como abordado (mañana: lo recogieron en su domicilio)
+ * o como entregado (tarde: bajó del camión), guardando hora + ubicación.
+ */
+export async function markStopManual(tripId, studentId, field, location) {
+  const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
+  const timeField = field === 'boarded' ? 'boardedAt' : 'deliveredAt';
+  const locField = field === 'boarded' ? 'boardedLocation' : 'deliveredLocation';
+  const methodField = field === 'boarded' ? 'boardedMethod' : 'deliveredMethod';
+  await updateDoc(stopRef, {
+    status: field === 'boarded' ? 'boarded' : 'delivered',
+    [timeField]: serverTimestamp(),
+    [locField]: location || null,
+    [methodField]: 'manual',
+  });
+}
+
+export async function markStopAbsent(tripId, studentId) {
+  const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
+  await updateDoc(stopRef, { status: 'absent' });
+}
+
+/**
+ * Acción masiva: "Llegamos al colegio" (mañana) o "Todos abordaron" (tarde).
+ * Aplica hora + ubicación a TODOS los alumnos que siguen activos en la ruta.
+ */
+export async function markAllBulk(tripId, field, location, stops) {
+  const batch = writeBatch(db);
+  const timeField = field === 'boarded' ? 'boardedAt' : 'deliveredAt';
+  const locField = field === 'boarded' ? 'boardedLocation' : 'deliveredLocation';
+  const methodField = field === 'boarded' ? 'boardedMethod' : 'deliveredMethod';
+  const eligible = stops.filter((s) => s.status !== 'absent');
+
+  eligible.forEach((stop) => {
+    const stopRef = doc(db, 'trips', tripId, 'stops', stop.id);
+    batch.update(stopRef, {
+      status: field === 'boarded' ? 'boarded' : 'delivered',
+      [timeField]: serverTimestamp(),
+      [locField]: location || null,
+      [methodField]: 'bulk',
+    });
+  });
+
+  const tripRef = doc(db, 'trips', tripId);
+  batch.update(tripRef, {
+    bulkEventAt: serverTimestamp(),
+    bulkEventLocation: location || null,
+  });
+
+  await batch.commit();
+}
+
+/** Agrega manualmente a un alumno que no estaba en la lista de la ruta. */
+export async function addStudentToTrip(tripId, student, order) {
+  const stopRef = doc(db, 'trips', tripId, 'stops', student.id);
+  await setDoc(stopRef, {
+    studentId: student.id,
+    matricula: student.matricula,
+    name: student.name,
+    order,
+    addedManually: true,
+    status: 'pending',
+  });
+}
+
+/**
+ * Cierra el recorrido y guarda el orden real en la ruta para que
+ * mañana la lista del chofer ya venga pre-ordenada.
+ */
+export async function completeTrip(tripId, trip) {
+  const stopsSnap = await getDocs(
+    query(collection(db, 'trips', tripId, 'stops'), orderBy('order'))
+  );
+  const stops = stopsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
+  const finished = stops.filter((s) => s.status !== 'absent' && s[timeKey]);
+  finished.sort((a, b) => {
+    const ta = a[timeKey]?.toMillis ? a[timeKey].toMillis() : 0;
+    const tb = b[timeKey]?.toMillis ? b[timeKey].toMillis() : 0;
+    return ta - tb;
+  });
+  const newOrder = finished.map((s) => s.studentId);
+
+  await Routes.saveOrderFromTrip(trip.routeId, trip.shift, newOrder);
+  await updateDoc(doc(db, 'trips', tripId), {
+    status: 'completed',
+    completedAt: serverTimestamp(),
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Reportes                                                           */
+/* ------------------------------------------------------------------ */
+export async function listTripsByRoute(routeId) {
+  const q = query(
+    collection(db, 'trips'),
+    where('routeId', '==', routeId),
+    orderBy('date', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function listTripsByDriver(driverId) {
+  const q = query(
+    collection(db, 'trips'),
+    where('driverId', '==', driverId),
+    orderBy('date', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function getTripStopsOnce(tripId) {
+  const snap = await getDocs(
+    query(collection(db, 'trips', tripId, 'stops'), orderBy('order'))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}

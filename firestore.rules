@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && userDoc().data.role == 'admin';
+    }
+
+    function isDriver() {
+      return isSignedIn() && userDoc().data.role == 'driver';
+    }
+
+    function myDriverId() {
+      return userDoc().data.driverId;
+    }
+
+    // ------------------------------------------------------------
+    // users/{uid}: perfil de acceso. Se "auto-crea" la primera vez
+    // que alguien entra con Google, solo si su correo aparece en
+    // /admins o coincide con el email de algún documento en /drivers.
+    // Una vez creado, no se puede editar ni borrar desde el cliente.
+    // ------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+
+      allow create: if isSignedIn() && request.auth.uid == uid && (
+        (
+          request.resource.data.role == 'admin' &&
+          exists(/databases/$(database)/documents/admins/$(myEmail()))
+        ) ||
+        (
+          request.resource.data.role == 'driver' &&
+          get(/databases/$(database)/documents/drivers/$(request.resource.data.driverId)).data.email.lower() == myEmail()
+        )
+      );
+
+      allow update, delete: if false;
+    }
+
+    // Lista blanca de administradores. El documento ID es el correo
+    // institucional en minúsculas, ej: admins/direccion@tucolegio.edu.mx
+    match /admins/{email} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Catálogos: el admin gestiona todo; los choferes solo leen
+    // lo necesario para operar su recorrido.
+    match /schools/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /units/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Los choferes necesitan poder LEER esta colección incluso antes
+    // de tener perfil propio (para el auto-alta por correo), por eso
+    // el read solo exige estar autenticado.
+    match /drivers/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /routes/{id} {
+      allow read: if isSignedIn();
+      // El propio chofer puede actualizar el orden guardado de su ruta
+      // (se hace automáticamente al terminar cada recorrido).
+      allow update: if isAdmin() ||
+        (isDriver() && resource.data.driverId == myDriverId() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['studentOrderMorning', 'studentOrderAfternoon', 'updatedAt']));
+      allow create, delete: if isAdmin();
+    }
+
+    match /students/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Recorridos: el chofer solo puede crear/editar el recorrido del día
+    // que le corresponde a él; el admin puede leer todo para reportes.
+    match /trips/{tripId} {
+      allow read: if isAdmin() || (isDriver() && resource.data.driverId == myDriverId());
+      allow create: if isDriver() && request.resource.data.driverId == myDriverId();
+      allow update: if isAdmin() || (isDriver() && resource.data.driverId == myDriverId());
+
+      match /stops/{studentId} {
+        allow read: if isAdmin() || isDriver();
+        allow write: if isAdmin() || isDriver();
+      }
+    }
+  }
+}
