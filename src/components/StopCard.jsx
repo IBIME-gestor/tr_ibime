@@ -18,7 +18,11 @@ const STATUS_LABEL = {
  * "Bajó" en la tarde. El chofer toca UNA vez, no hay menús ni pasos extra.
  */
 export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled }) {
-  const isDone = stop.status === 'boarded' || stop.status === 'delivered';
+  // "Terminado" de verdad es solo cuando ya se entregó (bajó en su domicilio
+  // o llegó al plantel). "A bordo" es un estado intermedio: en el recorrido
+  // de vuelta todavía falta la acción de "Bajó", así que el botón debe
+  // seguir apareciendo.
+  const isDone = stop.status === 'delivered';
   const isAbsent = stop.status === 'absent';
 
   return (
