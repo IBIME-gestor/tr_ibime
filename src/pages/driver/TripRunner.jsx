@@ -171,8 +171,10 @@ export default function TripRunner() {
         </h1>
       </div>
 
-      {/* Buscar por matrícula — útil el primer día o para altas de última hora */}
-      {!config.boardedBulk && !boardingPhaseDone && (
+          {/* Buscar por matrícula — útil el primer día o para altas de última
+          hora, en cualquier turno (ida o vuelta) mientras el recorrido no
+          esté totalmente resuelto. */}
+          {!allResolved && (
         <div className="card">
           <p className="font-medium text-sm text-navy-600 mb-2">
             ¿No aparece el alumno? Búscalo por matrícula
