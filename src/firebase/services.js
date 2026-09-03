@@ -113,6 +113,8 @@ export const Routes = {
     listAll('routes', [where('schoolId', '==', schoolId), orderBy('name')]),
   listByDriver: (driverId) =>
     listAll('routes', [where('driverId', '==', driverId)]),
+  listByNanny: (nannyId) =>
+    listAll('routes', [where('nannyId', '==', nannyId)]),
   subscribe: (cb) => subscribeAll('routes', [orderBy('name')], cb),
   get: (id) => getOne('routes', id),
   create: (data) =>
