@@ -17,7 +17,7 @@ const STATUS_LABEL = {
  * `actionLabel` cambia según el turno: "Recogido" en la mañana,
  * "Bajó" en la tarde. El chofer toca UNA vez, no hay menús ni pasos extra.
  */
-export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled }) {
+export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled, navHref }) {
   // "Terminado" de verdad es solo cuando ya se entregó (bajó en su domicilio
   // o llegó al plantel). "A bordo" es un estado intermedio: en el recorrido
   // de vuelta todavía falta la acción de "Bajó", así que el botón debe
@@ -38,19 +38,31 @@ export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, di
           </p>
         </div>
         {!isDone && !isAbsent && !disabled && (
-          <div className="flex gap-2 shrink-0">
-            <button
-              onClick={() => onMarkAbsent(stop)}
-              className="text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-400"
-            >
-              No vino
-            </button>
-            <button
-              onClick={() => onAction(stop)}
-              className="px-4 py-3 rounded-xl bg-navy-800 text-white font-display font-semibold"
-            >
-              {actionLabel}
-            </button>
+          <div className="flex flex-col gap-2 shrink-0 items-end">
+            {navHref && (
+              <a
+                href={navHref}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs px-3 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap"
+              >
+                📍 Navegar
+              </a>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => onMarkAbsent(stop)}
+                className="text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-400"
+              >
+                No vino
+              </button>
+              <button
+                onClick={() => onAction(stop)}
+                className="px-4 py-3 rounded-xl bg-navy-800 text-white font-display font-semibold"
+              >
+                {actionLabel}
+              </button>
+            </div>
           </div>
         )}
         {isDone && <span className="text-2xl">✓</span>}
