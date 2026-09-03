@@ -90,6 +90,26 @@ export default function Reports() {
       {!trip && <p className="text-navy-400 text-sm">Elige una ruta para ver sus recorridos.</p>}
 
       {trip && (
+        <>
+          <div className="card mb-4 flex flex-wrap gap-6 text-sm">
+            <div>
+              <p className="text-navy-400">Kilometraje inicial</p>
+              <p className="font-display font-semibold text-lg">{trip.kmInicial ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-navy-400">Kilometraje final</p>
+              <p className="font-display font-semibold text-lg">{trip.kmFinal ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-navy-400">Kilómetros recorridos</p>
+              <p className="font-display font-semibold text-lg">
+                {trip.kmInicial != null && trip.kmFinal != null
+                  ? (trip.kmFinal - trip.kmInicial).toFixed(1)
+                  : '—'}
+              </p>
+            </div>
+          </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="card overflow-x-auto">
             <table className="w-full text-sm">
@@ -128,6 +148,7 @@ export default function Reports() {
             </MapContainer>
           </div>
         </div>
+        </>
       )}
     </div>
   );
