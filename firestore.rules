@@ -23,8 +23,12 @@ service cloud.firestore {
       return isSignedIn() && userDoc().data.role == 'driver';
     }
 
-    function myDriverId() {
-      return userDoc().data.driverId;
+    function isNanny() {
+      return isSignedIn() && userDoc().data.role == 'nanny';
+    }
+
+    function myStaffId() {
+      return userDoc().data.staffId;
     }
 
     match /users/{uid} {
@@ -36,8 +40,9 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/admins/$(myEmail()))
         ) ||
         (
-          request.resource.data.role == 'driver' &&
-          get(/databases/$(database)/documents/drivers/$(request.resource.data.driverId)).data.email.lower() == myEmail()
+          (request.resource.data.role == 'driver' || request.resource.data.role == 'nanny') &&
+          get(/databases/$(database)/documents/drivers/$(request.resource.data.staffId)).data.email.lower() == myEmail() &&
+          get(/databases/$(database)/documents/drivers/$(request.resource.data.staffId)).data.role == request.resource.data.role
         )
       );
 
@@ -67,7 +72,7 @@ service cloud.firestore {
     match /routes/{id} {
       allow read: if isSignedIn();
       allow update: if isAdmin() ||
-        (isDriver() && resource.data.driverId == myDriverId() &&
+        (isDriver() && resource.data.driverId == myStaffId() &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['studentOrderMorning', 'studentOrderAfternoon', 'updatedAt']));
       allow create, delete: if isAdmin();
@@ -78,14 +83,26 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // El chofer es el único que puede crear el recorrido (requiere el
+    // kilometraje inicial, validado en la app) y cerrarlo (kilometraje
+    // final). La nanny puede leerlo y actualizar solo lo relacionado con
+    // marcar alumnos/ubicación en vivo — nunca el kilometraje ni el status.
     match /trips/{tripId} {
-      allow read: if isAdmin() || (isDriver() && (resource == null || resource.data.driverId == myDriverId()));
-      allow create: if isDriver() && request.resource.data.driverId == myDriverId();
-      allow update: if isAdmin() || (isDriver() && resource.data.driverId == myDriverId());
+      allow read: if isAdmin()
+        || (isDriver() && (resource == null || resource.data.driverId == myStaffId()))
+        || (isNanny() && resource != null && resource.data.nannyId == myStaffId());
+
+      allow create: if isDriver() && request.resource.data.driverId == myStaffId();
+
+      allow update: if isAdmin()
+        || (isDriver() && resource.data.driverId == myStaffId())
+        || (isNanny() && resource.data.nannyId == myStaffId() &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'updatedAt']));
 
       match /stops/{studentId} {
-        allow read: if isAdmin() || isDriver();
-        allow write: if isAdmin() || isDriver();
+        allow read: if isAdmin() || isDriver() || isNanny();
+        allow write: if isAdmin() || isDriver() || isNanny();
       }
     }
 
@@ -103,7 +120,7 @@ service cloud.firestore {
 
     match /publicTracking/{tripId} {
       allow read: if true;
-      allow write: if isAdmin() || isDriver();
+      allow write: if isAdmin() || isDriver() || isNanny();
     }
   }
 }
