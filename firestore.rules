@@ -98,7 +98,7 @@ service cloud.firestore {
         || (isDriver() && resource.data.driverId == myStaffId())
         || (isNanny() && resource.data.nannyId == myStaffId() &&
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'updatedAt']));
+              .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'alert', 'updatedAt']));
 
       match /stops/{studentId} {
         allow read: if isAdmin() || isDriver() || isNanny();
