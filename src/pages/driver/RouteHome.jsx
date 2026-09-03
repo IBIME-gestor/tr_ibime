@@ -65,6 +65,22 @@ export default function RouteHome() {
               🌇 Recorrido de vuelta (tarde)
             </button>
           </div>
+          <p className="text-xs text-navy-400 mt-3">
+            ¿Ruta nueva para ti? Consulta cómo se hizo antes:{' '}
+            <button
+              onClick={() => navigate(`/chofer/referencia/${route.id}/morning`)}
+              className="underline"
+            >
+              ver ida
+            </button>{' '}
+            ·{' '}
+            <button
+              onClick={() => navigate(`/chofer/referencia/${route.id}/afternoon`)}
+              className="underline"
+            >
+              ver vuelta
+            </button>
+          </p>
         </div>
       ))}
 
