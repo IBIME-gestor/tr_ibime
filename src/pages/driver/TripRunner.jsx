@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students } from '../../firebase/services';
 import {
-  getOrCreateTodayTrip,
+  subscribeTodayTrip,
+  startTrip,
   subscribeTripStops,
   markStopManual,
   markStopAbsent,
@@ -61,48 +62,69 @@ export default function TripRunner() {
   const config = SHIFT_CONFIG[shift];
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const isDriver = profile?.role === 'driver';
 
-  const [trip, setTrip] = useState(null);
+  const [route, setRoute] = useState(null);
+  const [trip, setTrip] = useState(null); // null mientras carga, undefined... (ver tripLoaded)
+  const [tripLoaded, setTripLoaded] = useState(false);
   const [stops, setStops] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [matricula, setMatricula] = useState('');
   const [found, setFound] = useState(null);
   const [searchError, setSearchError] = useState('');
   const [destinations, setDestinations] = useState({}); // studentId -> {lat,lng} | address string
+  const [phones, setPhones] = useState({}); // studentId -> teléfono del padre
+
+  // Formularios de kilometraje
+  const [kmInicialInput, setKmInicialInput] = useState('');
+  const [kmFinalInput, setKmFinalInput] = useState('');
+  const [kmError, setKmError] = useState('');
+  const [startingTrip, setStartingTrip] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
   const lastSentAtRef = useRef(0);
 
   useEffect(() => {
     async function init() {
-      const route = await RoutesService.get(routeId);
-      const t = await getOrCreateTodayTrip(route, shift, profile?.driverId);
-      setTrip(t);
-      setLoading(false);
+      const r = await RoutesService.get(routeId);
+      setRoute(r);
 
-      // Destinos para el botón "Navegar": primero la última ubicación real
-      // capturada en un recorrido previo de esta misma ruta/turno (más
-      // precisa), y si no existe todavía, la dirección de texto guardada
-      // del alumno (útil el primer día en una ruta nueva).
+      // Destinos para el botón "Navegar" y teléfonos para "Llamar": primero
+      // la última ubicación real capturada en un recorrido previo de esta
+      // misma ruta/turno (más precisa), y si no existe, la dirección de
+      // texto guardada del alumno (útil el primer día en una ruta nueva).
       const [reference, students] = await Promise.all([
         getReferenceTrip(routeId, shift),
         Students.listByRoute(routeId),
       ]);
       const byId = {};
+      const phoneById = {};
       students.forEach((s) => {
         if (s.address) byId[s.id] = s.address;
+        if (s.parentContact) phoneById[s.id] = s.parentContact;
       });
       reference?.stops.forEach((s) => {
         if (s.referenceLocation?.lat) byId[s.studentId] = s.referenceLocation;
       });
       setDestinations(byId);
+      setPhones(phoneById);
     }
     init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId, shift]);
+
+  // Se suscribe al recorrido de HOY en tiempo real, exista o no todavía.
+  // Así, si la nanny entra antes que el chofer, ve en vivo el momento en
+  // que él registra su kilometraje y arranca el recorrido.
+  useEffect(() => {
+    const unsub = subscribeTodayTrip(routeId, shift, (t) => {
+      setTrip(t);
+      setTripLoaded(true);
+    });
+    return unsub;
   }, [routeId, shift]);
 
   useEffect(() => {
-    if (!trip?.id) return undefined;
+    if (!trip?.id) { setStops([]); return undefined; }
     const unsub = subscribeTripStops(trip.id, setStops);
     return unsub;
   }, [trip?.id]);
@@ -116,9 +138,10 @@ export default function TripRunner() {
     syncPublicTracking({ id: trip.id, ...trip }, stops);
   }, [trip, stops]);
 
-  // Ubicación en vivo del camión mientras el recorrido está en curso.
+  // Ubicación en vivo del camión mientras el recorrido está en curso
+  // (solo el chofer la transmite; la nanny no necesita duplicarla).
   useEffect(() => {
-    if (!trip?.id || trip.status !== 'in_progress') return undefined;
+    if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
     const stop = watchLocation((location) => {
       const now = Date.now();
       if (now - lastSentAtRef.current < LOCATION_THROTTLE_MS) return;
@@ -126,7 +149,20 @@ export default function TripRunner() {
       updateLiveLocation(trip.id, location);
     });
     return stop;
-  }, [trip?.id, trip?.status]);
+  }, [isDriver, trip?.id, trip?.status]);
+
+  async function handleStartTrip(e) {
+    e.preventDefault();
+    setKmError('');
+    setStartingTrip(true);
+    try {
+      const t = await startTrip(route, shift, profile.staffId, kmInicialInput);
+      setTrip(t);
+    } catch (err) {
+      setKmError(err.message);
+    }
+    setStartingTrip(false);
+  }
 
   const pendingBoarding = useMemo(() => stops.filter((s) => s.status === 'pending'), [stops]);
   const boardedWaitingDelivery = useMemo(
@@ -210,13 +246,67 @@ export default function TripRunner() {
     setBusy(false);
   }
 
-  async function handleFinish() {
-    setBusy(true);
-    await completeTrip(trip.id, trip);
-    navigate(`/chofer/resumen/${trip.id}`);
+  async function handleFinish(e) {
+    e.preventDefault();
+    setKmError('');
+    setFinishing(true);
+    try {
+      await completeTrip(trip.id, trip, kmFinalInput);
+      navigate(`/chofer/resumen/${trip.id}`);
+    } catch (err) {
+      setKmError(err.message);
+      setFinishing(false);
+    }
   }
 
-  if (loading) return <p className="text-center text-navy-400 mt-10">Preparando recorrido…</p>;
+  if (!tripLoaded || !route) {
+    return <p className="text-center text-navy-400 mt-10">Preparando recorrido…</p>;
+  }
+
+  // --------------------------------------------------------------
+  // Candado de kilometraje: sin kmInicial no existe el recorrido ni
+  // aparece la lista de alumnos, ni para el chofer ni para la nanny.
+  // --------------------------------------------------------------
+  if (!trip) {
+    if (!isDriver) {
+      return (
+        <div className="card text-center mt-10">
+          <p className="text-3xl mb-2">⏳</p>
+          <p className="font-display font-semibold text-lg mb-1">Esperando al chofer</p>
+          <p className="text-navy-400 text-sm">
+            El chofer todavía no registra su kilometraje inicial para arrancar este recorrido.
+            En cuanto lo haga, esta pantalla se actualiza sola.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className="card mt-6">
+        <p className="text-3xl mb-2 text-center">🚚</p>
+        <h1 className="font-display font-bold text-lg text-center mb-1">
+          {config.title} · {route.name}
+        </h1>
+        <p className="text-navy-400 text-sm text-center mb-4">
+          Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.
+        </p>
+        <form onSubmit={handleStartTrip} className="space-y-3">
+          <input
+            value={kmInicialInput}
+            onChange={(e) => setKmInicialInput(e.target.value)}
+            type="number"
+            inputMode="decimal"
+            placeholder="Kilometraje inicial"
+            className="w-full rounded-xl border border-navy-100 px-3 py-3 text-lg text-center"
+            required
+          />
+          {kmError && <p className="text-stop text-sm text-center">{kmError}</p>}
+          <button type="submit" disabled={startingTrip} className="btn-go w-full">
+            {startingTrip ? 'Iniciando…' : 'Iniciar recorrido'}
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   const boardingPhaseDone = config.boardedBulk
     ? stops.length > 0 && stops.every((s) => s.status !== 'pending')
@@ -291,6 +381,7 @@ export default function TripRunner() {
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
                 navHref={mapsUrl(destinations[stop.studentId])}
+                phone={phones[stop.studentId]}
               />
             ))
           )}
@@ -317,6 +408,7 @@ export default function TripRunner() {
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
                 navHref={mapsUrl(destinations[stop.studentId])}
+                phone={phones[stop.studentId]}
               />
             ))
           )}
@@ -331,10 +423,32 @@ export default function TripRunner() {
         ))}
       </div>
 
-      {allResolved && (
-        <button onClick={handleFinish} disabled={busy} className="btn-go">
-          ✅ Finalizar y guardar recorrido
-        </button>
+      {allResolved && isDriver && (
+        <form onSubmit={handleFinish} className="card space-y-3">
+          <p className="font-medium text-sm text-navy-600">
+            Registra el kilometraje final para cerrar el recorrido
+          </p>
+          <input
+            value={kmFinalInput}
+            onChange={(e) => setKmFinalInput(e.target.value)}
+            type="number"
+            inputMode="decimal"
+            placeholder={`Kilometraje final (inicial: ${trip.kmInicial})`}
+            className="w-full rounded-xl border border-navy-100 px-3 py-3 text-lg text-center"
+            required
+          />
+          {kmError && <p className="text-stop text-sm">{kmError}</p>}
+          <button type="submit" disabled={finishing} className="btn-go w-full">
+            {finishing ? 'Cerrando…' : '✅ Finalizar y guardar recorrido'}
+          </button>
+        </form>
+      )}
+
+      {allResolved && !isDriver && (
+        <p className="text-center text-navy-400 text-sm">
+          Todos los alumnos están resueltos. El chofer debe registrar el kilometraje final para
+          cerrar el recorrido.
+        </p>
       )}
     </div>
   );
