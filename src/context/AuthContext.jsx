@@ -35,14 +35,18 @@ async function provisionProfile(firebaseUser) {
   }
 
   // 2) ¿Su correo coincide con algún chofer/nanny dado de alta?
+  //    El campo `role` del documento en `drivers` (driver|nanny) es el que
+  //    decide qué permisos recibe: choferes y nannies son personas
+  //    distintas guardadas en la misma colección de personal.
   const q = query(collection(db, 'drivers'), where('email', '==', email));
   const results = await getDocs(q);
   if (!results.empty) {
-    const driverDoc = results.docs[0];
+    const staffDoc = results.docs[0];
+    const staffRole = staffDoc.data().role === 'nanny' ? 'nanny' : 'driver';
     const data = {
-      role: 'driver',
-      driverId: driverDoc.id,
-      name: driverDoc.data().name || firebaseUser.displayName,
+      role: staffRole,
+      staffId: staffDoc.id,
+      name: staffDoc.data().name || firebaseUser.displayName,
       email,
     };
     await setDoc(doc(db, 'users', firebaseUser.uid), data);
