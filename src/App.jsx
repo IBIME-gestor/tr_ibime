@@ -18,6 +18,9 @@ import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
 import TripSummary from './pages/driver/TripSummary';
 import TripHistory from './pages/driver/TripHistory';
+import ReferenceRoute from './pages/driver/ReferenceRoute';
+
+import PublicTrack from './pages/PublicTrack';
 
 export default function App() {
   return (
@@ -54,7 +57,11 @@ export default function App() {
         <Route path="recorrido/:routeId/:shift" element={<TripRunner />} />
         <Route path="resumen/:tripId" element={<TripSummary />} />
         <Route path="historial" element={<TripHistory />} />
+        <Route path="referencia/:routeId/:shift" element={<ReferenceRoute />} />
       </Route>
+
+      {/* Seguimiento para el padre de familia: sin login, solo con matrícula. */}
+      <Route path="/seguimiento" element={<PublicTrack />} />
 
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
