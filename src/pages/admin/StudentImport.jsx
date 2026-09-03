@@ -72,9 +72,9 @@ export default function StudentImport() {
 
   return (
     <div className="max-w-2xl">
-      <Link to="/admin/alumnos" className="text-navy-400 text-sm underline">← Volver a alumnos</Link>
-      <h1 className="text-2xl font-display font-bold text-navy-900 mt-2 mb-2">Cargar alumnos por CSV</h1>
-      <p className="text-navy-400 text-sm mb-6">
+      <Link to="/admin/alumnos" className="link-action">← Volver a alumnos</Link>
+      <h1 className="admin-h1 mt-2 mb-2">Cargar alumnos por CSV</h1>
+      <p className="text-navy-400 text-sm mb-5">
         El archivo debe tener columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>,{' '}
         <code className="bg-navy-100 px-1 rounded">name</code>,{' '}
         <code className="bg-navy-100 px-1 rounded">school</code> (nombre exacto del plantel ya dado de alta),
@@ -82,14 +82,14 @@ export default function StudentImport() {
         <code className="bg-navy-100 px-1 rounded">parentContact</code>.
       </p>
 
-      <div className="card space-y-4">
-        <input type="file" accept=".csv" onChange={handleFile} />
+      <div className="admin-card space-y-4">
+        <input type="file" accept=".csv" onChange={handleFile} className="text-sm" />
         {fileError && <p className="text-stop text-sm">{fileError}</p>}
 
         {rows.length > 0 && !result && (
           <>
             <p className="text-sm text-navy-600">{rows.length} filas detectadas. Vista previa:</p>
-            <div className="overflow-x-auto max-h-64 border border-navy-100 rounded-xl">
+            <div className="overflow-x-auto max-h-64 border border-navy-100 rounded-lg">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left bg-navy-50">
@@ -114,7 +114,7 @@ export default function StudentImport() {
             <button
               onClick={handleImport}
               disabled={importing}
-              className="px-4 py-2 rounded-xl bg-go text-white font-semibold"
+              className="btn-admin bg-go text-white hover:bg-go/90"
             >
               {importing ? 'Importando…' : `Importar ${rows.length} alumnos`}
             </button>
@@ -122,14 +122,14 @@ export default function StudentImport() {
         )}
 
         {result && (
-          <div className="bg-go-light border-2 border-go rounded-xl p-4">
-            <p className="font-medium">Se importaron {result.ok} alumnos correctamente.</p>
+          <div className="bg-go-light border border-go rounded-lg p-4">
+            <p className="font-medium text-sm text-navy-800">Se importaron {result.ok} alumnos correctamente.</p>
             {result.failed.length > 0 && (
               <p className="text-sm text-stop mt-1">
                 {result.failed.length} filas no se pudieron importar (matrícula, nombre o plantel inválido).
               </p>
             )}
-            <button onClick={() => navigate('/admin/alumnos')} className="mt-3 underline text-sm">
+            <button onClick={() => navigate('/admin/alumnos')} className="link-action mt-3">
               Ver lista de alumnos
             </button>
           </div>
