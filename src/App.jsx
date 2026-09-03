@@ -48,7 +48,7 @@ export default function App() {
       <Route
         path="/chofer"
         element={
-          <ProtectedRoute role="driver">
+          <ProtectedRoute role={['driver', 'nanny']}>
             <DriverLayout />
           </ProtectedRoute>
         }
