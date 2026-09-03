@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { getPublicStudentIndex, subscribePublicTracking } from '../firebase/trips';
+import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES } from '../firebase/trips';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -145,6 +145,18 @@ export default function PublicTrack() {
           <div className="card text-center text-sm text-navy-400">
             Aún no ha iniciado el recorrido de {shift === 'morning' ? 'ida' : 'vuelta'} de hoy para{' '}
             {studentIndex.name}.
+          </div>
+        )}
+
+        {tracking?.alert && (
+          <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3">
+            <p className="font-display font-semibold text-sm text-navy-800">
+              {TRIP_ALERT_TYPES[tracking.alert.type]?.icon} {TRIP_ALERT_TYPES[tracking.alert.type]?.label}{' '}
+              reportado por el transporte
+            </p>
+            {tracking.alert.message && (
+              <p className="text-sm text-navy-600 mt-0.5">{tracking.alert.message}</p>
+            )}
           </div>
         )}
 
