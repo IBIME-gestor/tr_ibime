@@ -33,34 +33,40 @@ export default function SchoolsPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-display font-bold text-navy-900 mb-6">Planteles</h1>
+      <h1 className="admin-h1 mb-5">Planteles</h1>
 
-      <form onSubmit={handleSubmit} className="card mb-6 space-y-3">
-        <p className="font-medium text-sm text-navy-600">
+      <form onSubmit={handleSubmit} className="admin-card mb-5">
+        <p className="font-display font-semibold text-sm text-navy-800 mb-3">
           {editingId ? 'Editar plantel' : 'Nuevo plantel'}
         </p>
-        <input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="Nombre del colegio"
-          className="w-full rounded-xl border border-navy-100 px-3 py-2"
-          required
-        />
-        <input
-          value={form.address}
-          onChange={(e) => setForm({ ...form, address: e.target.value })}
-          placeholder="Dirección (opcional)"
-          className="w-full rounded-xl border border-navy-100 px-3 py-2"
-        />
-        <div className="flex gap-2">
-          <button type="submit" className="px-4 py-2 rounded-xl bg-navy-800 text-white font-semibold">
+        <div className="space-y-3">
+          <div>
+            <label className="admin-label">Nombre del colegio</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="admin-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="admin-label">Dirección (opcional)</label>
+            <input
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              className="admin-input"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button type="submit" className="btn-admin-primary">
             {editingId ? 'Guardar cambios' : 'Agregar plantel'}
           </button>
           {editingId && (
             <button
               type="button"
               onClick={() => { setEditingId(null); setForm({ name: '', address: '' }); }}
-              className="px-4 py-2 rounded-xl border border-navy-100"
+              className="btn-admin-ghost"
             >
               Cancelar
             </button>
@@ -68,20 +74,31 @@ export default function SchoolsPage() {
         </div>
       </form>
 
-      <div className="card divide-y divide-navy-100">
-        {schools.map((s) => (
-          <div key={s.id} className="py-3 flex items-center justify-between">
-            <div>
-              <p className="font-medium">{s.name}</p>
-              {s.address && <p className="text-sm text-navy-400">{s.address}</p>}
-            </div>
-            <div className="flex gap-2 text-sm">
-              <button onClick={() => handleEdit(s)} className="text-navy-600 underline">Editar</button>
-              <button onClick={() => handleDelete(s.id)} className="text-stop underline">Eliminar</button>
-            </div>
-          </div>
-        ))}
-        {schools.length === 0 && <p className="text-navy-400 text-sm py-2">Sin planteles aún.</p>}
+      <div className="admin-card p-0 overflow-hidden">
+        <table className="table-admin">
+          <thead>
+            <tr>
+              <th className="pl-5">Nombre</th>
+              <th>Dirección</th>
+              <th className="pr-5"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {schools.map((s) => (
+              <tr key={s.id}>
+                <td className="pl-5 font-medium text-navy-700">{s.name}</td>
+                <td className="text-navy-500">{s.address || '—'}</td>
+                <td className="pr-5 text-right whitespace-nowrap">
+                  <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
+                  <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {schools.length === 0 && (
+          <p className="text-navy-400 text-sm py-6 text-center">Sin planteles registrados.</p>
+        )}
       </div>
     </div>
   );
