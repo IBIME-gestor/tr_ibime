@@ -36,6 +36,25 @@ export default function TripSummary() {
         <p className="text-navy-400 text-sm">{trip.date}</p>
       </div>
 
+      <div className="card flex justify-around text-center text-sm">
+        <div>
+          <p className="text-navy-400">Km inicial</p>
+          <p className="font-display font-semibold text-lg">{trip.kmInicial ?? '—'}</p>
+        </div>
+        <div>
+          <p className="text-navy-400">Km final</p>
+          <p className="font-display font-semibold text-lg">{trip.kmFinal ?? '—'}</p>
+        </div>
+        <div>
+          <p className="text-navy-400">Recorridos</p>
+          <p className="font-display font-semibold text-lg">
+            {trip.kmInicial != null && trip.kmFinal != null
+              ? (trip.kmFinal - trip.kmInicial).toFixed(1)
+              : '—'}
+          </p>
+        </div>
+      </div>
+
       <div className="card divide-y divide-navy-100">
         {stops.map((s) => (
           <div key={s.id} className="py-2 flex items-center justify-between">
