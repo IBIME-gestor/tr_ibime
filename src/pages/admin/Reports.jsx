@@ -60,13 +60,13 @@ export default function Reports() {
 
   return (
     <div>
-      <h1 className="text-2xl font-display font-bold text-navy-900 mb-6">Reportes de recorrido</h1>
+      <h1 className="admin-h1 mb-5">Reportes de recorrido</h1>
 
       <div className="flex gap-3 mb-4 flex-wrap">
         <select
           value={routeId}
           onChange={(e) => setRouteId(e.target.value)}
-          className="rounded-xl border border-navy-100 px-3 py-2"
+          className="admin-select w-auto"
         >
           <option value="">Selecciona una ruta…</option>
           {routes.map((r) => (
@@ -77,7 +77,7 @@ export default function Reports() {
           value={tripId}
           onChange={(e) => setTripId(e.target.value)}
           disabled={!routeId}
-          className="rounded-xl border border-navy-100 px-3 py-2"
+          className="admin-select w-auto"
         >
           {trips.map((t) => (
             <option key={t.id} value={t.id}>
@@ -87,22 +87,26 @@ export default function Reports() {
         </select>
       </div>
 
-      {!trip && <p className="text-navy-400 text-sm">Elige una ruta para ver sus recorridos.</p>}
+      {!trip && (
+        <p className="text-navy-400 text-sm py-6 text-center admin-card">
+          Elige una ruta para ver sus recorridos.
+        </p>
+      )}
 
       {trip && (
         <>
-          <div className="card mb-4 flex flex-wrap gap-6 text-sm">
+          <div className="admin-card mb-4 flex flex-wrap gap-8 text-sm">
             <div>
-              <p className="text-navy-400">Kilometraje inicial</p>
-              <p className="font-display font-semibold text-lg">{trip.kmInicial ?? '—'}</p>
+              <p className="text-navy-400 text-xs mb-0.5">Kilometraje inicial</p>
+              <p className="font-display font-semibold text-lg text-navy-800">{trip.kmInicial ?? '—'}</p>
             </div>
             <div>
-              <p className="text-navy-400">Kilometraje final</p>
-              <p className="font-display font-semibold text-lg">{trip.kmFinal ?? '—'}</p>
+              <p className="text-navy-400 text-xs mb-0.5">Kilometraje final</p>
+              <p className="font-display font-semibold text-lg text-navy-800">{trip.kmFinal ?? '—'}</p>
             </div>
             <div>
-              <p className="text-navy-400">Kilómetros recorridos</p>
-              <p className="font-display font-semibold text-lg">
+              <p className="text-navy-400 text-xs mb-0.5">Kilómetros recorridos</p>
+              <p className="font-display font-semibold text-lg text-navy-800">
                 {trip.kmInicial != null && trip.kmFinal != null
                   ? (trip.kmFinal - trip.kmInicial).toFixed(1)
                   : '—'}
@@ -110,44 +114,44 @@ export default function Reports() {
             </div>
           </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-navy-400 border-b border-navy-100">
-                  <th className="py-2 pr-2">Alumno</th>
-                  <th className="py-2 pr-2">Hora</th>
-                  <th className="py-2 pr-2">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stops.map((s) => (
-                  <tr key={s.id} className="border-b border-navy-50">
-                    <td className="py-2 pr-2">{s.name}</td>
-                    <td className="py-2 pr-2">{fmtTime(s[timeKey])}</td>
-                    <td className="py-2 pr-2 capitalize">{s.status}</td>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="admin-card p-0 overflow-x-auto">
+              <table className="table-admin">
+                <thead>
+                  <tr>
+                    <th className="pl-5">Alumno</th>
+                    <th>Hora</th>
+                    <th className="pr-5">Estado</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {stops.map((s) => (
+                    <tr key={s.id}>
+                      <td className="pl-5">{s.name}</td>
+                      <td className="text-navy-500">{fmtTime(s[timeKey])}</td>
+                      <td className="pr-5 capitalize text-navy-500">{s.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          <div className="card p-0 overflow-hidden" style={{ height: 420 }}>
-            <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
-              <TileLayer
-                attribution='&copy; OpenStreetMap contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {markers.map((m) => (
-                <Marker key={m.id} position={[m.loc.lat, m.loc.lng]}>
-                  <Popup>
-                    {m.name} · {fmtTime(m[timeKey])}
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
+            <div className="admin-card p-0 overflow-hidden" style={{ height: 420 }}>
+              <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
+                <TileLayer
+                  attribution='&copy; OpenStreetMap contributors'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                {markers.map((m) => (
+                  <Marker key={m.id} position={[m.loc.lat, m.loc.lng]}>
+                    <Popup>
+                      {m.name} · {fmtTime(m[timeKey])}
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            </div>
           </div>
-        </div>
         </>
       )}
     </div>
