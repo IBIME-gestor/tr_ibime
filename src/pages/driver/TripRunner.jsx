@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students } from '../../firebase/services';
@@ -10,9 +10,28 @@ import {
   markAllBulk,
   addStudentToTrip,
   completeTrip,
+  updateLiveLocation,
+  syncPublicTracking,
+  getReferenceTrip,
 } from '../../firebase/trips';
-import { getCurrentLocation } from '../../hooks/useGeolocation';
+import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import StopCard from '../../components/StopCard';
+
+// No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
+// nada para un ETA aproximado). Con una actualización cada 15s es más que
+// suficiente para que el mapa del padre se vea "en vivo".
+const LOCATION_THROTTLE_MS = 15000;
+
+function mapsUrl(destination) {
+  if (!destination) return null;
+  const dest =
+    typeof destination === 'string'
+      ? destination
+      : `${destination.lat},${destination.lng}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    dest
+  )}&travelmode=driving`;
+}
 
 const SHIFT_CONFIG = {
   morning: {
@@ -50,6 +69,9 @@ export default function TripRunner() {
   const [matricula, setMatricula] = useState('');
   const [found, setFound] = useState(null);
   const [searchError, setSearchError] = useState('');
+  const [destinations, setDestinations] = useState({}); // studentId -> {lat,lng} | address string
+
+  const lastSentAtRef = useRef(0);
 
   useEffect(() => {
     async function init() {
@@ -57,6 +79,23 @@ export default function TripRunner() {
       const t = await getOrCreateTodayTrip(route, shift, profile?.driverId);
       setTrip(t);
       setLoading(false);
+
+      // Destinos para el botón "Navegar": primero la última ubicación real
+      // capturada en un recorrido previo de esta misma ruta/turno (más
+      // precisa), y si no existe todavía, la dirección de texto guardada
+      // del alumno (útil el primer día en una ruta nueva).
+      const [reference, students] = await Promise.all([
+        getReferenceTrip(routeId, shift),
+        Students.listByRoute(routeId),
+      ]);
+      const byId = {};
+      students.forEach((s) => {
+        if (s.address) byId[s.id] = s.address;
+      });
+      reference?.stops.forEach((s) => {
+        if (s.referenceLocation?.lat) byId[s.studentId] = s.referenceLocation;
+      });
+      setDestinations(byId);
     }
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,6 +106,27 @@ export default function TripRunner() {
     const unsub = subscribeTripStops(trip.id, setStops);
     return unsub;
   }, [trip?.id]);
+
+  // Mantiene el espejo público (publicTracking/{tripId}) al día cada vez
+  // que cambian las paradas, para que la vista del padre de familia
+  // refleje el avance del recorrido sin que cada handler tenga que
+  // acordarse de sincronizarlo por su cuenta.
+  useEffect(() => {
+    if (!trip?.id || stops.length === 0) return;
+    syncPublicTracking({ id: trip.id, ...trip }, stops);
+  }, [trip, stops]);
+
+  // Ubicación en vivo del camión mientras el recorrido está en curso.
+  useEffect(() => {
+    if (!trip?.id || trip.status !== 'in_progress') return undefined;
+    const stop = watchLocation((location) => {
+      const now = Date.now();
+      if (now - lastSentAtRef.current < LOCATION_THROTTLE_MS) return;
+      lastSentAtRef.current = now;
+      updateLiveLocation(trip.id, location);
+    });
+    return stop;
+  }, [trip?.id, trip?.status]);
 
   const pendingBoarding = useMemo(() => stops.filter((s) => s.status === 'pending'), [stops]);
   const boardedWaitingDelivery = useMemo(
@@ -230,6 +290,7 @@ export default function TripRunner() {
                 onAction={handleIndividualBoard}
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
+                navHref={mapsUrl(destinations[stop.studentId])}
               />
             ))
           )}
@@ -255,6 +316,7 @@ export default function TripRunner() {
                 onAction={handleIndividualDeliver}
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
+                navHref={mapsUrl(destinations[stop.studentId])}
               />
             ))
           )}
