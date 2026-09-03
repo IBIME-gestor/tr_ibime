@@ -11,11 +11,14 @@ export default function RouteHome() {
 
   useEffect(() => {
     async function load() {
-      if (!profile?.driverId) {
+      if (!profile?.staffId) {
         setLoading(false);
         return;
       }
-      const mine = await Routes.listByDriver(profile.driverId);
+      const mine =
+        profile.role === 'nanny'
+          ? await Routes.listByNanny(profile.staffId)
+          : await Routes.listByDriver(profile.staffId);
       setRoutesState(mine);
       setLoading(false);
     }
