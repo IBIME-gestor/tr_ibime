@@ -43,6 +43,71 @@ h1, h2, h3 {
   @apply bg-white rounded-2xl shadow-panel p-4;
 }
 
+/* ------------------------------------------------------------------ */
+/* Panel administrativo: densidad compacta, pensado para escritorio    */
+/* pero responsivo. Deliberadamente MÁS COMPACTO que los .btn-huge/    */
+/* .card de arriba, que son para la app del chofer en el celular.      */
+/* ------------------------------------------------------------------ */
+.admin-h1 {
+  @apply text-xl font-display font-bold text-navy-900;
+}
+
+.admin-card {
+  @apply bg-white rounded-xl border border-navy-100 p-5;
+}
+
+.admin-label {
+  @apply block text-xs font-medium text-navy-400 mb-1;
+}
+
+.admin-input {
+  @apply w-full h-10 rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-800 placeholder:text-navy-400 focus:outline-none focus:border-navy-400 focus:ring-2 focus:ring-signal-yellow/40 transition-shadow;
+}
+
+.admin-select {
+  @apply admin-input pr-8;
+}
+
+.btn-admin {
+  @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap;
+}
+
+.btn-admin-primary {
+  @apply btn-admin bg-navy-800 text-white hover:bg-navy-700;
+}
+
+.btn-admin-ghost {
+  @apply btn-admin border border-navy-100 text-navy-600 hover:bg-navy-50;
+}
+
+.link-action {
+  @apply text-xs font-medium text-navy-600 underline decoration-navy-100 underline-offset-2 hover:decoration-navy-600;
+}
+
+.link-danger {
+  @apply text-xs font-medium text-stop underline decoration-stop/40 underline-offset-2 hover:decoration-stop;
+}
+
+.table-admin {
+  @apply w-full text-sm border-collapse;
+}
+
+.table-admin thead th {
+  @apply text-left text-xs font-semibold text-navy-400 pb-2 pr-3 border-b border-navy-100;
+}
+
+.table-admin tbody tr {
+  @apply border-b border-navy-50 hover:bg-navy-50/70 transition-colors;
+}
+
+.table-admin td {
+  @apply py-2.5 pr-3 align-middle;
+}
+
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-navy-50 text-navy-600;
+}
+
 /* Enfoque visible para accesibilidad de teclado */
 :focus-visible {
   outline: 3px solid #FFC93C;
