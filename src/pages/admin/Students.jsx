@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Search, Upload } from 'lucide-react';
 import { Students, Schools, Routes } from '../../firebase/services';
 
 const emptyForm = {
@@ -41,6 +42,11 @@ export default function StudentsPage() {
     setEditingId(student.id);
   }
 
+  function handleCancel() {
+    setForm(emptyForm);
+    setEditingId(null);
+  }
+
   async function handleDelete(id) {
     if (window.confirm('¿Dar de baja a este alumno?')) {
       await Students.remove(id);
@@ -57,81 +63,94 @@ export default function StudentsPage() {
   });
 
   const schoolName = (id) => schools.find((s) => s.id === id)?.name || '—';
-  const routeName = (id) => routes.find((r) => r.id === id)?.name || 'Sin ruta';
+  const routeName = (id) => routes.find((r) => r.id === id)?.name || null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-2xl font-display font-bold text-navy-900">Alumnos</h1>
-        <Link
-          to="/admin/alumnos/importar"
-          className="px-4 py-2 rounded-xl bg-navy-800 text-white font-semibold text-sm"
-        >
-          Cargar desde CSV/Excel
+    <div className="max-w-5xl">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="admin-h1">Alumnos</h1>
+          <p className="text-sm text-navy-400 mt-0.5">{students.length} alumnos dados de alta</p>
+        </div>
+        <Link to="/admin/alumnos/importar" className="btn-admin-ghost">
+          <Upload size={15} /> Cargar CSV/Excel
         </Link>
       </div>
 
-      <form onSubmit={handleSubmit} className="card mb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <p className="md:col-span-2 font-medium text-sm text-navy-600">
+      <form onSubmit={handleSubmit} className="admin-card mb-5">
+        <p className="font-display font-semibold text-sm text-navy-800 mb-3">
           {editingId ? 'Editar alumno' : 'Nuevo alumno'}
         </p>
-        <input
-          value={form.matricula}
-          onChange={(e) => setForm({ ...form, matricula: e.target.value })}
-          placeholder="Matrícula"
-          className="rounded-xl border border-navy-100 px-3 py-2"
-          required
-        />
-        <input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="Nombre completo"
-          className="rounded-xl border border-navy-100 px-3 py-2"
-          required
-        />
-        <select
-          value={form.schoolId}
-          onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-          required
-        >
-          <option value="">Plantel…</option>
-          {schools.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <select
-          value={form.routeId}
-          onChange={(e) => setForm({ ...form, routeId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-        >
-          <option value="">Ruta (opcional por ahora)…</option>
-          {routes.map((r) => (
-            <option key={r.id} value={r.id}>{r.name}</option>
-          ))}
-        </select>
-        <input
-          value={form.address}
-          onChange={(e) => setForm({ ...form, address: e.target.value })}
-          placeholder="Domicilio / punto de recolección"
-          className="rounded-xl border border-navy-100 px-3 py-2 md:col-span-2"
-        />
-        <input
-          value={form.parentContact}
-          onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
-          placeholder="Contacto del padre/madre (opcional)"
-          className="rounded-xl border border-navy-100 px-3 py-2 md:col-span-2"
-        />
-        <div className="flex gap-2 md:col-span-2">
-          <button type="submit" className="px-4 py-2 rounded-xl bg-navy-800 text-white font-semibold">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="admin-label">Matrícula</label>
+            <input
+              value={form.matricula}
+              onChange={(e) => setForm({ ...form, matricula: e.target.value })}
+              className="admin-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="admin-label">Nombre completo</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="admin-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="admin-label">Plantel</label>
+            <select
+              value={form.schoolId}
+              onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
+              className="admin-select"
+              required
+            >
+              <option value="">Selecciona…</option>
+              {schools.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="admin-label">Ruta (opcional por ahora)</label>
+            <select
+              value={form.routeId}
+              onChange={(e) => setForm({ ...form, routeId: e.target.value })}
+              className="admin-select"
+            >
+              <option value="">Sin asignar</option>
+              {routes.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="admin-label">Domicilio / punto de recolección</label>
+            <input
+              value={form.address}
+              onChange={(e) => setForm({ ...form, address: e.target.value })}
+              className="admin-input"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="admin-label">Contacto del padre/madre (opcional)</label>
+            <input
+              value={form.parentContact}
+              onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
+              placeholder="10 dígitos, para el botón de llamada del chofer"
+              className="admin-input"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button type="submit" className="btn-admin-primary">
             {editingId ? 'Guardar cambios' : 'Agregar alumno'}
           </button>
           {editingId && (
-            <button
-              type="button"
-              onClick={() => { setEditingId(null); setForm(emptyForm); }}
-              className="px-4 py-2 rounded-xl border border-navy-100"
-            >
+            <button type="button" onClick={handleCancel} className="btn-admin-ghost">
               Cancelar
             </button>
           )}
@@ -139,16 +158,19 @@ export default function StudentsPage() {
       </form>
 
       <div className="flex gap-3 mb-3 flex-wrap">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre o matrícula"
-          className="rounded-xl border border-navy-100 px-3 py-2 flex-1 min-w-[200px]"
-        />
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre o matrícula"
+            className="admin-input pl-9"
+          />
+        </div>
         <select
           value={filterSchool}
           onChange={(e) => setFilterSchool(e.target.value)}
-          className="rounded-xl border border-navy-100 px-3 py-2"
+          className="admin-select w-auto"
         >
           <option value="">Todos los planteles</option>
           {schools.map((s) => (
@@ -157,33 +179,41 @@ export default function StudentsPage() {
         </select>
       </div>
 
-      <div className="card overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="admin-card p-0 overflow-x-auto">
+        <table className="table-admin">
           <thead>
-            <tr className="text-left text-navy-400 border-b border-navy-100">
-              <th className="py-2 pr-3">Matrícula</th>
-              <th className="py-2 pr-3">Nombre</th>
-              <th className="py-2 pr-3">Plantel</th>
-              <th className="py-2 pr-3">Ruta</th>
-              <th className="py-2 pr-3"></th>
+            <tr>
+              <th className="pl-5">Matrícula</th>
+              <th>Nombre</th>
+              <th>Plantel</th>
+              <th>Ruta</th>
+              <th className="pr-5"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((s) => (
-              <tr key={s.id} className="border-b border-navy-50">
-                <td className="py-2 pr-3">{s.matricula}</td>
-                <td className="py-2 pr-3">{s.name}</td>
-                <td className="py-2 pr-3">{schoolName(s.schoolId)}</td>
-                <td className="py-2 pr-3">{routeName(s.routeId)}</td>
-                <td className="py-2 pr-3 text-right whitespace-nowrap">
-                  <button onClick={() => handleEdit(s)} className="text-navy-600 underline mr-3">Editar</button>
-                  <button onClick={() => handleDelete(s.id)} className="text-stop underline">Eliminar</button>
+              <tr key={s.id}>
+                <td className="pl-5 font-medium text-navy-700">{s.matricula}</td>
+                <td>{s.name}</td>
+                <td className="text-navy-500">{schoolName(s.schoolId)}</td>
+                <td>
+                  {routeName(s.routeId) ? (
+                    <span className="badge">{routeName(s.routeId)}</span>
+                  ) : (
+                    <span className="text-navy-400">Sin ruta</span>
+                  )}
+                </td>
+                <td className="pr-5 text-right whitespace-nowrap">
+                  <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
+                  <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <p className="text-navy-400 text-sm py-3">No hay alumnos que coincidan.</p>}
+        {filtered.length === 0 && (
+          <p className="text-navy-400 text-sm py-6 text-center">No hay alumnos que coincidan.</p>
+        )}
       </div>
     </div>
   );
