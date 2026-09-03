@@ -36,6 +36,14 @@
       "collectionGroup": "trips",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "nannyId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "trips",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "routeId", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
       ]
