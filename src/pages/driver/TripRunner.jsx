@@ -14,6 +14,9 @@ import {
   updateLiveLocation,
   syncPublicTracking,
   getReferenceTrip,
+  setTripAlert,
+  clearTripAlert,
+  TRIP_ALERT_TYPES,
 } from '../../firebase/trips';
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import StopCard from '../../components/StopCard';
@@ -81,6 +84,12 @@ export default function TripRunner() {
   const [kmError, setKmError] = useState('');
   const [startingTrip, setStartingTrip] = useState(false);
   const [finishing, setFinishing] = useState(false);
+
+  // Aviso de incidente (tráfico, accidente, retraso, otro)
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertType, setAlertType] = useState('traffic');
+  const [alertMessage, setAlertMessage] = useState('');
+  const [sendingAlert, setSendingAlert] = useState(false);
 
   const lastSentAtRef = useRef(0);
 
@@ -162,6 +171,19 @@ export default function TripRunner() {
       setKmError(err.message);
     }
     setStartingTrip(false);
+  }
+
+  async function handleSendAlert(e) {
+    e.preventDefault();
+    setSendingAlert(true);
+    await setTripAlert(trip.id, alertType, alertMessage);
+    setSendingAlert(false);
+    setAlertOpen(false);
+    setAlertMessage('');
+  }
+
+  async function handleClearAlert() {
+    await clearTripAlert(trip.id);
   }
 
   const pendingBoarding = useMemo(() => stops.filter((s) => s.status === 'pending'), [stops]);
@@ -320,6 +342,73 @@ export default function TripRunner() {
           {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
         </h1>
       </div>
+
+      {/* Aviso de incidente en ruta: lo ve el padre de familia en vivo en
+          /seguimiento. Disponible tanto para el chofer como para la nanny. */}
+      {trip.alert ? (
+        <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3 flex items-start justify-between gap-3">
+          <div>
+            <p className="font-display font-semibold text-sm text-navy-800">
+              {TRIP_ALERT_TYPES[trip.alert.type]?.icon} {TRIP_ALERT_TYPES[trip.alert.type]?.label}
+            </p>
+            {trip.alert.message && (
+              <p className="text-sm text-navy-600 mt-0.5">{trip.alert.message}</p>
+            )}
+            <p className="text-xs text-navy-400 mt-1">Visible para los padres en tiempo real</p>
+          </div>
+          <button onClick={handleClearAlert} className="text-xs text-navy-400 underline shrink-0">
+            Quitar
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAlertOpen((v) => !v)}
+          className="text-sm px-3 py-2 rounded-xl border border-navy-100 text-navy-600"
+        >
+          ⚠️ Reportar tráfico, accidente o retraso
+        </button>
+      )}
+
+      {alertOpen && !trip.alert && (
+        <form onSubmit={handleSendAlert} className="card space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {Object.entries(TRIP_ALERT_TYPES).map(([key, t]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setAlertType(key)}
+                className={`py-2 rounded-xl border-2 text-sm font-medium ${
+                  alertType === key ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100'
+                }`}
+              >
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+          <input
+            value={alertMessage}
+            onChange={(e) => setAlertMessage(e.target.value)}
+            placeholder="Detalle breve (opcional), ej. vamos ~15 min tarde"
+            className="w-full rounded-xl border border-navy-100 px-3 py-2 text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setAlertOpen(false)}
+              className="flex-1 py-2 rounded-xl border border-navy-100 text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={sendingAlert}
+              className="flex-1 py-2 rounded-xl bg-signal-yellow text-navy-900 font-semibold text-sm"
+            >
+              {sendingAlert ? 'Enviando…' : 'Avisar a los padres'}
+            </button>
+          </div>
+        </form>
+      )}
 
           {/* Buscar por matrícula — útil el primer día o para altas de última
           hora, en cualquier turno (ida o vuelta) mientras el recorrido no
