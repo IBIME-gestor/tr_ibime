@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Routes, Schools, Drivers, Units, Students } from '../../firebase/services';
 
 const emptyForm = { name: '', schoolId: '', driverId: '', nannyId: '', unitId: '' };
@@ -46,70 +47,87 @@ export default function RoutesPage() {
   const driverName = (id) => drivers.find((d) => d.id === id)?.name || '—';
 
   return (
-    <div>
-      <h1 className="text-2xl font-display font-bold text-navy-900 mb-6">Rutas</h1>
+    <div className="max-w-4xl">
+      <h1 className="admin-h1 mb-5">Rutas</h1>
 
-      <form onSubmit={handleSubmit} className="card mb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <p className="md:col-span-2 font-medium text-sm text-navy-600">
+      <form onSubmit={handleSubmit} className="admin-card mb-5">
+        <p className="font-display font-semibold text-sm text-navy-800 mb-3">
           {editingId ? 'Editar ruta' : 'Nueva ruta'}
         </p>
-        <input
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          placeholder="Nombre de la ruta (ej. Ruta Norte 1)"
-          className="rounded-xl border border-navy-100 px-3 py-2 md:col-span-2"
-          required
-        />
-        <select
-          value={form.schoolId}
-          onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-          required
-        >
-          <option value="">Plantel…</option>
-          {schools.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <select
-          value={form.unitId}
-          onChange={(e) => setForm({ ...form, unitId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-        >
-          <option value="">Unidad…</option>
-          {units.map((u) => (
-            <option key={u.id} value={u.id}>{u.plate} {u.model ? `— ${u.model}` : ''}</option>
-          ))}
-        </select>
-        <select
-          value={form.driverId}
-          onChange={(e) => setForm({ ...form, driverId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-        >
-          <option value="">Chofer…</option>
-          {drivers.filter((d) => d.role !== 'nanny').map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        <select
-          value={form.nannyId}
-          onChange={(e) => setForm({ ...form, nannyId: e.target.value })}
-          className="rounded-xl border border-navy-100 px-3 py-2"
-        >
-          <option value="">Nanny (opcional)…</option>
-          {drivers.filter((d) => d.role === 'nanny').map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        <div className="flex gap-2 md:col-span-2">
-          <button type="submit" className="px-4 py-2 rounded-xl bg-navy-800 text-white font-semibold">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2">
+            <label className="admin-label">Nombre de la ruta</label>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="ej. Ruta Norte 1"
+              className="admin-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="admin-label">Plantel</label>
+            <select
+              value={form.schoolId}
+              onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
+              className="admin-select"
+              required
+            >
+              <option value="">Selecciona…</option>
+              {schools.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="admin-label">Unidad</label>
+            <select
+              value={form.unitId}
+              onChange={(e) => setForm({ ...form, unitId: e.target.value })}
+              className="admin-select"
+            >
+              <option value="">Selecciona…</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>{u.plate} {u.model ? `— ${u.model}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="admin-label">Chofer</label>
+            <select
+              value={form.driverId}
+              onChange={(e) => setForm({ ...form, driverId: e.target.value })}
+              className="admin-select"
+            >
+              <option value="">Selecciona…</option>
+              {drivers.filter((d) => d.role !== 'nanny').map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="admin-label">Nanny (opcional)</label>
+            <select
+              value={form.nannyId}
+              onChange={(e) => setForm({ ...form, nannyId: e.target.value })}
+              className="admin-select"
+            >
+              <option value="">Sin nanny</option>
+              {drivers.filter((d) => d.role === 'nanny').map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button type="submit" className="btn-admin-primary">
             {editingId ? 'Guardar cambios' : 'Crear ruta'}
           </button>
           {editingId && (
             <button
               type="button"
               onClick={() => { setEditingId(null); setForm(emptyForm); }}
-              className="px-4 py-2 rounded-xl border border-navy-100"
+              className="btn-admin-ghost"
             >
               Cancelar
             </button>
@@ -117,25 +135,26 @@ export default function RoutesPage() {
         </div>
       </form>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {routes.map((r) => (
-          <div key={r.id} className="card">
+          <div key={r.id} className="admin-card">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <p className="font-display font-semibold">{r.name}</p>
+                <p className="font-display font-semibold text-navy-800">{r.name}</p>
                 <p className="text-sm text-navy-400">
                   {name(schools, r.schoolId)} · {driverName(r.driverId)} · {name(units, r.unitId)}
                 </p>
               </div>
-              <div className="flex gap-3 text-sm">
+              <div className="flex items-center gap-4">
                 <button
                   onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
-                  className="text-navy-600 underline"
+                  className="link-action flex items-center gap-1"
                 >
-                  {expandedId === r.id ? 'Ocultar alumnos' : 'Gestionar alumnos'}
+                  Gestionar alumnos
+                  {expandedId === r.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                 </button>
-                <button onClick={() => handleEdit(r)} className="text-navy-600 underline">Editar</button>
-                <button onClick={() => handleDelete(r.id)} className="text-stop underline">Eliminar</button>
+                <button onClick={() => handleEdit(r)} className="link-action">Editar</button>
+                <button onClick={() => handleDelete(r.id)} className="link-danger">Eliminar</button>
               </div>
             </div>
             {expandedId === r.id && (
@@ -143,7 +162,9 @@ export default function RoutesPage() {
             )}
           </div>
         ))}
-        {routes.length === 0 && <p className="text-navy-400 text-sm">Sin rutas creadas.</p>}
+        {routes.length === 0 && (
+          <p className="text-navy-400 text-sm py-6 text-center">Sin rutas creadas.</p>
+        )}
       </div>
     </div>
   );
@@ -173,21 +194,23 @@ function RouteRoster({ route, allStudents }) {
   }
 
   return (
-    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div className="mt-4 pt-4 border-t border-navy-100 grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <p className="text-sm font-medium text-navy-600 mb-2">
+        <p className="text-xs font-medium text-navy-400 mb-2">
           En esta ruta ({assigned.length})
         </p>
-        <div className="border border-navy-100 rounded-xl divide-y divide-navy-50 max-h-64 overflow-y-auto">
+        <div className="border border-navy-100 rounded-lg divide-y divide-navy-50 max-h-64 overflow-y-auto">
           {assigned.map((s) => (
-            <div key={s.id} className="flex items-center justify-between p-2 text-sm">
+            <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
               <span>{s.name} <span className="text-navy-400">({s.matricula})</span></span>
-              <button onClick={() => unassign(s.id)} className="text-stop text-xs underline">
+              <button onClick={() => unassign(s.id)} className="link-danger">
                 Quitar
               </button>
             </div>
           ))}
-          {assigned.length === 0 && <p className="p-2 text-navy-400 text-sm">Sin alumnos aún.</p>}
+          {assigned.length === 0 && (
+            <p className="px-3 py-3 text-navy-400 text-sm">Sin alumnos aún.</p>
+          )}
         </div>
         <p className="text-xs text-navy-400 mt-2">
           El orden de recogida/bajada se guarda solo, según cómo el chofer los
@@ -195,20 +218,20 @@ function RouteRoster({ route, allStudents }) {
         </p>
       </div>
       <div>
-        <p className="text-sm font-medium text-navy-600 mb-2">
+        <p className="text-xs font-medium text-navy-400 mb-2">
           Alumnos del plantel sin esta ruta ({unassignedSameSchool.length})
         </p>
-        <div className="border border-navy-100 rounded-xl divide-y divide-navy-50 max-h-64 overflow-y-auto">
+        <div className="border border-navy-100 rounded-lg divide-y divide-navy-50 max-h-64 overflow-y-auto">
           {unassignedSameSchool.map((s) => (
-            <div key={s.id} className="flex items-center justify-between p-2 text-sm">
+            <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
               <span>{s.name} <span className="text-navy-400">({s.matricula})</span></span>
-              <button onClick={() => assign(s.id)} className="text-go text-xs underline">
+              <button onClick={() => assign(s.id)} className="text-go text-xs font-medium underline underline-offset-2">
                 Agregar
               </button>
             </div>
           ))}
           {unassignedSameSchool.length === 0 && (
-            <p className="p-2 text-navy-400 text-sm">No hay alumnos disponibles.</p>
+            <p className="px-3 py-3 text-navy-400 text-sm">No hay alumnos disponibles.</p>
           )}
         </div>
       </div>
