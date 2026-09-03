@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { listTripsByDriver } from '../../firebase/trips';
+import { listTripsByDriver, listTripsByNanny } from '../../firebase/trips';
 
 export default function TripHistory() {
   const { profile } = useAuth();
@@ -9,8 +9,11 @@ export default function TripHistory() {
 
   useEffect(() => {
     async function load() {
-      if (!profile?.driverId) return;
-      const data = await listTripsByDriver(profile.driverId);
+      if (!profile?.staffId) return;
+      const data =
+        profile.role === 'nanny'
+          ? await listTripsByNanny(profile.staffId)
+          : await listTripsByDriver(profile.staffId);
       setTrips(data);
     }
     load();
