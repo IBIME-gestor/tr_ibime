@@ -37,9 +37,11 @@ import { Routes, Students } from './services';
  * MODELO DE DATOS
  * ----------------
  * trips/{tripId}
- *    routeId, schoolId, driverId, unitId, date ('YYYY-MM-DD'), shift ('morning'|'afternoon')
+ *    routeId, schoolId, driverId, nannyId, unitId, date ('YYYY-MM-DD'), shift ('morning'|'afternoon')
  *    status: 'in_progress' | 'completed'
  *    startedAt, completedAt
+ *    kmInicial, kmInicialAt   // obligatorio para crear el recorrido (lo pide el chofer)
+ *    kmFinal, kmFinalAt       // obligatorio para poder cerrarlo (Finalizar recorrido)
  *    bulkEventAt, bulkEventLocation   // el clic de "Llegamos al colegio" / "Todos abordaron"
  *
  * trips/{tripId}/stops/{studentId}
@@ -66,16 +68,35 @@ export function todayString() {
 }
 
 /**
- * Obtiene el recorrido de hoy para una ruta/turno, o lo crea si no existe,
- * poblando las paradas en el orden guardado del día anterior (o alfabético
- * si es la primera vez).
+ * Se suscribe en tiempo real al recorrido de HOY para una ruta/turno,
+ * exista o no todavía. Así, si una nanny abre la pantalla antes que el
+ * chofer, ve en vivo el momento en que el chofer registra su kilometraje
+ * inicial y arranca el recorrido, sin tener que refrescar.
  */
-export async function getOrCreateTodayTrip(route, shift, driverUid) {
+export function subscribeTodayTrip(routeId, shift, callback) {
+  const id = tripDocId(routeId, todayString(), shift);
+  const ref = doc(db, 'trips', id);
+  return onSnapshot(ref, (snap) => {
+    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+  });
+}
+
+/**
+ * Arranca formalmente el recorrido de hoy. SOLO el chofer puede llamarla
+ * (así lo exigen las reglas de Firestore), y requiere el kilometraje
+ * inicial del vehículo: sin este dato no se crea el recorrido ni,
+ * por lo tanto, aparece la lista de alumnos para nadie (ni chofer ni
+ * nanny), que es justo el candado que se pidió.
+ */
+export async function startTrip(route, shift, driverId, kmInicial) {
+  if (kmInicial == null || kmInicial === '' || Number.isNaN(Number(kmInicial))) {
+    throw new Error('Se requiere el kilometraje inicial para iniciar el recorrido.');
+  }
+
   const date = todayString();
   const id = tripDocId(route.id, date, shift);
   const tripRef = doc(db, 'trips', id);
   const existing = await getDoc(tripRef);
-
   if (existing.exists()) {
     return { id: tripRef.id, ...existing.data() };
   }
@@ -83,18 +104,20 @@ export async function getOrCreateTodayTrip(route, shift, driverUid) {
   const students = await Students.listByRoute(route.id);
   const savedOrder =
     shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
-
   const ordered = orderStudents(students, savedOrder);
 
   const tripData = {
     routeId: route.id,
     schoolId: route.schoolId,
-    driverId: driverUid,
+    driverId,
+    nannyId: route.nannyId || null,
     unitId: route.unitId,
     date,
     shift,
     status: 'in_progress',
     startedAt: serverTimestamp(),
+    kmInicial: Number(kmInicial),
+    kmInicialAt: serverTimestamp(),
   };
   await setDoc(tripRef, tripData);
 
@@ -313,9 +336,15 @@ async function updateAvgStopMinutes(trip, stops) {
 
 /**
  * Cierra el recorrido y guarda el orden real en la ruta para que
- * mañana la lista del chofer ya venga pre-ordenada.
+ * mañana la lista del chofer ya venga pre-ordenada. Requiere el
+ * kilometraje final: sin él no se marca como completado ni se genera
+ * el mapa final del recorrido (Reportes) para ese día.
  */
-export async function completeTrip(tripId, trip) {
+export async function completeTrip(tripId, trip, kmFinal) {
+  if (kmFinal == null || kmFinal === '' || Number.isNaN(Number(kmFinal))) {
+    throw new Error('Se requiere el kilometraje final para cerrar el recorrido.');
+  }
+
   const stopsSnap = await getDocs(
     query(collection(db, 'trips', tripId, 'stops'), orderBy('order'))
   );
@@ -335,6 +364,8 @@ export async function completeTrip(tripId, trip) {
   await updateDoc(doc(db, 'trips', tripId), {
     status: 'completed',
     completedAt: serverTimestamp(),
+    kmFinal: Number(kmFinal),
+    kmFinalAt: serverTimestamp(),
   });
   await setDoc(
     doc(db, 'publicTracking', tripId),
@@ -395,6 +426,16 @@ export async function listTripsByDriver(driverId) {
   const q = query(
     collection(db, 'trips'),
     where('driverId', '==', driverId),
+    orderBy('date', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function listTripsByNanny(nannyId) {
+  const q = query(
+    collection(db, 'trips'),
+    where('nannyId', '==', nannyId),
     orderBy('date', 'desc')
   );
   const snap = await getDocs(q);
