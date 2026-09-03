@@ -16,7 +16,10 @@ export default function DriverLayout() {
           Ruta Segura
         </button>
         <div className="flex items-center gap-3 text-sm">
-          <span className="text-navy-100">{profile?.name}</span>
+          <span className="text-navy-100">
+            {profile?.name}
+            {profile?.role === 'nanny' && <span className="text-navy-300"> · Nanny</span>}
+          </span>
           <button
             onClick={logout}
             className="bg-navy-700 px-3 py-1.5 rounded-lg"
