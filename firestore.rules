@@ -88,5 +88,22 @@ service cloud.firestore {
         allow write: if isAdmin() || isDriver();
       }
     }
+
+    // ------------------------------------------------------------------
+    // Colecciones públicas (SIN login) para el seguimiento del padre de
+    // familia. Contienen deliberadamente lo mínimo: matrícula -> ruta, y
+    // un espejo de solo-lectura del recorrido del día (posición del
+    // camión + estado por parada). Nunca exponen domicilio, contacto del
+    // padre, ni el expediente completo del alumno.
+    // ------------------------------------------------------------------
+    match /publicStudentIndex/{matricula} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /publicTracking/{tripId} {
+      allow read: if true;
+      allow write: if isAdmin() || isDriver();
+    }
   }
 }
