@@ -21,7 +21,10 @@ export default function ProtectedRoute({ role, children }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  if (role && profile?.role !== role) {
+  // `role` puede ser un string ('admin') o un arreglo (['driver', 'nanny'])
+  // para pantallas compartidas por chofer y nanny.
+  const allowedRoles = Array.isArray(role) ? role : [role];
+  if (role && !allowedRoles.includes(profile?.role)) {
     return <Navigate to={profile?.role === 'admin' ? '/admin' : '/chofer'} replace />;
   }
 
