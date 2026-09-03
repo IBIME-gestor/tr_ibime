@@ -1,4 +1,5 @@
-import { where, orderBy } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from './config';
 import {
   listAll,
   subscribeAll,
@@ -7,6 +8,21 @@ import {
   updateDocById,
   removeDoc,
 } from './db';
+
+/**
+ * Mantiene publicStudentIndex/{matricula} en sincronía con el alumno.
+ * Es lo único que la vista pública del padre de familia puede leer sin
+ * iniciar sesión: matrícula -> a qué ruta pertenece. No incluye domicilio,
+ * escuela, ni ningún otro dato del expediente.
+ */
+async function syncPublicStudentIndex(student) {
+  if (!student?.matricula || !student?.routeId) return;
+  await setDoc(doc(db, 'publicStudentIndex', student.matricula.trim()), {
+    studentId: student.id,
+    name: student.name || '',
+    routeId: student.routeId,
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /*  Planteles (schools)                                                */
@@ -55,9 +71,26 @@ export const Students = {
     listAll('students', [where('routeId', '==', routeId), orderBy('name')]),
   subscribe: (cb) => subscribeAll('students', [orderBy('name')], cb),
   get: (id) => getOne('students', id),
-  create: (data) => createDoc('students', data),
-  update: (id, data) => updateDocById('students', id, data),
-  remove: (id) => removeDoc('students', id),
+
+  async create(data) {
+    const id = await createDoc('students', data);
+    await syncPublicStudentIndex({ id, ...data });
+    return id;
+  },
+
+  async update(id, data) {
+    await updateDocById('students', id, data);
+    const full = await getOne('students', id);
+    await syncPublicStudentIndex(full);
+  },
+
+  async remove(id) {
+    const existing = await getOne('students', id);
+    await removeDoc('students', id);
+    if (existing?.matricula) {
+      await deleteDoc(doc(db, 'publicStudentIndex', existing.matricula.trim()));
+    }
+  },
 
   /**
    * Búsqueda por matrícula exacta. Se usa cuando el chofer digita
@@ -89,6 +122,11 @@ export const Routes = {
       // Se recalculan solos después de cada recorrido real.
       studentOrderMorning: [],
       studentOrderAfternoon: [],
+      // Minutos promedio (histórico) entre parada N-1 y parada N, indexado
+      // por posición. Se recalcula solo al cerrar cada recorrido y
+      // alimenta el ETA aproximado que ve el padre de familia.
+      avgStopMinutesMorning: [],
+      avgStopMinutesAfternoon: [],
       ...data,
     }),
   update: (id, data) => updateDocById('routes', id, data),
