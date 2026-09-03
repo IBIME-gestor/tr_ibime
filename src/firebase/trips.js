@@ -11,6 +11,7 @@ import {
   onSnapshot,
   writeBatch,
   serverTimestamp,
+  deleteField,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Routes, Students } from './services';
@@ -375,8 +376,33 @@ export async function completeTrip(tripId, trip, kmFinal) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Recorrido de referencia (chofer asignado a una ruta que no conoce) */
+/*  Aviso de incidente en ruta (tráfico, accidente, retraso, otro)     */
 /* ------------------------------------------------------------------ */
+
+export const TRIP_ALERT_TYPES = {
+  traffic: { label: 'Tráfico', icon: '🚦' },
+  accident: { label: 'Accidente', icon: '🚑' },
+  delay: { label: 'Retraso', icon: '⏱️' },
+  other: { label: 'Otro', icon: '⚠️' },
+};
+
+/**
+ * El chofer o la nanny publican un aviso corto para que los padres lo vean
+ * de inmediato en /seguimiento (por ejemplo "tráfico pesado en la avenida,
+ * vamos ~15 min tarde"). Se guarda en el trip y se refleja en el espejo
+ * público.
+ */
+export async function setTripAlert(tripId, type, message) {
+  const alert = { type, message: message || '', createdAt: serverTimestamp() };
+  await updateDoc(doc(db, 'trips', tripId), { alert });
+  await setDoc(doc(db, 'publicTracking', tripId), { alert }, { merge: true });
+}
+
+/** Quita el aviso activo (ej. una vez que el tráfico se resolvió). */
+export async function clearTripAlert(tripId) {
+  await updateDoc(doc(db, 'trips', tripId), { alert: deleteField() });
+  await setDoc(doc(db, 'publicTracking', tripId), { alert: deleteField() }, { merge: true });
+}
 
 /**
  * Trae el recorrido COMPLETADO más reciente de una ruta/turno junto con
