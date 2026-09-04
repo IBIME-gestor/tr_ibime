@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Sun, Sunset, History } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes } from '../../firebase/services';
+import { getTimeGreeting, getFirstName } from '../../utils/greetings';
 
 export default function RouteHome() {
   const { profile } = useAuth();
@@ -45,41 +47,44 @@ export default function RouteHome() {
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <p className="text-navy-400 text-sm capitalize">{today}</p>
-        <h1 className="text-2xl font-display font-bold text-navy-900">¿Qué recorrido vas a hacer?</h1>
+    <div className="space-y-5">
+      <div className="bg-navy-800 text-white rounded-2xl px-5 py-4">
+        <p className="text-navy-300 text-xs capitalize">{today}</p>
+        <h1 className="text-xl font-display font-bold">
+          {getTimeGreeting()}, {getFirstName(profile?.name)} 👋
+        </h1>
+        <p className="text-navy-200 text-sm mt-0.5">¿Qué recorrido vas a hacer?</p>
       </div>
 
       {routes.map((route) => (
         <div key={route.id} className="card">
           <p className="font-display font-semibold text-lg mb-3">{route.name}</p>
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 gap-2.5">
             <button
-              className="btn-go"
+              className="btn-go flex items-center justify-center gap-2"
               onClick={() => navigate(`/chofer/recorrido/${route.id}/morning`)}
             >
-              ☀️ Recorrido de ida (mañana)
+              <Sun size={20} /> Recorrido de ida (mañana)
             </button>
             <button
-              className="btn-signal"
+              className="btn-signal flex items-center justify-center gap-2"
               onClick={() => navigate(`/chofer/recorrido/${route.id}/afternoon`)}
             >
-              🌇 Recorrido de vuelta (tarde)
+              <Sunset size={20} /> Recorrido de vuelta (tarde)
             </button>
           </div>
           <p className="text-xs text-navy-400 mt-3">
             ¿Ruta nueva para ti? Consulta cómo se hizo antes:{' '}
             <button
               onClick={() => navigate(`/chofer/referencia/${route.id}/morning`)}
-              className="underline"
+              className="underline font-medium text-navy-600"
             >
               ver ida
             </button>{' '}
             ·{' '}
             <button
               onClick={() => navigate(`/chofer/referencia/${route.id}/afternoon`)}
-              className="underline"
+              className="underline font-medium text-navy-600"
             >
               ver vuelta
             </button>
@@ -89,9 +94,9 @@ export default function RouteHome() {
 
       <button
         onClick={() => navigate('/chofer/historial')}
-        className="w-full text-center text-navy-400 text-sm underline py-2"
+        className="w-full flex items-center justify-center gap-2 text-navy-400 text-sm py-2"
       >
-        Ver recorridos anteriores
+        <History size={15} /> Ver recorridos anteriores
       </button>
     </div>
   );
