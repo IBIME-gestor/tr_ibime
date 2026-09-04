@@ -19,6 +19,7 @@ import {
   TRIP_ALERT_TYPES,
 } from '../../firebase/trips';
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
+import { getFarewellMessage } from '../../utils/greetings';
 import StopCard from '../../components/StopCard';
 
 // No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
@@ -26,15 +27,20 @@ import StopCard from '../../components/StopCard';
 // suficiente para que el mapa del padre se vea "en vivo".
 const LOCATION_THROTTLE_MS = 15000;
 
-function mapsUrl(destination) {
+function navUrls(destination) {
   if (!destination) return null;
-  const dest =
-    typeof destination === 'string'
-      ? destination
-      : `${destination.lat},${destination.lng}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-    dest
-  )}&travelmode=driving`;
+  if (typeof destination === 'string') {
+    const encoded = encodeURIComponent(destination);
+    return {
+      maps: `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`,
+      waze: `https://waze.com/ul?q=${encoded}&navigate=yes`,
+    };
+  }
+  const { lat, lng } = destination;
+  return {
+    maps: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
+    waze: `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
+  };
 }
 
 const SHIFT_CONFIG = {
@@ -469,7 +475,7 @@ export default function TripRunner() {
                 onAction={handleIndividualBoard}
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
-                navHref={mapsUrl(destinations[stop.studentId])}
+                nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
               />
             ))
@@ -496,7 +502,7 @@ export default function TripRunner() {
                 onAction={handleIndividualDeliver}
                 onMarkAbsent={handleAbsent}
                 disabled={busy}
-                navHref={mapsUrl(destinations[stop.studentId])}
+                nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
               />
             ))
@@ -527,6 +533,9 @@ export default function TripRunner() {
             required
           />
           {kmError && <p className="text-stop text-sm">{kmError}</p>}
+          <p className="text-xs text-navy-400 text-center">
+            Al cerrar: <span className="font-medium text-navy-600">{getFarewellMessage(shift)}</span> 💙
+          </p>
           <button type="submit" disabled={finishing} className="btn-go w-full">
             {finishing ? 'Cerrando…' : '✅ Finalizar y guardar recorrido'}
           </button>
