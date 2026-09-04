@@ -13,8 +13,11 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-function mapsUrl(lat, lng) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+function navUrls(lat, lng) {
+  return {
+    maps: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
+    waze: `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
+  };
 }
 
 /**
@@ -117,15 +120,26 @@ export default function ReferenceRoute() {
                     <p className="text-sm text-navy-400">Matrícula {s.matricula}</p>
                   </div>
                   {s.referenceLocation?.lat ? (
-                    <a
-                      href={mapsUrl(s.referenceLocation.lat, s.referenceLocation.lng)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => setActiveStop(s.id)}
-                      className="px-4 py-3 rounded-xl bg-navy-800 text-white font-display font-semibold whitespace-nowrap shrink-0"
-                    >
-                      📍 Navegar
-                    </a>
+                    <div className="flex gap-2 shrink-0">
+                      <a
+                        href={navUrls(s.referenceLocation.lat, s.referenceLocation.lng).maps}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setActiveStop(s.id)}
+                        className="px-3 py-3 rounded-xl bg-navy-800 text-white font-display font-semibold whitespace-nowrap"
+                      >
+                        📍 Maps
+                      </a>
+                      <a
+                        href={navUrls(s.referenceLocation.lat, s.referenceLocation.lng).waze}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setActiveStop(s.id)}
+                        className="px-3 py-3 rounded-xl border border-navy-100 text-navy-600 font-display font-semibold whitespace-nowrap"
+                      >
+                        🚗 Waze
+                      </a>
+                    </div>
                   ) : (
                     <span className="text-xs text-navy-400 shrink-0">Sin ubicación guardada</span>
                   )}
