@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 import { getTrip, getTripStopsOnce } from '../../firebase/trips';
+import { getFirstName, getFarewellMessage } from '../../utils/greetings';
 
 function fmtTime(ts) {
   if (!ts?.toDate) return '—';
@@ -10,6 +12,7 @@ function fmtTime(ts) {
 export default function TripSummary() {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [trip, setTrip] = useState(null);
   const [stops, setStops] = useState([]);
 
@@ -30,10 +33,13 @@ export default function TripSummary() {
 
   return (
     <div className="space-y-4 pb-10">
-      <div className="text-center">
-        <p className="text-4xl mb-1">🎉</p>
-        <h1 className="text-xl font-display font-bold">Recorrido guardado</h1>
-        <p className="text-navy-400 text-sm">{trip.date}</p>
+      <div className="bg-navy-800 text-white rounded-2xl px-5 py-6 text-center">
+        <p className="text-3xl mb-2">{trip.shift === 'afternoon' ? '🏡' : '🎉'}</p>
+        <h1 className="text-lg font-display font-bold">
+          Gracias, {getFirstName(profile?.name)}. Recorrido guardado.
+        </h1>
+        <p className="text-navy-200 text-sm mt-1">{getFarewellMessage(trip.shift)}</p>
+        <p className="text-navy-400 text-xs mt-2">{trip.date}</p>
       </div>
 
       <div className="card flex justify-around text-center text-sm">
