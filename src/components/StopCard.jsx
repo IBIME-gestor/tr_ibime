@@ -17,7 +17,7 @@ const STATUS_LABEL = {
  * `actionLabel` cambia según el turno: "Recogido" en la mañana,
  * "Bajó" en la tarde. El chofer toca UNA vez, no hay menús ni pasos extra.
  */
-export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled, navHref }) {
+export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled, nav, phone }) {
   // "Terminado" de verdad es solo cuando ya se entregó (bajó en su domicilio
   // o llegó al plantel). "A bordo" es un estado intermedio: en el recorrido
   // de vuelta todavía falta la acción de "Bajó", así que el botón debe
@@ -39,16 +39,36 @@ export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, di
         </div>
         {!isDone && !isAbsent && !disabled && (
           <div className="flex flex-col gap-2 shrink-0 items-end">
-            {navHref && (
-              <a
-                href={navHref}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs px-3 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap"
-              >
-                📍 Navegar
-              </a>
-            )}
+            <div className="flex gap-2">
+              {nav?.maps && (
+                <a
+                  href={nav.maps}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs px-3 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap"
+                >
+                  📍 Maps
+                </a>
+              )}
+              {nav?.waze && (
+                <a
+                  href={nav.waze}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs px-3 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap"
+                >
+                  🚗 Waze
+                </a>
+              )}
+              {phone && (
+                <a
+                  href={`tel:${phone}`}
+                  className="text-xs px-3 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap"
+                >
+                  📞 Llamar
+                </a>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={() => onMarkAbsent(stop)}
