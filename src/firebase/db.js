@@ -23,6 +23,29 @@ import { db } from './config';
 
 export const colRef = (name) => collection(db, name);
 
+/**
+ * Firestore rechaza cualquier valor "undefined" (en el documento o
+ * dentro de un arreglo) — truena updateDoc/setDoc con un error poco
+ * claro. Limpiamos antes de escribir, por si algún cálculo dejó un
+ * campo o una posición de arreglo sin llenar.
+ */
+function stripUndefined(value) {
+  if (Array.isArray(value)) {
+    return value.map((v) => (v === undefined ? null : stripUndefined(v)));
+  }
+  // Ojo: NO tocar instancias especiales de Firestore (serverTimestamp(),
+  // arrayUnion(), Timestamp, GeoPoint, etc.) — solo objetos "planos" tipo
+  // literal ({ ... }), para no romper esos sentinels internos.
+  if (value !== null && typeof value === 'object' && value.constructor === Object) {
+    const out = {};
+    Object.entries(value).forEach(([k, v]) => {
+      if (v !== undefined) out[k] = stripUndefined(v);
+    });
+    return out;
+  }
+  return value;
+}
+
 export async function listAll(name, constraints = []) {
   const q = query(colRef(name), ...constraints);
   const snap = await getDocs(q);
@@ -44,7 +67,7 @@ export async function getOne(name, id) {
 
 export async function createDoc(name, data) {
   const ref = await addDoc(colRef(name), {
-    ...data,
+    ...stripUndefined(data),
     createdAt: serverTimestamp(),
   });
   return ref.id;
@@ -52,7 +75,7 @@ export async function createDoc(name, data) {
 
 export async function createDocWithId(name, id, data) {
   await setDoc(doc(db, name, id), {
-    ...data,
+    ...stripUndefined(data),
     createdAt: serverTimestamp(),
   });
   return id;
@@ -60,7 +83,7 @@ export async function createDocWithId(name, id, data) {
 
 export async function updateDocById(name, id, data) {
   await updateDoc(doc(db, name, id), {
-    ...data,
+    ...stripUndefined(data),
     updatedAt: serverTimestamp(),
   });
 }
