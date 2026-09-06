@@ -1,10 +1,43 @@
 import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { Link, useNavigate } from 'react-router-dom';
 import { Schools, Students } from '../../firebase/services';
 
-// Columnas esperadas en el CSV: matricula, name, school, address, parentContact
+// Columnas esperadas: matricula, name, school, address, parentContact
+// Funciona tanto con .csv como con .xlsx/.xls reales de Excel.
 const REQUIRED_COLUMNS = ['matricula', 'name', 'school'];
+
+function normalizeHeader(h) {
+  return String(h || '').trim().toLowerCase();
+}
+
+// Lee un .xlsx/.xls real (binario) con SheetJS y regresa filas con los
+// encabezados ya normalizados, igual que hace Papa con el CSV.
+function parseExcelFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const workbook = XLSX.read(e.target.result, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+        const rows = raw.map((row) => {
+          const out = {};
+          Object.entries(row).forEach(([key, value]) => {
+            out[normalizeHeader(key)] = typeof value === 'string' ? value.trim() : value;
+          });
+          return out;
+        });
+        resolve(rows);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 export default function StudentImport() {
   const navigate = useNavigate();
@@ -16,25 +49,35 @@ export default function StudentImport() {
 
   useEffect(() => Schools.subscribe(setSchools), []);
 
+  function applyRows(cols, data) {
+    const missing = REQUIRED_COLUMNS.filter((c) => !cols.includes(c));
+    if (missing.length) {
+      setFileError(`Faltan columnas en el archivo: ${missing.join(', ')}`);
+      setRows([]);
+      return;
+    }
+    setRows(data);
+  }
+
   function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     setFileError('');
     setResult(null);
+
+    const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+    if (isExcel) {
+      parseExcelFile(file)
+        .then((data) => applyRows(Object.keys(data[0] || {}), data))
+        .catch(() => setFileError('No se pudo leer el archivo de Excel. Verifica que no esté dañado o protegido.'));
+      return;
+    }
+
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      transformHeader: (h) => h.trim().toLowerCase(),
-      complete: (res) => {
-        const cols = res.meta.fields || [];
-        const missing = REQUIRED_COLUMNS.filter((c) => !cols.includes(c));
-        if (missing.length) {
-          setFileError(`Faltan columnas en el CSV: ${missing.join(', ')}`);
-          setRows([]);
-          return;
-        }
-        setRows(res.data);
-      },
+      transformHeader: normalizeHeader,
+      complete: (res) => applyRows(res.meta.fields || [], res.data),
       error: () => setFileError('No se pudo leer el archivo.'),
     });
   }
@@ -48,24 +91,23 @@ export default function StudentImport() {
 
   async function handleImport() {
     setImporting(true);
-    let ok = 0;
-    let failed = [];
+    const valid = [];
+    const failed = [];
     for (const row of rows) {
       const schoolId = schoolIdFor(row.school);
       if (!row.matricula || !row.name || !schoolId) {
         failed.push(row);
         continue;
       }
-      await Students.create({
+      valid.push({
         matricula: String(row.matricula).trim(),
         name: row.name.trim(),
         schoolId,
         address: row.address || '',
         parentContact: row.parentcontact || row.parentContact || '',
-        routeId: '',
       });
-      ok += 1;
     }
+    const ok = valid.length ? await Students.bulkImport(valid) : 0;
     setImporting(false);
     setResult({ ok, failed });
   }
@@ -73,9 +115,12 @@ export default function StudentImport() {
   return (
     <div className="max-w-2xl">
       <Link to="/admin/alumnos" className="link-action">← Volver a alumnos</Link>
-      <h1 className="admin-h1 mt-2 mb-2">Cargar alumnos por CSV</h1>
+      <h1 className="admin-h1 mt-2 mb-2">Cargar alumnos por CSV o Excel</h1>
       <p className="text-navy-400 text-sm mb-5">
-        El archivo debe tener columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>,{' '}
+        Acepta archivos <code className="bg-navy-100 px-1 rounded">.csv</code>,{' '}
+        <code className="bg-navy-100 px-1 rounded">.xlsx</code> o{' '}
+        <code className="bg-navy-100 px-1 rounded">.xls</code>. La primera fila debe tener
+        columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>,{' '}
         <code className="bg-navy-100 px-1 rounded">name</code>,{' '}
         <code className="bg-navy-100 px-1 rounded">school</code> (nombre exacto del plantel ya dado de alta),
         y opcionalmente <code className="bg-navy-100 px-1 rounded">address</code> y{' '}
@@ -83,7 +128,7 @@ export default function StudentImport() {
       </p>
 
       <div className="admin-card space-y-4">
-        <input type="file" accept=".csv" onChange={handleFile} className="text-sm" />
+        <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFile} className="text-sm" />
         {fileError && <p className="text-stop text-sm">{fileError}</p>}
 
         {rows.length > 0 && !result && (
