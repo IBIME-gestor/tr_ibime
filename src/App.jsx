@@ -9,6 +9,7 @@ import Dashboard from './pages/admin/Dashboard';
 import Schools from './pages/admin/Schools';
 import Students from './pages/admin/Students';
 import StudentImport from './pages/admin/StudentImport';
+import RouteAssignImport from './pages/admin/RouteAssignImport';
 import DriversAdmin from './pages/admin/Drivers';
 import Units from './pages/admin/Units';
 import RoutesAdmin from './pages/admin/Routes';
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="planteles" element={<Schools />} />
         <Route path="alumnos" element={<Students />} />
         <Route path="alumnos/importar" element={<StudentImport />} />
+        <Route path="alumnos/asignar-rutas" element={<RouteAssignImport />} />
         <Route path="choferes" element={<DriversAdmin />} />
         <Route path="unidades" element={<Units />} />
         <Route path="rutas" element={<RoutesAdmin />} />
