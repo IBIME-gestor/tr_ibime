@@ -69,6 +69,44 @@ export function todayString() {
 }
 
 /**
+ * CALENDARIO DE ASISTENCIA DEL ALUMNO
+ * ------------------------------------
+ * Campos nuevos en students/{id} (ver Students.jsx):
+ *   serviceType:   'ida' | 'salida' | 'ambos'
+ *   scheduleType:  'mensual' | 'dias_fijos' | 'eventual'
+ *   activeDays:    [1,3,5]        // solo si scheduleType === 'dias_fijos'
+ *                                  // getDay(): 0=dom, 1=lun ... 6=sáb
+ *   eventDates:    ['2026-09-04'] // solo si scheduleType === 'eventual'
+ *
+ * Decide si un alumno debe aparecer en la lista de paradas de HOY, para
+ * ese turno específico. No hay ningún proceso que "reinicie" nada cada
+ * semana: un alumno fijo se recalcula solo (su día de la semana siempre
+ * existe), y un alumno eventual deja de aparecer solo porque la fecha
+ * exacta que tiene guardada ya quedó en el pasado.
+ */
+export function studentAppliesToday(student, dateStr, shift) {
+  const serviceType = student.serviceType || 'ambos';
+  const wantsThisShift =
+    serviceType === 'ambos' ||
+    serviceType === (shift === 'morning' ? 'ida' : 'salida');
+  if (!wantsThisShift) return false;
+
+  const scheduleType = student.scheduleType || 'mensual';
+
+  if (scheduleType === 'eventual') {
+    return (student.eventDates || []).includes(dateStr);
+  }
+
+  if (scheduleType === 'dias_fijos') {
+    const dow = new Date(`${dateStr}T00:00:00`).getDay();
+    return (student.activeDays || []).includes(dow);
+  }
+
+  // 'mensual' -> aplica todos los días que se corra la ruta
+  return true;
+}
+
+/**
  * Se suscribe en tiempo real al recorrido de HOY para una ruta/turno,
  * exista o no todavía. Así, si una nanny abre la pantalla antes que el
  * chofer, ve en vivo el momento en que el chofer registra su kilometraje
@@ -102,7 +140,10 @@ export async function startTrip(route, shift, driverId, kmInicial) {
     return { id: tripRef.id, ...existing.data() };
   }
 
-  const students = await Students.listByRoute(route.id);
+  const allStudents = await Students.listByRoute(route.id);
+  // Solo entran a la lista de hoy los alumnos cuyo servicio/calendario
+  // cubre este turno y esta fecha (ver studentAppliesToday arriba).
+  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift));
   const savedOrder =
     shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
   const ordered = orderStudents(students, savedOrder);
@@ -332,6 +373,14 @@ async function updateAvgStopMinutes(trip, stops) {
     nextAvg[order] = prev != null ? prev * 0.7 + minutes * 0.3 : minutes;
   });
 
+  // Si "order" salta números (por alumnos ausentes, agregados a media
+  // ruta, etc.) el arreglo queda con huecos sin tocar, y esos huecos se
+  // serializan como "undefined" — Firestore rechaza updateDoc() con
+  // cualquier "undefined" dentro de un arreglo. Los rellenamos con null.
+  for (let i = 0; i < nextAvg.length; i++) {
+    if (nextAvg[i] === undefined) nextAvg[i] = null;
+  }
+
   await Routes.update(trip.routeId, { [field]: nextAvg });
 }
 
@@ -367,6 +416,12 @@ export async function completeTrip(tripId, trip, kmFinal) {
     completedAt: serverTimestamp(),
     kmFinal: Number(kmFinal),
     kmFinalAt: serverTimestamp(),
+    // Conteos ya calculados aquí y guardados en el propio trip, para que
+    // el historial del operador (TripHistory) los muestre sin tener que
+    // volver a leer la subcolección de paradas de cada recorrido pasado.
+    studentsTotal: stops.length,
+    studentsAbsent: stops.filter((s) => s.status === 'absent').length,
+    studentsResolved: stops.filter((s) => s.status !== 'pending' && s.status !== 'absent').length,
   });
   await setDoc(
     doc(db, 'publicTracking', tripId),
