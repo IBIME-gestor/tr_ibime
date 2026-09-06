@@ -108,6 +108,18 @@ h1, h2, h3 {
   @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-navy-50 text-navy-600;
 }
 
+.badge-go {
+  @apply badge bg-go-light text-go;
+}
+
+.badge-stop {
+  @apply badge bg-stop-light text-stop;
+}
+
+.badge-amber {
+  @apply badge bg-signal-amber/15 text-signal-amber;
+}
+
 /* Enfoque visible para accesibilidad de teclado */
 :focus-visible {
   outline: 3px solid #FFC93C;
