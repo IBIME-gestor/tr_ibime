@@ -1,4 +1,4 @@
-import { where, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc, collection, writeBatch } from 'firebase/firestore';
 import { db } from './config';
 import {
   listAll,
@@ -8,6 +8,15 @@ import {
   updateDocById,
   removeDoc,
 } from './db';
+
+// Firestore acepta hasta 500 operaciones por lote; dejamos margen.
+const BATCH_CHUNK_SIZE = 400;
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 /**
  * Mantiene publicStudentIndex/{matricula} en sincronía con el alumno.
@@ -101,6 +110,52 @@ export const Students = {
       where('matricula', '==', matricula.trim()),
     ]);
     return results[0] || null;
+  },
+
+  /**
+   * Alta masiva por lotes (CSV de 3500+ alumnos). Muchísimo más rápido
+   * que crear uno por uno: agrupa en lotes de hasta 400 escrituras y
+   * los manda en paralelo-secuencial. No asigna ruta ni calendario —
+   * eso se hace después con bulkAssignRoute o editando cada alumno.
+   */
+  async bulkImport(rows) {
+    let ok = 0;
+    for (const group of chunk(rows, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach((row) => {
+        const ref = doc(collection(db, 'students'));
+        batch.set(ref, { routeId: '', ...row });
+      });
+      await batch.commit();
+      ok += group.length;
+    }
+    return ok;
+  },
+
+  /**
+   * Asignación masiva de ruta por matrícula (para no hacerlo de uno en
+   * uno en la pantalla de Rutas). items: [{ id, matricula, name, routeId }].
+   * Actualiza el alumno Y su espejo público (publicStudentIndex) en el
+   * mismo lote, sin leer cada documento de vuelta.
+   */
+  async bulkAssignRoute(items) {
+    let ok = 0;
+    for (const group of chunk(items, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach(({ id, matricula, name, routeId }) => {
+        batch.update(doc(db, 'students', id), { routeId });
+        if (routeId && matricula) {
+          batch.set(doc(db, 'publicStudentIndex', matricula.trim()), {
+            studentId: id,
+            name: name || '',
+            routeId,
+          });
+        }
+      });
+      await batch.commit();
+      ok += group.length;
+    }
+    return ok;
   },
 };
 
