@@ -1,7 +1,40 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Upload } from 'lucide-react';
+import { Search, Upload, X } from 'lucide-react';
 import { Students, Schools, Routes } from '../../firebase/services';
+
+export const SERVICE_TYPES = {
+  ida: 'Solo ida (recolección)',
+  salida: 'Solo salida (entrega)',
+  ambos: 'Ida y salida',
+};
+
+export const SCHEDULE_TYPES = {
+  mensual: 'Mes completo',
+  dias_fijos: 'Días fijos a la semana',
+  eventual: 'Eventual (fechas sueltas)',
+};
+
+export const BILLING_MODES = {
+  mensual: 'Cuota mensual fija',
+  por_dias: 'Tarifa fija según sus días de la semana',
+  por_evento: 'Se cobra cada vez que se usa',
+};
+
+export const PAYMENT_STATUSES = {
+  al_corriente: { label: 'Al corriente', badgeClass: 'badge-go' },
+  desfase: { label: 'Con desfase', badgeClass: 'badge-amber' },
+  sin_pago: { label: 'Sin pago', badgeClass: 'badge-stop' },
+};
+
+export const WEEKDAYS = [
+  { value: 1, label: 'Lun' },
+  { value: 2, label: 'Mar' },
+  { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' },
+  { value: 5, label: 'Vie' },
+  { value: 6, label: 'Sáb' },
+];
 
 const emptyForm = {
   matricula: '',
@@ -10,6 +43,13 @@ const emptyForm = {
   routeId: '',
   address: '',
   parentContact: '',
+  serviceType: 'ambos',
+  scheduleType: 'mensual',
+  activeDays: [],
+  eventDates: [],
+  billingMode: 'mensual',
+  billingAmount: '',
+  paymentStatus: 'al_corriente',
 };
 
 export default function StudentsPage() {
@@ -20,6 +60,7 @@ export default function StudentsPage() {
   const [editingId, setEditingId] = useState(null);
   const [filterSchool, setFilterSchool] = useState('');
   const [search, setSearch] = useState('');
+  const [newEventDate, setNewEventDate] = useState('');
 
   useEffect(() => Students.subscribe(setStudents), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -47,34 +88,121 @@ export default function StudentsPage() {
     setEditingId(null);
   }
 
+  function handleScheduleTypeChange(scheduleType) {
+    const defaultBilling =
+      scheduleType === 'mensual' ? 'mensual'
+      : scheduleType === 'dias_fijos' ? 'por_dias'
+      : 'por_evento';
+    setForm({ ...form, scheduleType, billingMode: defaultBilling });
+  }
+
+  function toggleDay(day) {
+    const activeDays = form.activeDays.includes(day)
+      ? form.activeDays.filter((d) => d !== day)
+      : [...form.activeDays, day].sort();
+    setForm({ ...form, activeDays });
+  }
+
+  function addEventDate() {
+    if (!newEventDate || form.eventDates.includes(newEventDate)) return;
+    setForm({ ...form, eventDates: [...form.eventDates, newEventDate].sort() });
+    setNewEventDate('');
+  }
+
+  function removeEventDate(date) {
+    setForm({ ...form, eventDates: form.eventDates.filter((d) => d !== date) });
+  }
+
   async function handleDelete(id) {
     if (window.confirm('¿Dar de baja a este alumno?')) {
       await Students.remove(id);
     }
   }
 
+  async function handlePaymentStatusChange(id, paymentStatus) {
+    await Students.update(id, { paymentStatus });
+  }
+
+  const [filterPayment, setFilterPayment] = useState('');
+
   const filtered = students.filter((s) => {
     const matchSchool = !filterSchool || s.schoolId === filterSchool;
+    const matchPayment = !filterPayment || (s.paymentStatus || 'al_corriente') === filterPayment;
     const matchSearch =
       !search ||
       s.name?.toLowerCase().includes(search.toLowerCase()) ||
       s.matricula?.includes(search);
-    return matchSchool && matchSearch;
+    return matchSchool && matchPayment && matchSearch;
   });
+
+  const paymentCounts = students.reduce(
+    (acc, s) => {
+      const status = s.paymentStatus || 'al_corriente';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    },
+    { al_corriente: 0, desfase: 0, sin_pago: 0 }
+  );
 
   const schoolName = (id) => schools.find((s) => s.id === id)?.name || '—';
   const routeName = (id) => routes.find((r) => r.id === id)?.name || null;
 
+  function scheduleSummary(s) {
+    const service = SERVICE_TYPES[s.serviceType] || SERVICE_TYPES.ambos;
+    if (s.scheduleType === 'dias_fijos') {
+      const days = (s.activeDays || [])
+        .map((d) => WEEKDAYS.find((w) => w.value === d)?.label)
+        .filter(Boolean)
+        .join('/');
+      return `${service} · ${days || 'sin días'}`;
+    }
+    if (s.scheduleType === 'eventual') {
+      return `${service} · Eventual (${(s.eventDates || []).length} fechas)`;
+    }
+    return `${service} · Mes completo`;
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
           <h1 className="admin-h1">Alumnos</h1>
           <p className="text-sm text-navy-400 mt-0.5">{students.length} alumnos dados de alta</p>
         </div>
-        <Link to="/admin/alumnos/importar" className="btn-admin-ghost">
-          <Upload size={15} /> Cargar CSV/Excel
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/admin/alumnos/importar" className="btn-admin-ghost">
+            <Upload size={15} /> Cargar CSV/Excel
+          </Link>
+          <Link to="/admin/alumnos/asignar-rutas" className="btn-admin-ghost">
+            <Upload size={15} /> Asignar rutas en lote
+          </Link>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-5">
+        <button
+          onClick={() => setFilterPayment('al_corriente')}
+          className={`badge-go ${filterPayment === 'al_corriente' ? 'ring-2 ring-go' : ''}`}
+        >
+          {paymentCounts.al_corriente} al corriente
+        </button>
+        <button
+          onClick={() => setFilterPayment('desfase')}
+          className={`badge-amber ${filterPayment === 'desfase' ? 'ring-2 ring-signal-amber' : ''}`}
+        >
+          {paymentCounts.desfase} con desfase
+        </button>
+        <button
+          onClick={() => setFilterPayment('sin_pago')}
+          className={`badge-stop ${filterPayment === 'sin_pago' ? 'ring-2 ring-stop' : ''}`}
+        >
+          {paymentCounts.sin_pago} sin pago
+        </button>
+        {filterPayment && (
+          <button onClick={() => setFilterPayment('')} className="link-action">
+            Quitar filtro de pago
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
@@ -145,6 +273,125 @@ export default function StudentsPage() {
                 className="admin-input"
               />
             </div>
+
+            <div className="border-t border-navy-100 pt-3">
+              <label className="admin-label">Servicio de transporte</label>
+              <select
+                value={form.serviceType}
+                onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
+                className="admin-select"
+              >
+                {Object.entries(SERVICE_TYPES).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="admin-label">Calendario</label>
+              <select
+                value={form.scheduleType}
+                onChange={(e) => handleScheduleTypeChange(e.target.value)}
+                className="admin-select"
+              >
+                {Object.entries(SCHEDULE_TYPES).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {form.scheduleType === 'dias_fijos' && (
+              <div>
+                <label className="admin-label">Días que toma el servicio</label>
+                <div className="flex gap-1.5 flex-wrap">
+                  {WEEKDAYS.map((d) => (
+                    <button
+                      key={d.value}
+                      type="button"
+                      onClick={() => toggleDay(d.value)}
+                      className={
+                        form.activeDays.includes(d.value)
+                          ? 'badge cursor-pointer'
+                          : 'badge cursor-pointer opacity-40'
+                      }
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {form.scheduleType === 'eventual' && (
+              <div>
+                <label className="admin-label">Fechas en que toma el servicio</label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={newEventDate}
+                    onChange={(e) => setNewEventDate(e.target.value)}
+                    className="admin-input flex-1"
+                  />
+                  <button type="button" onClick={addEventDate} className="btn-admin-ghost">
+                    Agregar
+                  </button>
+                </div>
+                {form.eventDates.length > 0 && (
+                  <div className="flex gap-1.5 flex-wrap mt-2">
+                    {form.eventDates.map((date) => (
+                      <span key={date} className="badge inline-flex items-center gap-1">
+                        {date}
+                        <X size={12} className="cursor-pointer" onClick={() => removeEventDate(date)} />
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="border-t border-navy-100 pt-3">
+              <label className="admin-label">Cobro (para caja)</label>
+              <select
+                value={form.billingMode}
+                onChange={(e) => setForm({ ...form, billingMode: e.target.value })}
+                className="admin-select"
+              >
+                {Object.entries(BILLING_MODES).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="admin-label">
+                {form.billingMode === 'por_evento' ? 'Monto por cada vez que se usa' : 'Monto'}
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.billingAmount}
+                onChange={(e) => setForm({ ...form, billingAmount: e.target.value })}
+                placeholder="$0.00"
+                className="admin-input"
+              />
+            </div>
+
+            <div>
+              <label className="admin-label">Estatus de pago</label>
+              <select
+                value={form.paymentStatus}
+                onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
+                className="admin-select"
+              >
+                {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-navy-400 mt-1">
+                Lo actualiza la administración a mano tras registrar el cobro; es solo para control interno.
+              </p>
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
             <button type="submit" className="btn-admin-primary flex-1">
@@ -189,6 +436,8 @@ export default function StudentsPage() {
                   <th>Nombre</th>
                   <th>Plantel</th>
                   <th>Ruta</th>
+                  <th>Servicio</th>
+                  <th>Pago</th>
                   <th className="pr-5"></th>
                 </tr>
               </thead>
@@ -204,6 +453,18 @@ export default function StudentsPage() {
                       ) : (
                         <span className="text-navy-400">Sin ruta</span>
                       )}
+                    </td>
+                    <td className="text-navy-500 text-xs">{scheduleSummary(s)}</td>
+                    <td>
+                      <select
+                        value={s.paymentStatus || 'al_corriente'}
+                        onChange={(e) => handlePaymentStatusChange(s.id, e.target.value)}
+                        className={`text-xs rounded-md border-0 py-1 pr-6 font-medium cursor-pointer focus:ring-2 focus:ring-signal-yellow/40 ${PAYMENT_STATUSES[s.paymentStatus || 'al_corriente'].badgeClass}`}
+                      >
+                        {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
