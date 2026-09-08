@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Schools } from '../../firebase/services';
+import { cascadeStyle } from '../../utils/cascade';
 
 export default function SchoolsPage() {
   const [schools, setSchools] = useState([]);
@@ -36,7 +37,7 @@ export default function SchoolsPage() {
       <h1 className="admin-h1 mb-5">Planteles</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
-        <form onSubmit={handleSubmit} className="admin-card lg:sticky lg:top-6">
+        <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 cascade-item">
           <p className="font-display font-semibold text-sm text-navy-800 mb-3">
             {editingId ? 'Editar plantel' : 'Nuevo plantel'}
           </p>
@@ -75,31 +76,33 @@ export default function SchoolsPage() {
           </div>
         </form>
 
-        <div className="admin-card p-0 overflow-hidden">
-          <table className="table-admin">
-            <thead>
-              <tr>
-                <th className="pl-5">Nombre</th>
-                <th>Dirección</th>
-                <th className="pr-5"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {schools.map((s) => (
-                <tr key={s.id}>
-                  <td className="pl-5 font-medium text-navy-700">{s.name}</td>
-                  <td className="text-navy-500">{s.address || '—'}</td>
-                  <td className="pr-5 text-right whitespace-nowrap">
-                    <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
-                    <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
-                  </td>
+        <div className="admin-card p-0 overflow-hidden cascade-item" style={cascadeStyle(1, 60)}>
+          <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+            <table className="table-admin">
+              <thead className="sticky top-0 z-10 bg-white shadow-sm">
+                <tr>
+                  <th className="pl-5">Nombre</th>
+                  <th>Dirección</th>
+                  <th className="pr-5"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {schools.length === 0 && (
-            <p className="text-navy-400 text-sm py-6 text-center">Sin planteles registrados.</p>
-          )}
+              </thead>
+              <tbody>
+                {schools.map((s, i) => (
+                  <tr key={s.id} className="cascade-item" style={cascadeStyle(i, 25)}>
+                    <td className="pl-5 font-medium text-navy-700">{s.name}</td>
+                    <td className="text-navy-500">{s.address || '—'}</td>
+                    <td className="pr-5 text-right whitespace-nowrap">
+                      <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
+                      <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {schools.length === 0 && (
+              <p className="text-navy-400 text-sm py-6 text-center">Sin planteles registrados.</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
