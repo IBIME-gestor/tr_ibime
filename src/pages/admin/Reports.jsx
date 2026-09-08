@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes } from '../../firebase/services';
 import { listTripsByRoute, getTripStopsOnce } from '../../firebase/trips';
+import { cascadeStyle } from '../../utils/cascade';
 
 // Ícono por defecto de Leaflet no carga bien con bundlers; se reconfigura aquí.
 delete L.Icon.Default.prototype._getIconUrl;
@@ -114,26 +115,28 @@ export default function Reports() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="admin-card p-0 overflow-x-auto">
-              <table className="table-admin">
-                <thead>
-                  <tr>
-                    <th className="pl-5">Alumno</th>
-                    <th>Hora</th>
-                    <th className="pr-5">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stops.map((s) => (
-                    <tr key={s.id}>
-                      <td className="pl-5">{s.name}</td>
-                      <td className="text-navy-500">{fmtTime(s[timeKey])}</td>
-                      <td className="pr-5 capitalize text-navy-500">{s.status}</td>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 cascade-item">
+            <div className="admin-card p-0 overflow-hidden">
+              <div className="max-h-[420px] overflow-y-auto overflow-x-auto">
+                <table className="table-admin">
+                  <thead className="sticky top-0 z-10 bg-white shadow-sm">
+                    <tr>
+                      <th className="pl-5">Alumno</th>
+                      <th>Hora</th>
+                      <th className="pr-5">Estado</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {stops.map((s, i) => (
+                      <tr key={s.id} className="cascade-item" style={cascadeStyle(i, 25)}>
+                        <td className="pl-5">{s.name}</td>
+                        <td className="text-navy-500">{fmtTime(s[timeKey])}</td>
+                        <td className="pr-5 capitalize text-navy-500">{s.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="admin-card p-0 overflow-hidden" style={{ height: 420 }}>
