@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { listTripsByDriver, listTripsByNanny } from '../../firebase/trips';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 /**
  * Historial del operador. A propósito NO se suscribe en tiempo real
@@ -38,6 +40,7 @@ export default function TripHistory() {
 
   return (
     <div className="space-y-3">
+      <LoadingOverlay show={loading && trips.length === 0} label="Consultando tu historial…" />
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-display font-bold">Mis recorridos</h1>
         <button
@@ -56,19 +59,16 @@ export default function TripHistory() {
         </p>
       )}
 
-      {loading && trips.length === 0 && (
-        <p className="text-navy-400 text-sm">Consultando tu historial…</p>
-      )}
-
       {!loading && trips.length === 0 && (
         <p className="text-navy-400 text-sm">Aún no hay recorridos guardados.</p>
       )}
 
-      {trips.map((t) => (
+      {trips.map((t, i) => (
         <Link
           key={t.id}
           to={`/chofer/resumen/${t.id}`}
-          className="card flex items-center justify-between gap-3"
+          className="card flex items-center justify-between gap-3 cascade-item"
+          style={cascadeStyle(i, 40)}
         >
           <div className="min-w-0">
             <p className="font-medium truncate">{t.date}</p>
