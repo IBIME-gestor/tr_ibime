@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Upload, X } from 'lucide-react';
+import { Search, Upload, X, User, MapPin, Bus, CalendarClock, CircleDollarSign } from 'lucide-react';
 import { Students, Schools, Routes } from '../../firebase/services';
+import { cascadeStyle } from '../../utils/cascade';
 
 export const SERVICE_TYPES = {
   ida: 'Solo ida (recolección)',
@@ -35,6 +36,14 @@ export const WEEKDAYS = [
   { value: 5, label: 'Vie' },
   { value: 6, label: 'Sáb' },
 ];
+
+function SectionLabel({ icon: Icon, children }) {
+  return (
+    <p className="flex items-center gap-1.5 text-xs font-semibold text-navy-500 uppercase tracking-wide mb-2">
+      <Icon size={13} /> {children}
+    </p>
+  );
+}
 
 const emptyForm = {
   matricula: '',
@@ -206,194 +215,218 @@ export default function StudentsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
-        <form onSubmit={handleSubmit} className="admin-card lg:sticky lg:top-6">
-          <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-            {editingId ? 'Editar alumno' : 'Nuevo alumno'}
+        <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 transition-shadow">
+          <p className="font-display font-semibold text-base text-navy-800 mb-4">
+            {editingId ? `Editar a ${form.name || 'alumno'}` : 'Nuevo alumno'}
           </p>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div>
-              <label className="admin-label">Matrícula</label>
-              <input
-                value={form.matricula}
-                onChange={(e) => setForm({ ...form, matricula: e.target.value })}
-                className="admin-input"
-                required
-              />
-            </div>
-            <div>
-              <label className="admin-label">Nombre completo</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="admin-input"
-                required
-              />
-            </div>
-            <div>
-              <label className="admin-label">Plantel</label>
-              <select
-                value={form.schoolId}
-                onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
-                className="admin-select"
-                required
-              >
-                <option value="">Selecciona…</option>
-                {schools.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="admin-label">Ruta (opcional por ahora)</label>
-              <select
-                value={form.routeId}
-                onChange={(e) => setForm({ ...form, routeId: e.target.value })}
-                className="admin-select"
-              >
-                <option value="">Sin asignar</option>
-                {routes.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="admin-label">Domicilio / punto de recolección</label>
-              <input
-                value={form.address}
-                onChange={(e) => setForm({ ...form, address: e.target.value })}
-                className="admin-input"
-              />
-            </div>
-            <div>
-              <label className="admin-label">Contacto del padre/madre (opcional)</label>
-              <input
-                value={form.parentContact}
-                onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
-                placeholder="10 dígitos, para el botón de llamada del chofer"
-                className="admin-input"
-              />
-            </div>
-
-            <div className="border-t border-navy-100 pt-3">
-              <label className="admin-label">Servicio de transporte</label>
-              <select
-                value={form.serviceType}
-                onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
-                className="admin-select"
-              >
-                {Object.entries(SERVICE_TYPES).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="admin-label">Calendario</label>
-              <select
-                value={form.scheduleType}
-                onChange={(e) => handleScheduleTypeChange(e.target.value)}
-                className="admin-select"
-              >
-                {Object.entries(SCHEDULE_TYPES).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-            </div>
-
-            {form.scheduleType === 'dias_fijos' && (
-              <div>
-                <label className="admin-label">Días que toma el servicio</label>
-                <div className="flex gap-1.5 flex-wrap">
-                  {WEEKDAYS.map((d) => (
-                    <button
-                      key={d.value}
-                      type="button"
-                      onClick={() => toggleDay(d.value)}
-                      className={
-                        form.activeDays.includes(d.value)
-                          ? 'badge cursor-pointer'
-                          : 'badge cursor-pointer opacity-40'
-                      }
-                    >
-                      {d.label}
-                    </button>
-                  ))}
+              <SectionLabel icon={User}>Datos del alumno</SectionLabel>
+              <div className="space-y-3">
+                <div>
+                  <label className="admin-label">Matrícula</label>
+                  <input
+                    value={form.matricula}
+                    onChange={(e) => setForm({ ...form, matricula: e.target.value })}
+                    className="admin-input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="admin-label">Nombre completo</label>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="admin-input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="admin-label">Plantel</label>
+                  <select
+                    value={form.schoolId}
+                    onChange={(e) => setForm({ ...form, schoolId: e.target.value })}
+                    className="admin-select"
+                    required
+                  >
+                    <option value="">Selecciona…</option>
+                    {schools.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="admin-label">Ruta (opcional por ahora)</label>
+                  <select
+                    value={form.routeId}
+                    onChange={(e) => setForm({ ...form, routeId: e.target.value })}
+                    className="admin-select"
+                  >
+                    <option value="">Sin asignar</option>
+                    {routes.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
+            </div>
 
-            {form.scheduleType === 'eventual' && (
-              <div>
-                <label className="admin-label">Fechas en que toma el servicio</label>
-                <div className="flex gap-2">
+            <div className="border-t border-navy-100 pt-4">
+              <SectionLabel icon={MapPin}>Domicilio y contacto</SectionLabel>
+              <div className="space-y-3">
+                <div>
+                  <label className="admin-label">Domicilio / punto de recolección</label>
                   <input
-                    type="date"
-                    value={newEventDate}
-                    onChange={(e) => setNewEventDate(e.target.value)}
-                    className="admin-input flex-1"
+                    value={form.address}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
+                    className="admin-input"
                   />
-                  <button type="button" onClick={addEventDate} className="btn-admin-ghost">
-                    Agregar
-                  </button>
                 </div>
-                {form.eventDates.length > 0 && (
-                  <div className="flex gap-1.5 flex-wrap mt-2">
-                    {form.eventDates.map((date) => (
-                      <span key={date} className="badge inline-flex items-center gap-1">
-                        {date}
-                        <X size={12} className="cursor-pointer" onClick={() => removeEventDate(date)} />
-                      </span>
+                <div>
+                  <label className="admin-label">Contacto del padre/madre (opcional)</label>
+                  <input
+                    value={form.parentContact}
+                    onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
+                    placeholder="10 dígitos, para el botón de llamada del chofer"
+                    className="admin-input"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-navy-100 pt-4">
+              <SectionLabel icon={Bus}>Servicio y calendario</SectionLabel>
+              <div className="space-y-3">
+                <div>
+                  <label className="admin-label">Servicio de transporte</label>
+                  <select
+                    value={form.serviceType}
+                    onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
+                    className="admin-select"
+                  >
+                    {Object.entries(SERVICE_TYPES).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
                     ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="admin-label">Calendario</label>
+                  <select
+                    value={form.scheduleType}
+                    onChange={(e) => handleScheduleTypeChange(e.target.value)}
+                    className="admin-select"
+                  >
+                    {Object.entries(SCHEDULE_TYPES).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {form.scheduleType === 'dias_fijos' && (
+                  <div className="cascade-item">
+                    <label className="admin-label">Días que toma el servicio</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {WEEKDAYS.map((d) => (
+                        <button
+                          key={d.value}
+                          type="button"
+                          onClick={() => toggleDay(d.value)}
+                          className={
+                            form.activeDays.includes(d.value)
+                              ? 'badge cursor-pointer transition-transform active:scale-95'
+                              : 'badge cursor-pointer opacity-40 transition-transform active:scale-95'
+                          }
+                        >
+                          {d.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {form.scheduleType === 'eventual' && (
+                  <div className="cascade-item">
+                    <label className="admin-label">Fechas en que toma el servicio</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={newEventDate}
+                        onChange={(e) => setNewEventDate(e.target.value)}
+                        className="admin-input flex-1"
+                      />
+                      <button type="button" onClick={addEventDate} className="btn-admin-ghost">
+                        Agregar
+                      </button>
+                    </div>
+                    {form.eventDates.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap mt-2">
+                        {form.eventDates.map((date) => (
+                          <span key={date} className="badge inline-flex items-center gap-1 cascade-item">
+                            {date}
+                            <X size={12} className="cursor-pointer" onClick={() => removeEventDate(date)} />
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-
-            <div className="border-t border-navy-100 pt-3">
-              <label className="admin-label">Cobro (para caja)</label>
-              <select
-                value={form.billingMode}
-                onChange={(e) => setForm({ ...form, billingMode: e.target.value })}
-                className="admin-select"
-              >
-                {Object.entries(BILLING_MODES).map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
             </div>
 
-            <div>
-              <label className="admin-label">
-                {form.billingMode === 'por_evento' ? 'Monto por cada vez que se usa' : 'Monto'}
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.billingAmount}
-                onChange={(e) => setForm({ ...form, billingAmount: e.target.value })}
-                placeholder="$0.00"
-                className="admin-input"
-              />
-            </div>
+            <div className="border-t border-navy-100 pt-4">
+              <SectionLabel icon={CircleDollarSign}>Cobro y pago</SectionLabel>
+              <div className="space-y-3">
+                <div>
+                  <label className="admin-label">Cobro (para caja)</label>
+                  <select
+                    value={form.billingMode}
+                    onChange={(e) => setForm({ ...form, billingMode: e.target.value })}
+                    className="admin-select"
+                  >
+                    {Object.entries(BILLING_MODES).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
 
-            <div>
-              <label className="admin-label">Estatus de pago</label>
-              <select
-                value={form.paymentStatus}
-                onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
-                className="admin-select"
-              >
-                {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-              <p className="text-xs text-navy-400 mt-1">
-                Lo actualiza la administración a mano tras registrar el cobro; es solo para control interno.
-              </p>
+                <div>
+                  <label className="admin-label">
+                    {form.billingMode === 'por_evento' ? 'Monto por cada vez que se usa' : 'Monto'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.billingAmount}
+                    onChange={(e) => setForm({ ...form, billingAmount: e.target.value })}
+                    placeholder="$0.00"
+                    className="admin-input"
+                  />
+                </div>
+
+                <div>
+                  <label className="admin-label">Estatus de pago</label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={form.paymentStatus}
+                      onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
+                      className="admin-select flex-1"
+                    >
+                      {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                    <span className={PAYMENT_STATUSES[form.paymentStatus].badgeClass}>●</span>
+                  </div>
+                  <p className="text-xs text-navy-400 mt-1">
+                    Lo actualiza la administración a mano tras registrar el cobro; es solo para control interno.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-5">
             <button type="submit" className="btn-admin-primary flex-1">
               {editingId ? 'Guardar cambios' : 'Agregar alumno'}
             </button>
@@ -428,55 +461,57 @@ export default function StudentsPage() {
             </select>
           </div>
 
-          <div className="admin-card p-0 overflow-x-auto">
-            <table className="table-admin">
-              <thead>
-                <tr>
-                  <th className="pl-5">Matrícula</th>
-                  <th>Nombre</th>
-                  <th>Plantel</th>
-                  <th>Ruta</th>
-                  <th>Servicio</th>
-                  <th>Pago</th>
-                  <th className="pr-5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((s) => (
-                  <tr key={s.id}>
-                    <td className="pl-5 font-medium text-navy-700">{s.matricula}</td>
-                    <td>{s.name}</td>
-                    <td className="text-navy-500">{schoolName(s.schoolId)}</td>
-                    <td>
-                      {routeName(s.routeId) ? (
-                        <span className="badge">{routeName(s.routeId)}</span>
-                      ) : (
-                        <span className="text-navy-400">Sin ruta</span>
-                      )}
-                    </td>
-                    <td className="text-navy-500 text-xs">{scheduleSummary(s)}</td>
-                    <td>
-                      <select
-                        value={s.paymentStatus || 'al_corriente'}
-                        onChange={(e) => handlePaymentStatusChange(s.id, e.target.value)}
-                        className={`text-xs rounded-md border-0 py-1 pr-6 font-medium cursor-pointer focus:ring-2 focus:ring-signal-yellow/40 ${PAYMENT_STATUSES[s.paymentStatus || 'al_corriente'].badgeClass}`}
-                      >
-                        {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="pr-5 text-right whitespace-nowrap">
-                      <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
-                      <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
-                    </td>
+          <div className="admin-card p-0 overflow-hidden">
+            <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+              <table className="table-admin">
+                <thead className="sticky top-0 z-10 bg-white shadow-sm">
+                  <tr>
+                    <th className="pl-5">Matrícula</th>
+                    <th>Nombre</th>
+                    <th>Plantel</th>
+                    <th>Ruta</th>
+                    <th>Servicio</th>
+                    <th>Pago</th>
+                    <th className="pr-5"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {filtered.length === 0 && (
-              <p className="text-navy-400 text-sm py-6 text-center">No hay alumnos que coincidan.</p>
-            )}
+                </thead>
+                <tbody>
+                  {filtered.map((s, i) => (
+                    <tr key={s.id} className="cascade-item" style={cascadeStyle(i)}>
+                      <td className="pl-5 font-medium text-navy-700">{s.matricula}</td>
+                      <td>{s.name}</td>
+                      <td className="text-navy-500">{schoolName(s.schoolId)}</td>
+                      <td>
+                        {routeName(s.routeId) ? (
+                          <span className="badge">{routeName(s.routeId)}</span>
+                        ) : (
+                          <span className="text-navy-400">Sin ruta</span>
+                        )}
+                      </td>
+                      <td className="text-navy-500 text-xs">{scheduleSummary(s)}</td>
+                      <td>
+                        <select
+                          value={s.paymentStatus || 'al_corriente'}
+                          onChange={(e) => handlePaymentStatusChange(s.id, e.target.value)}
+                          className={`text-xs rounded-md border-0 py-1 pr-6 font-medium cursor-pointer focus:ring-2 focus:ring-signal-yellow/40 ${PAYMENT_STATUSES[s.paymentStatus || 'al_corriente'].badgeClass}`}
+                        >
+                          {Object.entries(PAYMENT_STATUSES).map(([value, { label }]) => (
+                            <option key={value} value={value}>{label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="pr-5 text-right whitespace-nowrap">
+                        <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
+                        <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filtered.length === 0 && (
+                <p className="text-navy-400 text-sm py-6 text-center">No hay alumnos que coincidan.</p>
+              )}
+            </div>
           </div>
         </div>
       </div>
