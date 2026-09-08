@@ -8,6 +8,8 @@ import {
   Truck,
   Route as RouteIcon,
   FileBarChart,
+  LifeBuoy,
+  Wallet,
   Menu,
   X,
 } from 'lucide-react';
@@ -21,6 +23,8 @@ const links = [
   { to: '/admin/unidades', label: 'Unidades', icon: Truck },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon },
   { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart },
+  { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy },
+  { to: '/admin/caja', label: 'Caja', icon: Wallet },
 ];
 
 export default function AdminLayout() {
