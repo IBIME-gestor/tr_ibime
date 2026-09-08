@@ -21,6 +21,8 @@ import {
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import { getFarewellMessage } from '../../utils/greetings';
 import StopCard from '../../components/StopCard';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 // No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
 // nada para un ETA aproximado). Con una actualización cada 15s es más que
@@ -288,7 +290,7 @@ export default function TripRunner() {
   }
 
   if (!tripLoaded || !route) {
-    return <p className="text-center text-navy-400 mt-10">Preparando recorrido…</p>;
+    return <LoadingOverlay show label="Preparando recorrido…" />;
   }
 
   // --------------------------------------------------------------
@@ -298,7 +300,7 @@ export default function TripRunner() {
   if (!trip) {
     if (!isDriver) {
       return (
-        <div className="card text-center mt-10">
+        <div className="card text-center mt-10 cascade-item">
           <p className="text-3xl mb-2">⏳</p>
           <p className="font-display font-semibold text-lg mb-1">Esperando al chofer</p>
           <p className="text-navy-400 text-sm">
@@ -309,7 +311,8 @@ export default function TripRunner() {
       );
     }
     return (
-      <div className="card mt-6">
+      <div className="card mt-6 cascade-item">
+        <LoadingOverlay show={startingTrip} label="Iniciando recorrido…" />
         <p className="text-3xl mb-2 text-center">🚚</p>
         <h1 className="font-display font-bold text-lg text-center mb-1">
           {config.title} · {route.name}
@@ -342,7 +345,9 @@ export default function TripRunner() {
 
   return (
     <div className="space-y-4 pb-10">
-      <div>
+      <LoadingOverlay show={busy} label="Guardando…" />
+      <LoadingOverlay show={finishing} label="Cerrando recorrido…" />
+      <div className="cascade-item">
         <p className="text-navy-400 text-sm">{config.title}</p>
         <h1 className="text-xl font-display font-bold text-navy-900">
           {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
@@ -467,7 +472,7 @@ export default function TripRunner() {
               {config.bulkBoardLabel}
             </button>
           ) : (
-            pendingBoarding.map((stop) => (
+            pendingBoarding.map((stop, i) => (
               <StopCard
                 key={stop.id}
                 stop={stop}
@@ -477,6 +482,8 @@ export default function TripRunner() {
                 disabled={busy}
                 nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
+                className="cascade-item"
+                style={cascadeStyle(i, 40)}
               />
             ))
           )}
@@ -494,7 +501,7 @@ export default function TripRunner() {
               {config.bulkDeliverLabel}
             </button>
           ) : (
-            boardedWaitingDelivery.map((stop) => (
+            boardedWaitingDelivery.map((stop, i) => (
               <StopCard
                 key={stop.id}
                 stop={stop}
@@ -504,6 +511,8 @@ export default function TripRunner() {
                 disabled={busy}
                 nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
+                className="cascade-item"
+                style={cascadeStyle(i, 40)}
               />
             ))
           )}
@@ -513,8 +522,8 @@ export default function TripRunner() {
       {/* Lista completa de referencia (colapsable visualmente por estado) */}
       <div>
         <p className="text-sm font-medium text-navy-600 mb-2 mt-4">Todos los alumnos</p>
-        {stops.map((stop) => (
-          <StopCard key={stop.id} stop={stop} disabled />
+        {stops.map((stop, i) => (
+          <StopCard key={stop.id} stop={stop} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
         ))}
       </div>
 
