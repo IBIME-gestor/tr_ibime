@@ -8,6 +8,8 @@ import {
   markStopAbsent,
   completeTrip,
 } from '../../firebase/trips';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 const STATUS_LABEL = {
   pending: 'Pendiente',
@@ -47,6 +49,7 @@ export default function ActiveTrips() {
 
   return (
     <div className="max-w-3xl">
+      <LoadingOverlay show={loading} label="Consultando…" />
       <div className="flex items-center justify-between gap-2 mb-1">
         <h1 className="admin-h1">Recorridos en curso</h1>
         <button
@@ -63,16 +66,14 @@ export default function ActiveTrips() {
         ruta. Desde aquí puedes revisar qué alcanzaron a marcar y cerrar el recorrido tú mismo.
       </p>
 
-      {loading && <p className="text-navy-400 text-sm">Consultando…</p>}
-
       {!loading && trips.length === 0 && (
-        <div className="card text-center text-sm text-navy-400">
+        <div className="card text-center text-sm text-navy-400 cascade-item">
           No hay recorridos atorados en curso ahora mismo. 🎉
         </div>
       )}
 
       <div className="space-y-3">
-        {trips.map((trip) => (
+        {trips.map((trip, i) => (
           <TripRescueCard
             key={trip.id}
             trip={trip}
@@ -85,6 +86,7 @@ export default function ActiveTrips() {
             isOpen={openTripId === trip.id}
             onToggle={() => setOpenTripId(openTripId === trip.id ? null : trip.id)}
             onClosed={load}
+            delay={i}
           />
         ))}
       </div>
@@ -92,7 +94,7 @@ export default function ActiveTrips() {
   );
 }
 
-function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed }) {
+function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed, delay = 0 }) {
   const [stops, setStops] = useState(null);
   const [loadingStops, setLoadingStops] = useState(false);
   const [kmFinal, setKmFinal] = useState('');
@@ -138,7 +140,8 @@ function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed 
   const pendingCount = stops?.filter((s) => s.status === 'pending').length ?? null;
 
   return (
-    <div className="card">
+    <div className="card cascade-item" style={cascadeStyle(delay, 60)}>
+      <LoadingOverlay show={closing} label="Cerrando recorrido…" />
       <button onClick={openAndLoad} className="w-full flex items-center justify-between gap-3 text-left">
         <div className="min-w-0">
           <p className="font-medium truncate">
@@ -149,17 +152,23 @@ function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed 
             {pendingCount != null && ` · ${pendingCount} sin marcar`}
           </p>
         </div>
-        <span className="shrink-0 text-navy-400">{isOpen ? '▲' : '▼'}</span>
+        <span className="shrink-0 text-navy-400 transition-transform" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }}>
+          ▼
+        </span>
       </button>
 
       {isOpen && (
-        <div className="mt-4 pt-4 border-t border-navy-100 space-y-4">
+        <div className="mt-4 pt-4 border-t border-navy-100 space-y-4 cascade-item">
           {loadingStops && <p className="text-sm text-navy-400">Cargando alumnos…</p>}
 
           {stops && (
             <div className="divide-y divide-navy-50 max-h-80 overflow-y-auto">
-              {stops.map((s) => (
-                <div key={s.id} className="py-2 flex flex-wrap items-center justify-between gap-2">
+              {stops.map((s, i) => (
+                <div
+                  key={s.id}
+                  className="py-2 flex flex-wrap items-center justify-between gap-2 cascade-item"
+                  style={cascadeStyle(i, 20, 260)}
+                >
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{s.name}</p>
                     <p className="text-xs text-navy-400">{STATUS_LABEL[s.status] || s.status}</p>
@@ -167,13 +176,13 @@ function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed 
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       onClick={() => handleMark(s.id, trip.shift === 'morning' ? 'boarded' : 'delivered')}
-                      className="text-xs px-2 py-1 rounded-md border border-go text-go"
+                      className="text-xs px-2 py-1.5 rounded-md border border-go text-go min-h-[32px]"
                     >
                       {trip.shift === 'morning' ? 'Marcar abordó' : 'Marcar bajó'}
                     </button>
                     <button
                       onClick={() => handleMark(s.id, 'absent')}
-                      className="text-xs px-2 py-1 rounded-md border border-stop text-stop"
+                      className="text-xs px-2 py-1.5 rounded-md border border-stop text-stop min-h-[32px]"
                     >
                       No asistió
                     </button>
@@ -191,7 +200,7 @@ function TripRescueCard({ trip, route, operatorName, isOpen, onToggle, onClosed 
                 kilometraje inicial ({trip.kmInicial ?? '—'}) para no perder el registro.
               </span>
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="number"
                 value={kmFinal}
