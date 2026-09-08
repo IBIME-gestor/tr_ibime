@@ -205,6 +205,24 @@ export function subscribeTripStops(tripId, callback) {
   });
 }
 
+/**
+ * Recorridos que quedaron "en curso" sin cerrarse — típicamente porque al
+ * operador se le acabaron los datos o se le apagó el celular a media
+ * ruta. Consulta puntual (no listener), para que el admin la use solo
+ * cuando la necesite, desde /admin/recorridos-activos.
+ */
+export async function listActiveTrips() {
+  const snap = await getDocs(query(collection(db, 'trips'), where('status', '==', 'in_progress')));
+  const trips = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  trips.sort((a, b) => (b.startedAt?.toMillis?.() || 0) - (a.startedAt?.toMillis?.() || 0));
+  return trips;
+}
+
+export async function listTripsByDate(date) {
+  const snap = await getDocs(query(collection(db, 'trips'), where('date', '==', date)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 export async function getTrip(tripId) {
   const snap = await getDoc(doc(db, 'trips', tripId));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
@@ -390,7 +408,7 @@ async function updateAvgStopMinutes(trip, stops) {
  * kilometraje final: sin él no se marca como completado ni se genera
  * el mapa final del recorrido (Reportes) para ese día.
  */
-export async function completeTrip(tripId, trip, kmFinal) {
+export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false) {
   if (kmFinal == null || kmFinal === '' || Number.isNaN(Number(kmFinal))) {
     throw new Error('Se requiere el kilometraje final para cerrar el recorrido.');
   }
@@ -422,6 +440,10 @@ export async function completeTrip(tripId, trip, kmFinal) {
     studentsTotal: stops.length,
     studentsAbsent: stops.filter((s) => s.status === 'absent').length,
     studentsResolved: stops.filter((s) => s.status !== 'pending' && s.status !== 'absent').length,
+    // Si lo cerró el admin (operador se quedó sin datos, etc.) queda
+    // marcado para que quede claro en reportes que no lo cerró el propio
+    // operador desde el camión.
+    ...(closedByAdmin ? { closedByAdmin: true, closedByAdminAt: serverTimestamp() } : {}),
   });
   await setDoc(
     doc(db, 'publicTracking', tripId),
