@@ -4,6 +4,8 @@ import { Routes, Schools, Drivers, Units, Students } from '../../firebase/servic
 import { getReferenceTrip } from '../../firebase/trips';
 import { resolveStudentLocation, resolveSchoolLocation } from '../../firebase/geocoding';
 import { optimizeStopOrder } from '../../utils/routeOptimizer';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 const emptyForm = { name: '', schoolId: '', driverId: '', nannyId: '', unitId: '' };
 
@@ -139,8 +141,8 @@ export default function RoutesPage() {
       </form>
 
       <div className="space-y-2.5">
-        {routes.map((r) => (
-          <div key={r.id} className="admin-card">
+        {routes.map((r, i) => (
+          <div key={r.id} className="admin-card cascade-item" style={cascadeStyle(i, 60)}>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <p className="font-display font-semibold text-navy-800">{r.name}</p>
@@ -204,8 +206,8 @@ function RouteRoster({ route, allStudents, school }) {
             En esta ruta ({assigned.length})
           </p>
           <div className="border border-navy-100 rounded-lg divide-y divide-navy-50 max-h-64 overflow-y-auto">
-            {assigned.map((s) => (
-              <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
+            {assigned.map((s, i) => (
+              <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm cascade-item" style={cascadeStyle(i, 20, 200)}>
                 <span>{s.name} <span className="text-navy-400">({s.matricula})</span></span>
                 <button onClick={() => unassign(s.id)} className="link-danger">
                   Quitar
@@ -222,8 +224,8 @@ function RouteRoster({ route, allStudents, school }) {
             Alumnos del plantel sin esta ruta ({unassignedSameSchool.length})
           </p>
           <div className="border border-navy-100 rounded-lg divide-y divide-navy-50 max-h-64 overflow-y-auto">
-            {unassignedSameSchool.map((s) => (
-              <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm">
+            {unassignedSameSchool.map((s, i) => (
+              <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm cascade-item" style={cascadeStyle(i, 20, 200)}>
                 <span>{s.name} <span className="text-navy-400">({s.matricula})</span></span>
                 <button onClick={() => assign(s.id)} className="text-go text-xs font-medium underline underline-offset-2">
                   Agregar
@@ -322,6 +324,7 @@ function RouteOptimizer({ route, assigned, school }) {
 
   return (
     <div className="border-t border-navy-100 pt-4">
+      <LoadingOverlay show={status === 'working'} label={progress || 'Calculando…'} />
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <p className="text-xs font-medium text-navy-400">Optimizar orden de paradas (gratis, sin API de pago)</p>
         <div className="flex gap-2 items-center">
@@ -376,4 +379,3 @@ function RouteOptimizer({ route, assigned, school }) {
     </div>
   );
 }
-
