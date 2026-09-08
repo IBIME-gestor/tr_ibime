@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { School, Users, Contact, Truck, Route as RouteIcon } from 'lucide-react';
 import { Schools, Students, Drivers, Units, Routes } from '../../firebase/services';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 export default function Dashboard() {
   const [counts, setCounts] = useState(null);
@@ -36,13 +38,15 @@ export default function Dashboard() {
 
   return (
     <div>
+      <LoadingOverlay show={!counts} label="Cargando resumen…" />
       <h1 className="admin-h1 mb-5">Resumen</h1>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {cards.map((c) => (
+        {cards.map((c, i) => (
           <Link
             key={c.label}
             to={c.to}
-            className="admin-card hover:border-navy-400 transition-colors"
+            className="admin-card hover:border-navy-400 hover:shadow-panel transition-all cascade-item"
+            style={cascadeStyle(i, 70)}
           >
             <c.icon size={18} className="text-navy-400 mb-3" />
             <p className="text-2xl font-display font-bold text-navy-800">{c.value ?? '—'}</p>
@@ -51,7 +55,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="admin-card mt-5 max-w-2xl">
+      <div className="admin-card mt-5 max-w-2xl cascade-item" style={cascadeStyle(cards.length, 70)}>
         <p className="font-display font-semibold text-sm text-navy-800 mb-2">Primeros pasos</p>
         <ol className="list-decimal list-inside text-sm text-navy-600 space-y-1.5">
           <li>Da de alta los planteles (colegios).</li>
