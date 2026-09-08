@@ -4,6 +4,8 @@ import { Sun, Sunset, History } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes } from '../../firebase/services';
 import { getTimeGreeting, getFirstName } from '../../utils/greetings';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 export default function RouteHome() {
   const { profile } = useAuth();
@@ -27,11 +29,11 @@ export default function RouteHome() {
     load();
   }, [profile]);
 
-  if (loading) return <p className="text-center text-navy-400 mt-10">Cargando tu ruta…</p>;
+  if (loading) return <LoadingOverlay show label="Cargando tu ruta…" />;
 
   if (routes.length === 0) {
     return (
-      <div className="card text-center mt-10">
+      <div className="card text-center mt-10 cascade-item">
         <p className="font-display font-semibold text-lg mb-1">Sin ruta asignada</p>
         <p className="text-navy-400 text-sm">
           Pide al administrador que te asigne una ruta, plantel y unidad.
@@ -48,7 +50,7 @@ export default function RouteHome() {
 
   return (
     <div className="space-y-5">
-      <div className="bg-navy-800 text-white rounded-2xl px-5 py-4">
+      <div className="bg-navy-800 text-white rounded-2xl px-5 py-4 cascade-item">
         <p className="text-navy-300 text-xs capitalize">{today}</p>
         <h1 className="text-xl font-display font-bold">
           {getTimeGreeting()}, {getFirstName(profile?.name)} 👋
@@ -56,18 +58,18 @@ export default function RouteHome() {
         <p className="text-navy-200 text-sm mt-0.5">¿Qué recorrido vas a hacer?</p>
       </div>
 
-      {routes.map((route) => (
-        <div key={route.id} className="card">
+      {routes.map((route, i) => (
+        <div key={route.id} className="card cascade-item" style={cascadeStyle(i + 1, 60)}>
           <p className="font-display font-semibold text-lg mb-3">{route.name}</p>
           <div className="grid grid-cols-1 gap-2.5">
             <button
-              className="btn-go flex items-center justify-center gap-2"
+              className="btn-go flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
               onClick={() => navigate(`/chofer/recorrido/${route.id}/morning`)}
             >
               <Sun size={20} /> Recorrido de ida (mañana)
             </button>
             <button
-              className="btn-signal flex items-center justify-center gap-2"
+              className="btn-signal flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
               onClick={() => navigate(`/chofer/recorrido/${route.id}/afternoon`)}
             >
               <Sunset size={20} /> Recorrido de vuelta (tarde)
