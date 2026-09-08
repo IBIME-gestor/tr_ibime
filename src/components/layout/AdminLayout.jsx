@@ -32,7 +32,7 @@ export default function AdminLayout() {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-navy-50">
+    <div className="min-h-screen flex flex-col md:flex-row bg-navy-50 overflow-x-hidden">
       {/* Barra superior solo en móvil/tablet */}
       <div className="md:hidden bg-navy-800 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-2">
@@ -92,7 +92,7 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 p-4 md:p-8 min-h-screen">
+      <main className="flex-1 min-w-0 p-4 md:p-8 min-h-screen">
         <Outlet />
       </main>
     </div>
