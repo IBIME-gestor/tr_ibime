@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Drivers, Schools } from '../../firebase/services';
+import { cascadeStyle } from '../../utils/cascade';
 
 const emptyForm = { name: '', phone: '', role: 'driver', schoolId: '', email: '' };
 
@@ -44,13 +45,13 @@ export default function DriversPage() {
       <p className="text-sm text-navy-400 mb-5">{drivers.length} personas dadas de alta</p>
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
-        <div className="space-y-4 lg:sticky lg:top-6">
+        <div className="space-y-4 lg:sticky lg:top-6 cascade-item">
           <div className="bg-signal-yellow/20 border border-signal-yellow rounded-lg px-4 py-3 text-sm text-navy-800">
             No necesitas crear ninguna contraseña: cada persona entra sola con su cuenta de Google
             institucional. Solo asegúrate de que el correo coincida exactamente.
           </div>
 
-          <form onSubmit={handleSubmit} className="admin-card">
+          <form onSubmit={handleSubmit} className="admin-card shadow-panel">
             <p className="font-display font-semibold text-sm text-navy-800 mb-3">
               {editingId ? 'Editar' : 'Nuevo chofer / nanny'}
             </p>
@@ -124,37 +125,39 @@ export default function DriversPage() {
           </form>
         </div>
 
-        <div className="admin-card p-0 overflow-hidden">
-          <table className="table-admin">
-            <thead>
-              <tr>
-                <th className="pl-5">Nombre</th>
-                <th>Rol</th>
-                <th>Plantel</th>
-                <th>Correo</th>
-                <th className="pr-5"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {drivers.map((d) => (
-                <tr key={d.id}>
-                  <td className="pl-5 font-medium text-navy-700">{d.name}</td>
-                  <td>
-                    <span className="badge">{d.role === 'nanny' ? 'Nanny' : 'Chofer'}</span>
-                  </td>
-                  <td className="text-navy-500">{schoolName(d.schoolId)}</td>
-                  <td className="text-navy-500">{d.email}</td>
-                  <td className="pr-5 text-right whitespace-nowrap">
-                    <button onClick={() => handleEdit(d)} className="link-action mr-3">Editar</button>
-                    <button onClick={() => handleDelete(d.id)} className="link-danger">Eliminar</button>
-                  </td>
+        <div className="admin-card p-0 overflow-hidden cascade-item" style={cascadeStyle(1, 60)}>
+          <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
+            <table className="table-admin">
+              <thead className="sticky top-0 z-10 bg-white shadow-sm">
+                <tr>
+                  <th className="pl-5">Nombre</th>
+                  <th>Rol</th>
+                  <th>Plantel</th>
+                  <th>Correo</th>
+                  <th className="pr-5"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {drivers.length === 0 && (
-            <p className="text-navy-400 text-sm py-6 text-center">Sin choferes registrados.</p>
-          )}
+              </thead>
+              <tbody>
+                {drivers.map((d, i) => (
+                  <tr key={d.id} className="cascade-item" style={cascadeStyle(i, 25)}>
+                    <td className="pl-5 font-medium text-navy-700">{d.name}</td>
+                    <td>
+                      <span className="badge">{d.role === 'nanny' ? 'Nanny' : 'Chofer'}</span>
+                    </td>
+                    <td className="text-navy-500">{schoolName(d.schoolId)}</td>
+                    <td className="text-navy-500">{d.email}</td>
+                    <td className="pr-5 text-right whitespace-nowrap">
+                      <button onClick={() => handleEdit(d)} className="link-action mr-3">Editar</button>
+                      <button onClick={() => handleDelete(d.id)} className="link-danger">Eliminar</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {drivers.length === 0 && (
+              <p className="text-navy-400 text-sm py-6 text-center">Sin choferes registrados.</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
