@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Students, Routes } from '../../firebase/services';
 import { listTripsByDate, getTripStopsOnce, todayString } from '../../firebase/trips';
 import { PAYMENT_STATUSES } from './Students';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 /**
  * Caja. A propósito es de consulta puntual (botón "Consultar"), no un
@@ -63,6 +65,7 @@ export default function Cashier() {
 
   return (
     <div className="max-w-3xl">
+      <LoadingOverlay show={loading} label="Consultando…" />
       <h1 className="admin-h1 mb-1">Caja</h1>
       <p className="text-sm text-navy-400 mb-5">
         Cruza qué alumnos tomaron el servicio ese día contra su estatus de pago, para validar
@@ -99,7 +102,7 @@ export default function Cashier() {
       </div>
 
       {rows && (
-        <div className="overflow-x-auto border border-navy-100 rounded-xl">
+        <div className="overflow-x-auto border border-navy-100 rounded-xl cascade-item">
           <table className="w-full text-sm">
             <thead className="bg-navy-50 text-left text-xs text-navy-400">
               <tr>
@@ -110,8 +113,8 @@ export default function Cashier() {
               </tr>
             </thead>
             <tbody className="divide-y divide-navy-50">
-              {visible.map((r) => (
-                <tr key={r.studentId}>
+              {visible.map((r, i) => (
+                <tr key={r.studentId} className="cascade-item" style={cascadeStyle(i)}>
                   <td className="p-2">
                     <p className="font-medium">{r.name}</p>
                     <p className="text-xs text-navy-400">{r.matricula}</p>
