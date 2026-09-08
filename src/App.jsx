@@ -14,6 +14,8 @@ import DriversAdmin from './pages/admin/Drivers';
 import Units from './pages/admin/Units';
 import RoutesAdmin from './pages/admin/Routes';
 import Reports from './pages/admin/Reports';
+import ActiveTrips from './pages/admin/ActiveTrips';
+import Cashier from './pages/admin/Cashier';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -45,6 +47,8 @@ export default function App() {
         <Route path="unidades" element={<Units />} />
         <Route path="rutas" element={<RoutesAdmin />} />
         <Route path="reportes" element={<Reports />} />
+        <Route path="recorridos-activos" element={<ActiveTrips />} />
+        <Route path="caja" element={<Cashier />} />
       </Route>
 
       <Route
