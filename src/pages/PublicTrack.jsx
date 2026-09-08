@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES } from '../firebase/trips';
+import LoadingOverlay from '../components/LoadingOverlay';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -97,13 +98,14 @@ export default function PublicTrack() {
 
   return (
     <div className="min-h-screen bg-navy-50 flex justify-center px-4 py-8">
+      <LoadingOverlay show={searching} label="Buscando…" />
       <div className="w-full max-w-md space-y-4">
-        <div className="text-center">
+        <div className="text-center cascade-item">
           <h1 className="text-xl font-display font-bold text-navy-900">Seguimiento del transporte</h1>
           <p className="text-navy-400 text-sm">Consulta con la matrícula de tu hijo(a)</p>
         </div>
 
-        <form onSubmit={handleSearch} className="card space-y-3">
+        <form onSubmit={handleSearch} className="card space-y-3 cascade-item" style={{ animationDelay: '70ms' }}>
           <input
             value={matricula}
             onChange={(e) => setMatricula(e.target.value)}
@@ -142,14 +144,14 @@ export default function PublicTrack() {
         </form>
 
         {studentIndex && !tracking && (
-          <div className="card text-center text-sm text-navy-400">
+          <div className="card text-center text-sm text-navy-400 cascade-item">
             Aún no ha iniciado el recorrido de {shift === 'morning' ? 'ida' : 'vuelta'} de hoy para{' '}
             {studentIndex.name}.
           </div>
         )}
 
         {tracking?.alert && (
-          <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3">
+          <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3 cascade-item">
             <p className="font-display font-semibold text-sm text-navy-800">
               {TRIP_ALERT_TYPES[tracking.alert.type]?.icon} {TRIP_ALERT_TYPES[tracking.alert.type]?.label}{' '}
               reportado por el transporte
@@ -161,7 +163,7 @@ export default function PublicTrack() {
         )}
 
         {tracking && myStop && (
-          <div className="card space-y-3">
+          <div className="card space-y-3 cascade-item">
             <div>
               <p className="font-display font-semibold text-lg">{studentIndex.name}</p>
               <p className="text-sm text-navy-400">
@@ -221,7 +223,7 @@ export default function PublicTrack() {
         )}
 
         {tracking && !myStop && (
-          <div className="card text-center text-sm text-stop">
+          <div className="card text-center text-sm text-stop cascade-item">
             Tu hijo(a) no aparece en el recorrido de hoy en este turno. Verifica la matrícula o el
             turno seleccionado.
           </div>
