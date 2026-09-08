@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { getTrip, getTripStopsOnce, todayString } from '../../firebase/trips';
 import { Students } from '../../firebase/services';
 import { getFirstName, getFarewellMessage } from '../../utils/greetings';
+import LoadingOverlay from '../../components/LoadingOverlay';
+import { cascadeStyle } from '../../utils/cascade';
 
 function fmtTime(ts) {
   if (!ts?.toDate) return '—';
@@ -40,7 +42,7 @@ export default function TripSummary() {
     load();
   }, [tripId]);
 
-  if (!trip) return <p className="text-center text-navy-400 mt-10">Cargando resumen…</p>;
+  if (!trip) return <LoadingOverlay show label="Cargando resumen…" />;
 
   const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
   const timeLabel = trip.shift === 'morning' ? 'Hora de recogida' : 'Hora de bajada';
@@ -48,7 +50,7 @@ export default function TripSummary() {
 
   return (
     <div className="space-y-4 pb-10">
-      <div className="bg-navy-800 text-white rounded-2xl px-5 py-6 text-center">
+      <div className="bg-navy-800 text-white rounded-2xl px-5 py-6 text-center cascade-item">
         <p className="text-3xl mb-2">{trip.shift === 'afternoon' ? '🏡' : '🎉'}</p>
         <h1 className="text-lg font-display font-bold">
           {isToday
@@ -61,7 +63,7 @@ export default function TripSummary() {
         <p className="text-navy-400 text-xs mt-2">{trip.date}</p>
       </div>
 
-      <div className="card flex justify-around text-center text-sm">
+      <div className="card flex justify-around text-center text-sm cascade-item" style={cascadeStyle(1, 60)}>
         <div>
           <p className="text-navy-400">Km inicial</p>
           <p className="font-display font-semibold text-lg">{trip.kmInicial ?? '—'}</p>
@@ -80,9 +82,9 @@ export default function TripSummary() {
         </div>
       </div>
 
-      <div className="card divide-y divide-navy-100">
-        {stops.map((s) => (
-          <div key={s.id} className="py-2 flex items-center justify-between gap-2">
+      <div className="card divide-y divide-navy-100 cascade-item" style={cascadeStyle(2, 60)}>
+        {stops.map((s, i) => (
+          <div key={s.id} className="py-2 flex items-center justify-between gap-2 cascade-item" style={cascadeStyle(i, 20, 260)}>
             <div className="min-w-0">
               <p className="font-medium truncate">{s.name}</p>
               <p className="text-xs text-navy-400">Matrícula {s.matricula}</p>
