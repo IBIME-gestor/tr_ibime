@@ -125,3 +125,65 @@ h1, h2, h3 {
   outline: 3px solid #FFC93C;
   outline-offset: 2px;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Loader de marca: el escudo IBIME "rellenándose" de color           */
+/* ------------------------------------------------------------------ */
+.ibime-loader {
+  position: relative;
+  width: 64px;
+  height: 64px;
+}
+
+.ibime-loader::before,
+.ibime-loader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: url('/ibime-shield.png');
+  mask-image: url('/ibime-shield.png');
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+/* silueta base, tenue, siempre visible */
+.ibime-loader::before {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* capa que se va "llenando" de abajo hacia arriba, en bucle */
+.ibime-loader::after {
+  background: linear-gradient(180deg, #FFC93C 0%, #C24C3E 100%);
+  animation: ibime-fill 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes ibime-fill {
+  0% { clip-path: inset(100% 0 0 0); }
+  50% { clip-path: inset(0% 0 0 0); }
+  100% { clip-path: inset(100% 0 0 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ibime-loader::after { animation: none; clip-path: inset(20% 0 0 0); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Entradas "en cascada": listas, tarjetas y filas de tabla           */
+/* ------------------------------------------------------------------ */
+@keyframes cascade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cascade-item {
+  opacity: 0;
+  animation: cascade-in 0.35s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cascade-item { opacity: 1; animation: none; }
+}
