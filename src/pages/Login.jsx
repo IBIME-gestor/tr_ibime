@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import LoadingOverlay from '../components/LoadingOverlay';
 
 export default function Login() {
   const { loginWithGoogle, authError, loading, user, profile } = useAuth();
@@ -24,6 +25,7 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen bg-navy-800 flex items-center justify-center p-6 overflow-hidden">
+      <LoadingOverlay show={loading} label="Entrando…" />
       {/* Marca de agua de fondo */}
       <img
         src="/ibime-shield.png"
@@ -42,12 +44,16 @@ export default function Login() {
         <img
           src="/logo-ibime.png"
           alt="IBIME"
-          className="mx-auto mb-6 w-48"
+          className="mx-auto mb-6 w-48 cascade-item"
         />
-        <h1 className="text-3xl font-display font-bold text-white">Ruta Segura</h1>
-        <p className="text-navy-100 mt-1 mb-8">Transporte escolar</p>
+        <h1 className="text-3xl font-display font-bold text-white cascade-item" style={{ animationDelay: '80ms' }}>
+          Ruta Segura
+        </h1>
+        <p className="text-navy-100 mt-1 mb-8 cascade-item" style={{ animationDelay: '130ms' }}>
+          Transporte escolar
+        </p>
 
-        <div className="card">
+        <div className="card cascade-item" style={{ animationDelay: '190ms' }}>
           <p className="text-navy-600 mb-5">
             Entra con tu cuenta de Google institucional
             <span className="block font-semibold text-navy-800">@ibime.edu.mx</span>
@@ -55,7 +61,7 @@ export default function Login() {
           <button
             onClick={handleClick}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 rounded-2xl border-2 border-navy-100 px-6 py-4 font-display font-semibold text-navy-800"
+            className="w-full flex items-center justify-center gap-3 rounded-2xl border-2 border-navy-100 px-6 py-4 font-display font-semibold text-navy-800 transition-transform active:scale-[0.98] hover:border-navy-400"
           >
             <svg width="22" height="22" viewBox="0 0 48 48">
               <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l6-6C34.9 5.5 29.7 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5 44.5 35.3 44.5 24c0-1.2-.1-2.4-.3-3.5z"/>
@@ -68,12 +74,12 @@ export default function Login() {
         </div>
 
         {authError && (
-          <div className="mt-4 bg-stop-light border-2 border-stop rounded-xl p-3 text-sm text-navy-800 text-left">
+          <div className="mt-4 bg-stop-light border-2 border-stop rounded-xl p-3 text-sm text-navy-800 text-left cascade-item">
             {authError}
           </div>
         )}
 
-        <p className="text-navy-100 text-xs mt-6">
+        <p className="text-navy-100 text-xs mt-6 cascade-item" style={{ animationDelay: '240ms' }}>
           El acceso lo autoriza el administrador registrando tu correo
           institucional en la app. Si es tu primera vez y ves un error
           arriba, avísale para que lo registre.
