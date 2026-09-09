@@ -1,3 +1,6 @@
+import { ARRIVAL_WAIT_SECONDS } from '../firebase/trips';
+import { useArrivalCountdown, fmtCountdown } from '../utils/countdown';
+
 const STATUS_STYLES = {
   pending: 'bg-white border-navy-100',
   boarded: 'bg-signal-yellow/20 border-signal-yellow',
@@ -20,8 +23,23 @@ const STATUS_LABEL = {
  * El nombre siempre va en su propio renglón y los botones abajo, en una
  * fila que se puede envolver (flex-wrap) — así no se aprietan ni se
  * salen de la pantalla en un celular angosto.
+ *
+ * Si se pasa `onArrive`, aparece el botón "Llegué" para arrancar el
+ * contador de espera (visible también para el padre); una vez tocado,
+ * ese botón se reemplaza por la cuenta regresiva en vivo.
  */
-export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, disabled, nav, phone, className = '', style }) {
+export default function StopCard({
+  stop,
+  actionLabel,
+  onAction,
+  onMarkAbsent,
+  onArrive,
+  disabled,
+  nav,
+  phone,
+  className = '',
+  style,
+}) {
   // "Terminado" de verdad es solo cuando ya se entregó (bajó en su domicilio
   // o llegó al plantel). "A bordo" es un estado intermedio: en el recorrido
   // de vuelta todavía falta la acción de "Bajó", así que el botón debe
@@ -29,6 +47,9 @@ export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, di
   const isDone = stop.status === 'delivered';
   const isAbsent = stop.status === 'absent';
   const showActions = !isDone && !isAbsent && !disabled;
+
+  const secondsLeft = useArrivalCountdown(stop.arrivedAt, ARRIVAL_WAIT_SECONDS);
+  const timeUp = secondsLeft === 0;
 
   return (
     <div className={`rounded-2xl border-2 p-4 mb-3 ${STATUS_STYLES[stop.status] || STATUS_STYLES.pending} ${className}`} style={style}>
@@ -45,6 +66,16 @@ export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, di
         {isDone && <span className="text-2xl shrink-0">✓</span>}
         {isAbsent && <span className="text-xs text-navy-400 shrink-0">—</span>}
       </div>
+
+      {showActions && secondsLeft != null && (
+        <div
+          className={`mt-2 text-xs font-medium rounded-lg px-2.5 py-1.5 inline-flex items-center gap-1.5 ${
+            timeUp ? 'bg-stop-light text-stop' : 'bg-signal-amber/15 text-signal-amber'
+          }`}
+        >
+          ⏱ {timeUp ? 'Tiempo agotado, puedes continuar' : `Esperando · ${fmtCountdown(secondsLeft)}`}
+        </div>
+      )}
 
       {showActions && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -76,11 +107,21 @@ export default function StopCard({ stop, actionLabel, onAction, onMarkAbsent, di
               📞 Llamar
             </a>
           )}
+          {onArrive && secondsLeft == null && (
+            <button
+              onClick={() => onArrive(stop)}
+              className="text-xs px-3 py-2 rounded-xl border border-signal-amber text-signal-amber font-semibold whitespace-nowrap min-h-[36px] flex items-center"
+            >
+              📍 Llegué
+            </button>
+          )}
 
           <div className="flex gap-2 ml-auto w-full sm:w-auto">
             <button
               onClick={() => onMarkAbsent(stop)}
-              className="flex-1 sm:flex-none text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-400 min-h-[44px]"
+              className={`flex-1 sm:flex-none text-xs px-3 py-2 rounded-xl border min-h-[44px] transition-colors ${
+                timeUp ? 'border-stop bg-stop text-white font-semibold' : 'border-navy-100 text-navy-400'
+              }`}
             >
               No vino
             </button>
