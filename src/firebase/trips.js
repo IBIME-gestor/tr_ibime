@@ -334,8 +334,14 @@ export async function markAllBulk(tripId, field, location, stops) {
   await batch.commit();
 }
 
-/** Agrega manualmente a un alumno que no estaba en la lista de la ruta. */
-export async function addStudentToTrip(tripId, student, order) {
+/**
+ * Agrega manualmente a un alumno que no estaba en la lista de la ruta
+ * ("surgió al momento"). Además de subirlo al recorrido, deja registrado
+ * quién lo agregó, en qué ruta, fecha y turno — para que la administración
+ * pueda cobrar ese servicio aunque el alumno no estuviera preconfigurado
+ * con ese calendario.
+ */
+export async function addStudentToTrip(tripId, student, order, trip, addedByProfile) {
   const stopRef = doc(db, 'trips', tripId, 'stops', student.id);
   await setDoc(stopRef, {
     studentId: student.id,
@@ -344,6 +350,13 @@ export async function addStudentToTrip(tripId, student, order) {
     order,
     addedManually: true,
     status: 'pending',
+    // Para que Caja pueda cobrar el servicio del día correctamente:
+    addedByStaffId: addedByProfile?.staffId || null,
+    addedByName: addedByProfile?.name || null,
+    addedByRole: addedByProfile?.role || null,
+    routeId: trip?.routeId || null,
+    date: trip?.date || null,
+    shift: trip?.shift || null,
   });
 }
 
