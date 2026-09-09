@@ -77,41 +77,62 @@ export function todayString() {
 }
 
 /**
- * CALENDARIO DE ASISTENCIA DEL ALUMNO
+ * TIPO DE SERVICIO DEL ALUMNO
  * ------------------------------------
- * Campos nuevos en students/{id} (ver Students.jsx):
- *   serviceType:   'ida' | 'salida' | 'ambos'
- *   scheduleType:  'mensual' | 'dias_fijos' | 'eventual'
- *   activeDays:    [1,3,5]        // solo si scheduleType === 'dias_fijos'
- *                                  // getDay(): 0=dom, 1=lun ... 6=sáb
- *   eventDates:    ['2026-09-04'] // solo si scheduleType === 'eventual'
+ * Campos en students/{id} (ver Students.jsx):
+ *   tipoServicio:      'completo' | 'medio' | 'eventual_fijo' | 'eventual_dia'
+ *   medioServicio:     'entrada' | 'salida'
+ *                        // solo si tipoServicio === 'medio'
+ *   diasFijos:         [ { dia, servicio } ]
+ *                        // solo si tipoServicio === 'eventual_fijo'
+ *                        // dia: getDay() → 0=dom, 1=lun ... 6=sáb
+ *                        // servicio: 'entrada' | 'salida' | 'ambas'
+ *   fechasEventuales:  [ { fecha: 'YYYY-MM-DD', servicio } ]
+ *                        // solo si tipoServicio === 'eventual_dia'
+ *                        // servicio: 'entrada' | 'salida' | 'ambas'
+ *
+ * COMPLETO      → entrada + salida, todos los días que se corra la ruta.
+ * MEDIO         → solo entrada o solo salida (medioServicio), todos los días.
+ * EVENTUAL_FIJO → se repite cada semana: el día de la semana siempre
+ *                 existe, así que no hace falta "reiniciar" nada.
+ * EVENTUAL_DIA  → NUNCA se repite solo: cada fecha vive en fechasEventuales
+ *                 y, en cuanto esa fecha exacta queda en el pasado, el
+ *                 alumno deja de aparecer sin que nadie lo apague a mano.
  *
  * Decide si un alumno debe aparecer en la lista de paradas de HOY, para
- * ese turno específico. No hay ningún proceso que "reinicie" nada cada
- * semana: un alumno fijo se recalcula solo (su día de la semana siempre
- * existe), y un alumno eventual deja de aparecer solo porque la fecha
- * exacta que tiene guardada ya quedó en el pasado.
+ * ese turno específico (shift: 'morning' = entrada, 'afternoon' = salida).
  */
+function servicioIncluyeTurno(servicio, shift) {
+  if (servicio === 'ambas') return true;
+  return servicio === (shift === 'morning' ? 'entrada' : 'salida');
+}
+
 export function studentAppliesToday(student, dateStr, shift) {
-  const serviceType = student.serviceType || 'ambos';
-  const wantsThisShift =
-    serviceType === 'ambos' ||
-    serviceType === (shift === 'morning' ? 'ida' : 'salida');
-  if (!wantsThisShift) return false;
+  const tipoServicio = student.tipoServicio || 'completo';
 
-  const scheduleType = student.scheduleType || 'mensual';
-
-  if (scheduleType === 'eventual') {
-    return (student.eventDates || []).includes(dateStr);
+  if (tipoServicio === 'completo') {
+    return true;
   }
 
-  if (scheduleType === 'dias_fijos') {
+  if (tipoServicio === 'medio') {
+    const medioServicio = student.medioServicio || 'entrada';
+    return medioServicio === (shift === 'morning' ? 'entrada' : 'salida');
+  }
+
+  if (tipoServicio === 'eventual_fijo') {
     const dow = new Date(`${dateStr}T00:00:00`).getDay();
-    return (student.activeDays || []).includes(dow);
+    const config = (student.diasFijos || []).find((d) => d.dia === dow);
+    if (!config) return false;
+    return servicioIncluyeTurno(config.servicio, shift);
   }
 
-  // 'mensual' -> aplica todos los días que se corra la ruta
-  return true;
+  if (tipoServicio === 'eventual_dia') {
+    const config = (student.fechasEventuales || []).find((f) => f.fecha === dateStr);
+    if (!config) return false;
+    return servicioIncluyeTurno(config.servicio, shift);
+  }
+
+  return false;
 }
 
 /**
