@@ -27,15 +27,31 @@ export default function Cashier() {
     const routeNameById = Object.fromEntries(routes.map((r) => [r.id, r.name]));
     const studentById = Object.fromEntries(students.map((s) => [s.id, s]));
 
-    const took = {}; // studentId -> { morning: bool, afternoon: bool }
+    const took = {}; // studentId -> { morning, afternoon, adHocMorning, adHocAfternoon, routeId }
     await Promise.all(
       trips.map(async (trip) => {
         const stops = await getTripStopsOnce(trip.id);
         stops.forEach((s) => {
           const tomoElServicio = s.status === 'boarded' || s.status === 'delivered';
           if (!tomoElServicio) return;
-          if (!took[s.studentId]) took[s.studentId] = { morning: false, afternoon: false };
-          took[s.studentId][trip.shift === 'morning' ? 'morning' : 'afternoon'] = true;
+          if (!took[s.studentId]) {
+            took[s.studentId] = {
+              morning: false,
+              afternoon: false,
+              adHocMorning: null,
+              adHocAfternoon: null,
+              routeId: trip.routeId,
+            };
+          }
+          const key = trip.shift === 'morning' ? 'morning' : 'afternoon';
+          took[s.studentId][key] = true;
+          // La ruta real en la que viajó ese día (por si difiere de la que
+          // tiene configurada actualmente, p. ej. altas al vuelo).
+          took[s.studentId].routeId = trip.routeId;
+          if (s.addedManually) {
+            took[s.studentId][trip.shift === 'morning' ? 'adHocMorning' : 'adHocAfternoon'] =
+              s.addedByName || 'operador';
+          }
         });
       })
     );
@@ -46,7 +62,7 @@ export default function Cashier() {
         studentId,
         name: student?.name || '(alumno ya no está dado de alta)',
         matricula: student?.matricula || '—',
-        routeName: routeNameById[student?.routeId] || '—',
+        routeName: routeNameById[flags.routeId] || '—',
         paymentStatus: student?.paymentStatus || 'al_corriente',
         ...flags,
       };
@@ -122,6 +138,13 @@ export default function Cashier() {
                   <td className="p-2 text-navy-500">{r.routeName}</td>
                   <td className="p-2 text-xs whitespace-nowrap">
                     {r.morning && r.afternoon ? 'Ida y vuelta' : r.morning ? 'Solo ida' : 'Solo vuelta'}
+                    {(r.adHocMorning || r.adHocAfternoon) && (
+                      <span className="block text-signal-amber font-medium mt-0.5">
+                        ➕ Agregado al vuelo
+                        {r.adHocMorning ? ` (ida, por ${r.adHocMorning})` : ''}
+                        {r.adHocAfternoon ? ` (vuelta, por ${r.adHocAfternoon})` : ''}
+                      </span>
+                    )}
                   </td>
                   <td className="p-2">
                     <select
