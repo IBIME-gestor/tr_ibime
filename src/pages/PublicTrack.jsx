@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES } from '../firebase/trips';
+import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES, ARRIVAL_WAIT_SECONDS } from '../firebase/trips';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { useArrivalCountdown, fmtCountdown } from '../utils/countdown';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -96,6 +97,9 @@ export default function PublicTrack() {
     liveLoc?.updatedAt?.toMillis &&
     Date.now() - liveLoc.updatedAt.toMillis() > 3 * 60 * 1000;
 
+  const arrivalSecondsLeft = useArrivalCountdown(myStop?.arrivedAt, ARRIVAL_WAIT_SECONDS);
+  const arrivalTimeUp = arrivalSecondsLeft === 0;
+
   return (
     <div className="min-h-screen bg-navy-50 flex justify-center px-4 py-8">
       <LoadingOverlay show={searching} label="Buscando…" />
@@ -175,6 +179,33 @@ export default function PublicTrack() {
               <p className="text-go font-semibold">✅ Ya llegó a este punto del recorrido.</p>
             )}
             {eta?.absent && <p className="text-navy-400">No asistió hoy al recorrido.</p>}
+
+            {arrivalSecondsLeft != null && myStop.status === 'pending' && (
+              <div
+                className={`rounded-xl border-2 p-3 ${
+                  arrivalTimeUp
+                    ? 'border-stop bg-stop-light'
+                    : 'border-signal-amber bg-signal-amber/15'
+                }`}
+              >
+                <p className="text-sm font-medium text-navy-800">
+                  {arrivalTimeUp
+                    ? '⏱ El camión ya está esperando, tiempo agotado'
+                    : '⏱ El camión ya llegó, está esperando'}
+                </p>
+                {!arrivalTimeUp && (
+                  <p className="text-2xl font-display font-bold text-navy-900">
+                    {fmtCountdown(arrivalSecondsLeft)}
+                  </p>
+                )}
+                <p className="text-xs text-navy-500 mt-1">
+                  {arrivalTimeUp
+                    ? 'El recorrido va a continuar para no atrasar a los demás alumnos.'
+                    : 'Si tu hijo(a) va a salir, este es el momento — el camión no puede esperar más de este tiempo.'}
+                </p>
+              </div>
+            )}
+
             {eta && !eta.done && !eta.absent && (
               <div className="bg-signal-yellow/20 border-2 border-signal-yellow rounded-xl p-3">
                 <p className="text-sm text-navy-600">Llegada aproximada</p>
