@@ -274,11 +274,12 @@ export default function TripRunner() {
   async function confirmMatriculaBoard() {
     setBusy(true);
     const location = await getCurrentLocation();
+    const action = shift === 'morning' ? 'boarded' : 'delivered';
     if (found.alreadyInTrip) {
-      await markStopManual(trip.id, found.student.id, 'boarded', location);
+      await markStopManual(trip.id, found.student.id, action, location);
     } else {
-      await addStudentToTrip(trip.id, found.student, stops.length);
-      await markStopManual(trip.id, found.student.id, 'boarded', location);
+      await addStudentToTrip(trip.id, found.student, stops.length, trip, profile);
+      await markStopManual(trip.id, found.student.id, action, location);
     }
     setFound(null);
     setMatricula('');
