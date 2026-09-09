@@ -55,7 +55,15 @@ import { Routes, Students } from './services';
  *                             delivered = llega al plantel (bulk, un botón para todos)
  * En el turno de la TARDE:   boarded = sube al camión en el plantel (bulk, un botón para todos)
  *                             delivered = baja en su domicilio (manual, uno por uno)
+ *
+ * Además, en cualquier parada individual (domicilio): al llegar, el
+ * operador aprieta "Llegué" → arrivedAt. Eso dispara un contador de
+ * ARRIVAL_WAIT_SECONDS visible tanto para el operador como para el padre
+ * (vía publicTracking), para no perder tiempo en la parada.
  */
+
+/** Segundos de espera tras marcar "Llegué" antes de que la app sugiera continuar. */
+export const ARRIVAL_WAIT_SECONDS = 120;
 
 const todayId = (date) => date; // 'YYYY-MM-DD'
 
@@ -218,6 +226,21 @@ export async function listActiveTrips() {
   return trips;
 }
 
+/**
+ * A diferencia de listActiveTrips (consulta puntual), esta SÍ es un
+ * listener en vivo (onSnapshot) — a propósito: es para el mapa de flota
+ * en tiempo real del admin, donde el punto es ver la posición de los
+ * camiones actualizarse sola. El número de recorridos "en_progress" al
+ * mismo tiempo es chico (uno por ruta activa), así que el costo de
+ * lecturas es marginal comparado con listas grandes como Alumnos.
+ */
+export function subscribeActiveTripsLive(callback) {
+  const q = query(collection(db, 'trips'), where('status', '==', 'in_progress'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+  });
+}
+
 export async function listTripsByDate(date) {
   const snap = await getDocs(query(collection(db, 'trips'), where('date', '==', date)));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -248,6 +271,16 @@ export async function markStopManual(tripId, studentId, field, location) {
 export async function markStopAbsent(tripId, studentId) {
   const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
   await updateDoc(stopRef, { status: 'absent' });
+}
+
+/**
+ * El operador llegó al domicilio y está esperando. Arranca el contador
+ * de ARRIVAL_WAIT_SECONDS (visible también para el padre) para no perder
+ * tiempo parado si el alumno no sale.
+ */
+export async function markArrived(tripId, studentId) {
+  const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
+  await updateDoc(stopRef, { arrivedAt: serverTimestamp() });
 }
 
 /**
@@ -327,6 +360,7 @@ export async function syncPublicTracking(trip, stops) {
     order: s.order,
     status: s.status,
     resolvedAt: s[timeKey] || null,
+    arrivedAt: s.arrivedAt || null,
   }));
 
   const route = await Routes.get(trip.routeId);
