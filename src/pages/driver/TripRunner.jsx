@@ -8,6 +8,7 @@ import {
   subscribeTripStops,
   markStopManual,
   markStopAbsent,
+  markArrived,
   markAllBulk,
   addStudentToTrip,
   completeTrip,
@@ -242,6 +243,14 @@ export default function TripRunner() {
 
   async function handleAbsent(stop) {
     await markStopAbsent(trip.id, stop.studentId);
+  }
+
+  // "Llegué" al domicilio: no bloquea la pantalla con el overlay grande
+  // (busy) porque el operador sigue viendo el contador arrancar al toque;
+  // es una acción rápida y de bajo riesgo si falla, no hace falta tapar
+  // la pantalla para ella.
+  async function handleArrive(stop) {
+    await markArrived(trip.id, stop.studentId);
   }
 
   // ------------------------------------------------------------------
@@ -479,6 +488,7 @@ export default function TripRunner() {
                 actionLabel={config.boardAction}
                 onAction={handleIndividualBoard}
                 onMarkAbsent={handleAbsent}
+                onArrive={handleArrive}
                 disabled={busy}
                 nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
@@ -508,6 +518,7 @@ export default function TripRunner() {
                 actionLabel={config.deliverAction}
                 onAction={handleIndividualDeliver}
                 onMarkAbsent={handleAbsent}
+                onArrive={handleArrive}
                 disabled={busy}
                 nav={navUrls(destinations[stop.studentId])}
                 phone={phones[stop.studentId]}
