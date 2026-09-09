@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Upload, X, User, MapPin, Bus, CalendarClock, CircleDollarSign } from 'lucide-react';
+import { Search, Upload, User, MapPin, Bus, CircleDollarSign } from 'lucide-react';
 import { Students, Schools, Routes } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 
-export const SERVICE_TYPES = {
-  ida: 'Solo ida (recolección)',
-  salida: 'Solo salida (entrega)',
-  ambos: 'Ida y salida',
+export const TIPOS_SERVICIO = {
+  completo: 'Servicio completo (entrada y salida, todos los días)',
+  medio: 'Servicio medio (solo entrada o solo salida, todos los días)',
+  eventual_fijo: 'Eventual fijo (días de la semana, se repiten)',
+  eventual_dia: 'Eventual día (fechas específicas, no se repiten)',
 };
 
-export const SCHEDULE_TYPES = {
-  mensual: 'Mes completo',
-  dias_fijos: 'Días fijos a la semana',
-  eventual: 'Eventual (fechas sueltas)',
+export const OPCIONES_SERVICIO = {
+  entrada: 'Entrada',
+  salida: 'Salida',
+  ambas: 'Entrada + Salida',
 };
+
+const OPCIONES_SERVICIO_CORTO = { entrada: 'E', salida: 'S', ambas: 'E+S' };
+
+const DIAS_SEMANA_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export const BILLING_MODES = {
   mensual: 'Cuota mensual fija',
@@ -52,10 +57,10 @@ const emptyForm = {
   routeId: '',
   address: '',
   parentContact: '',
-  serviceType: 'ambos',
-  scheduleType: 'mensual',
-  activeDays: [],
-  eventDates: [],
+  tipoServicio: 'completo',
+  medioServicio: 'entrada',
+  diasFijos: [],
+  fechasEventuales: [],
   billingMode: 'mensual',
   billingAmount: '',
   paymentStatus: 'al_corriente',
@@ -70,6 +75,9 @@ export default function StudentsPage() {
   const [filterSchool, setFilterSchool] = useState('');
   const [search, setSearch] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
+  const [newEventServicio, setNewEventServicio] = useState('ambas');
+  const [editingEventIndex, setEditingEventIndex] = useState(null);
+  const [eventualError, setEventualError] = useState('');
 
   useEffect(() => Students.subscribe(setStudents), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -97,29 +105,83 @@ export default function StudentsPage() {
     setEditingId(null);
   }
 
-  function handleScheduleTypeChange(scheduleType) {
+  function handleTipoServicioChange(tipoServicio) {
     const defaultBilling =
-      scheduleType === 'mensual' ? 'mensual'
-      : scheduleType === 'dias_fijos' ? 'por_dias'
+      tipoServicio === 'completo' || tipoServicio === 'medio' ? 'mensual'
+      : tipoServicio === 'eventual_fijo' ? 'por_dias'
       : 'por_evento';
-    setForm({ ...form, scheduleType, billingMode: defaultBilling });
+    setForm({ ...form, tipoServicio, billingMode: defaultBilling });
   }
 
-  function toggleDay(day) {
-    const activeDays = form.activeDays.includes(day)
-      ? form.activeDays.filter((d) => d !== day)
-      : [...form.activeDays, day].sort();
-    setForm({ ...form, activeDays });
+  // --- Eventual fijo: cada día de la semana seleccionado trae su propio
+  //     servicio (Entrada / Salida / Ambas), no uno global para todos. ---
+  function toggleDiaFijo(dia) {
+    const yaEsta = form.diasFijos.some((d) => d.dia === dia);
+    const diasFijos = yaEsta
+      ? form.diasFijos.filter((d) => d.dia !== dia)
+      : [...form.diasFijos, { dia, servicio: 'ambas' }].sort((a, b) => a.dia - b.dia);
+    setForm({ ...form, diasFijos });
   }
 
-  function addEventDate() {
-    if (!newEventDate || form.eventDates.includes(newEventDate)) return;
-    setForm({ ...form, eventDates: [...form.eventDates, newEventDate].sort() });
+  function setDiaFijoServicio(dia, servicio) {
+    setForm({
+      ...form,
+      diasFijos: form.diasFijos.map((d) => (d.dia === dia ? { ...d, servicio } : d)),
+    });
+  }
+
+  // --- Eventual día: alta/edición/baja de fechas sueltas, cada una con
+  //     su propio servicio. Nunca se copian solas a otras semanas. ---
+  function handleAddOrEditFechaEventual() {
+    setEventualError('');
+    if (!newEventDate) {
+      setEventualError('Selecciona una fecha.');
+      return;
+    }
+    if (!newEventServicio) {
+      setEventualError('Selecciona Entrada, Salida o Entrada + Salida.');
+      return;
+    }
+    const duplicada = form.fechasEventuales.some(
+      (f, i) => f.fecha === newEventDate && i !== editingEventIndex
+    );
+    if (duplicada) {
+      setEventualError('Esa fecha ya está agregada para este alumno.');
+      return;
+    }
+
+    const entry = { fecha: newEventDate, servicio: newEventServicio };
+    let fechasEventuales;
+    if (editingEventIndex != null) {
+      fechasEventuales = form.fechasEventuales.map((f, i) => (i === editingEventIndex ? entry : f));
+    } else {
+      fechasEventuales = [...form.fechasEventuales, entry];
+    }
+    fechasEventuales.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    setForm({ ...form, fechasEventuales });
     setNewEventDate('');
+    setNewEventServicio('ambas');
+    setEditingEventIndex(null);
   }
 
-  function removeEventDate(date) {
-    setForm({ ...form, eventDates: form.eventDates.filter((d) => d !== date) });
+  function handleEditFechaEventual(index) {
+    const entry = form.fechasEventuales[index];
+    setNewEventDate(entry.fecha);
+    setNewEventServicio(entry.servicio);
+    setEditingEventIndex(index);
+    setEventualError('');
+  }
+
+  function handleCancelEditFechaEventual() {
+    setNewEventDate('');
+    setNewEventServicio('ambas');
+    setEditingEventIndex(null);
+    setEventualError('');
+  }
+
+  function handleRemoveFechaEventual(index) {
+    setForm({ ...form, fechasEventuales: form.fechasEventuales.filter((_, i) => i !== index) });
+    if (editingEventIndex === index) handleCancelEditFechaEventual();
   }
 
   async function handleDelete(id) {
@@ -157,18 +219,22 @@ export default function StudentsPage() {
   const routeName = (id) => routes.find((r) => r.id === id)?.name || null;
 
   function scheduleSummary(s) {
-    const service = SERVICE_TYPES[s.serviceType] || SERVICE_TYPES.ambos;
-    if (s.scheduleType === 'dias_fijos') {
-      const days = (s.activeDays || [])
-        .map((d) => WEEKDAYS.find((w) => w.value === d)?.label)
-        .filter(Boolean)
-        .join('/');
-      return `${service} · ${days || 'sin días'}`;
+    const tipo = s.tipoServicio || 'completo';
+    if (tipo === 'completo') return 'Completo · Entrada y salida · todos los días';
+    if (tipo === 'medio') {
+      const label = s.medioServicio === 'salida' ? 'Solo salida' : 'Solo entrada';
+      return `Medio · ${label} · todos los días`;
     }
-    if (s.scheduleType === 'eventual') {
-      return `${service} · Eventual (${(s.eventDates || []).length} fechas)`;
+    if (tipo === 'eventual_fijo') {
+      const dias = (s.diasFijos || [])
+        .map((d) => `${WEEKDAYS.find((w) => w.value === d.dia)?.label}:${OPCIONES_SERVICIO_CORTO[d.servicio]}`)
+        .join(' ');
+      return `Eventual fijo · ${dias || 'sin días'}`;
     }
-    return `${service} · Mes completo`;
+    if (tipo === 'eventual_dia') {
+      return `Eventual día · ${(s.fechasEventuales || []).length} fecha(s)`;
+    }
+    return '—';
   }
 
   return (
@@ -295,80 +361,160 @@ export default function StudentsPage() {
             </div>
 
             <div className="border-t border-navy-100 pt-4">
-              <SectionLabel icon={Bus}>Servicio y calendario</SectionLabel>
+              <SectionLabel icon={Bus}>Tipo de servicio</SectionLabel>
               <div className="space-y-3">
                 <div>
-                  <label className="admin-label">Servicio de transporte</label>
+                  <label className="admin-label">Tipo de servicio</label>
                   <select
-                    value={form.serviceType}
-                    onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
+                    value={form.tipoServicio}
+                    onChange={(e) => handleTipoServicioChange(e.target.value)}
                     className="admin-select"
                   >
-                    {Object.entries(SERVICE_TYPES).map(([value, label]) => (
+                    {Object.entries(TIPOS_SERVICIO).map(([value, label]) => (
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="admin-label">Calendario</label>
-                  <select
-                    value={form.scheduleType}
-                    onChange={(e) => handleScheduleTypeChange(e.target.value)}
-                    className="admin-select"
-                  >
-                    {Object.entries(SCHEDULE_TYPES).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {form.scheduleType === 'dias_fijos' && (
+                {form.tipoServicio === 'medio' && (
                   <div className="cascade-item">
-                    <label className="admin-label">Días que toma el servicio</label>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {WEEKDAYS.map((d) => (
-                        <button
-                          key={d.value}
-                          type="button"
-                          onClick={() => toggleDay(d.value)}
-                          className={
-                            form.activeDays.includes(d.value)
-                              ? 'badge cursor-pointer transition-transform active:scale-95'
-                              : 'badge cursor-pointer opacity-40 transition-transform active:scale-95'
-                          }
-                        >
-                          {d.label}
-                        </button>
-                      ))}
-                    </div>
+                    <label className="admin-label">¿Entrada o salida?</label>
+                    <select
+                      value={form.medioServicio}
+                      onChange={(e) => setForm({ ...form, medioServicio: e.target.value })}
+                      className="admin-select"
+                    >
+                      <option value="entrada">Solo entrada (recolección)</option>
+                      <option value="salida">Solo salida (se lleva a casa)</option>
+                    </select>
                   </div>
                 )}
 
-                {form.scheduleType === 'eventual' && (
+                {form.tipoServicio === 'eventual_fijo' && (
                   <div className="cascade-item">
-                    <label className="admin-label">Fechas en que toma el servicio</label>
-                    <div className="flex gap-2">
+                    <label className="admin-label">Días de la semana y su servicio</label>
+                    <div className="space-y-2">
+                      {WEEKDAYS.map((d) => {
+                        const entry = form.diasFijos.find((x) => x.dia === d.value);
+                        return (
+                          <div key={d.value} className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleDiaFijo(d.value)}
+                              className={
+                                entry
+                                  ? 'badge cursor-pointer transition-transform active:scale-95 w-14 justify-center'
+                                  : 'badge cursor-pointer opacity-40 transition-transform active:scale-95 w-14 justify-center'
+                              }
+                            >
+                              {d.label}
+                            </button>
+                            {entry && (
+                              <select
+                                value={entry.servicio}
+                                onChange={(e) => setDiaFijoServicio(d.value, e.target.value)}
+                                className="admin-select flex-1 py-1.5 text-xs cascade-item"
+                              >
+                                {Object.entries(OPCIONES_SERVICIO).map(([value, label]) => (
+                                  <option key={value} value={value}>{label}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-navy-400 mt-2">
+                      Se repite cada semana mientras el alumno siga contratado — no hace falta
+                      volver a capturarlo.
+                    </p>
+                  </div>
+                )}
+
+                {form.tipoServicio === 'eventual_dia' && (
+                  <div className="cascade-item space-y-2">
+                    <label className="admin-label">Eventual día — fechas específicas</label>
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="date"
                         value={newEventDate}
                         onChange={(e) => setNewEventDate(e.target.value)}
                         className="admin-input flex-1"
                       />
-                      <button type="button" onClick={addEventDate} className="btn-admin-ghost">
-                        Agregar
+                      <select
+                        value={newEventServicio}
+                        onChange={(e) => setNewEventServicio(e.target.value)}
+                        className="admin-select sm:w-40"
+                      >
+                        {Object.entries(OPCIONES_SERVICIO).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAddOrEditFechaEventual}
+                        className="btn-admin-ghost shrink-0"
+                      >
+                        {editingEventIndex != null ? 'Guardar cambios' : 'Agregar fecha'}
                       </button>
                     </div>
-                    {form.eventDates.length > 0 && (
-                      <div className="flex gap-1.5 flex-wrap mt-2">
-                        {form.eventDates.map((date) => (
-                          <span key={date} className="badge inline-flex items-center gap-1 cascade-item">
-                            {date}
-                            <X size={12} className="cursor-pointer" onClick={() => removeEventDate(date)} />
-                          </span>
-                        ))}
-                      </div>
+                    {editingEventIndex != null && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditFechaEventual}
+                        className="text-xs text-navy-400 underline"
+                      >
+                        Cancelar edición
+                      </button>
                     )}
+                    {eventualError && <p className="text-stop text-xs">{eventualError}</p>}
+
+                    {form.fechasEventuales.length > 0 ? (
+                      <div className="border border-navy-100 rounded-lg overflow-hidden mt-1">
+                        <table className="w-full text-xs">
+                          <thead className="bg-navy-50 text-left text-navy-400">
+                            <tr>
+                              <th className="p-2">Fecha</th>
+                              <th className="p-2">Día</th>
+                              <th className="p-2">Servicio</th>
+                              <th className="p-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-navy-50">
+                            {form.fechasEventuales.map((f, i) => (
+                              <tr key={f.fecha} className="cascade-item" style={cascadeStyle(i, 30)}>
+                                <td className="p-2 whitespace-nowrap">{f.fecha}</td>
+                                <td className="p-2">
+                                  {DIAS_SEMANA_LARGO[new Date(`${f.fecha}T00:00:00`).getDay()]}
+                                </td>
+                                <td className="p-2">{OPCIONES_SERVICIO[f.servicio]}</td>
+                                <td className="p-2 text-right whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditFechaEventual(i)}
+                                    className="link-action mr-2"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveFechaEventual(i)}
+                                    className="link-danger"
+                                  >
+                                    Eliminar
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-navy-400">Aún no hay fechas agregadas.</p>
+                    )}
+                    <p className="text-xs text-navy-400">
+                      Cada fecha es independiente — no se copia sola a las semanas siguientes.
+                    </p>
                   </div>
                 )}
               </div>
