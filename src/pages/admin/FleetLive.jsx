@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes, Drivers } from '../../firebase/services';
@@ -21,10 +21,58 @@ function fmtTime(ts) {
 }
 
 /**
+ * MapContainer de Leaflet solo lee la prop `center` UNA vez, al montarse
+ * — si en ese primer instante todavía no habían llegado ubicaciones
+ * (justo lo que pasa aquí, porque el listener de Firestore tarda un
+ * pestañeo), se queda fijo en el centro genérico para siempre. Este
+ * componente vive DENTRO del mapa y lo reencuadra por su cuenta cuando
+ * cambia el conjunto de operadores activos.
+ *
+ * A propósito solo reacciona cuando ENTRA o SALE un operador (la key es
+ * la lista de ids, no las coordenadas) — si reencuadrara en cada
+ * actualización de posición (cada ~15s por camión), sería molesto estar
+ * "regresando" el mapa mientras el admin lo está viendo o moviendo.
+ */
+function FitBounds({ points }) {
+  const map = useMap();
+  const key = points.map((p) => p.id).sort().join(',');
+
+  useEffect(() => {
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView([points[0].lat, points[0].lng], 14);
+      return;
+    }
+    map.fitBounds(
+      points.map((p) => [p.lat, p.lng]),
+      { padding: [50, 50], maxZoom: 15 }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return null;
+}
+
+/** Al elegir un operador de la lista, centra el mapa en él sin recargar nada. */
+function FlyToSelected({ point }) {
+  const map = useMap();
+  useEffect(() => {
+    if (point) map.flyTo([point.lat, point.lng], 15, { duration: 0.8 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [point?.id]);
+  return null;
+}
+
+/**
  * Mapa en vivo de todos los recorridos activos, para el admin. A
  * diferencia del resto de pantallas de admin (que consultan solo bajo
  * demanda para cuidar lecturas), esta SÍ se actualiza sola en tiempo
  * real — es justo el punto: ver moverse los camiones sin refrescar.
+ *
+ * Un marcador por operador en curso: la consulta ya filtra por
+ * status === 'in_progress', así que un recorrido aparece solo en cuanto
+ * el chofer arranca (kilometraje inicial) y desaparece solo en cuanto se
+ * cierra (kilometraje final) — sea el chofer o el admin quien lo cierre.
  */
 export default function FleetLive() {
   const [trips, setTrips] = useState([]);
@@ -45,9 +93,12 @@ export default function FleetLive() {
     [trips]
   );
 
-  const center = withLocation[0]?.liveLocation
-    ? [withLocation[0].liveLocation.lat, withLocation[0].liveLocation.lng]
-    : MEXICO_CITY;
+  const points = useMemo(
+    () => withLocation.map((t) => ({ id: t.id, lat: t.liveLocation.lat, lng: t.liveLocation.lng })),
+    [withLocation]
+  );
+
+  const selectedPoint = points.find((p) => p.id === selectedId) || null;
 
   return (
     <div>
@@ -100,11 +151,13 @@ export default function FleetLive() {
         </div>
 
         <div className="rounded-2xl overflow-hidden border border-navy-100 order-1 lg:order-2" style={{ height: 520 }}>
-          <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
+          <MapContainer center={MEXICO_CITY} zoom={12} style={{ height: '100%', width: '100%' }}>
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+            <FitBounds points={points} />
+            <FlyToSelected point={selectedPoint} />
             {withLocation.map((trip) => {
               const operatorName =
                 staffById[trip.driverId]?.name ||
