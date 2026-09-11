@@ -280,7 +280,7 @@ export default function StudentsPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
         <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 transition-shadow">
           <p className="font-display font-semibold text-base text-navy-800 mb-4">
             {editingId ? `Editar a ${form.name || 'alumno'}` : 'Nuevo alumno'}
@@ -353,7 +353,7 @@ export default function StudentsPage() {
                   <input
                     value={form.parentContact}
                     onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
-                    placeholder="10 dígitos, para el botón de llamada del chofer"
+                    placeholder="10 dígitos, para el botón de llamada del operador"
                     className="admin-input"
                   />
                 </div>
