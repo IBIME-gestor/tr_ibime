@@ -81,7 +81,16 @@ service cloud.firestore {
 
     match /students/{id} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      // El admin puede modificar cualquier campo. El chofer/nanny SOLO
+      // puede tocar el espejo de "última ubicación de entrega" que se
+      // escribe automáticamente al marcar a un alumno como entregado
+      // (ver markStopManual/markAllBulk en trips.js) — nunca el resto
+      // del expediente (nombre, domicilio, ruta, cobro, etc.).
+      allow update: if isAdmin() ||
+        ((isDriver() || isNanny()) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId']));
+      allow create, delete: if isAdmin();
     }
 
     // El chofer es el único que puede crear el recorrido (requiere el
