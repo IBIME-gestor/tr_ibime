@@ -119,6 +119,7 @@ export default function TripRunner() {
   const [route, setRoute] = useState(null);
   const [trip, setTrip] = useState(null); // null mientras carga, undefined... (ver tripLoaded)
   const [tripLoaded, setTripLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [stops, setStops] = useState([]);
   const [busy, setBusy] = useState(false);
   const [matricula, setMatricula] = useState('');
@@ -145,47 +146,71 @@ export default function TripRunner() {
   const [myLocation, setMyLocation] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
     async function init() {
-      const r = await RoutesService.get(routeId);
-      setRoute(r);
+      try {
+        const r = await RoutesService.get(routeId);
+        if (cancelled) return;
+        setRoute(r);
 
-      // Destinos para el botón "Navegar" y teléfonos para "Llamar": primero
-      // la última ubicación real capturada en un recorrido previo de esta
-      // misma ruta/turno (más precisa), y si no existe, la dirección de
-      // texto guardada del alumno (útil el primer día en una ruta nueva).
-      const [reference, students] = await Promise.all([
-        getReferenceTrip(routeId, shift),
-        Students.listByRoute(routeId),
-      ]);
-      const byId = {};
-      const phoneById = {};
-      students.forEach((s) => {
-        if (s.address) byId[s.id] = s.address;
-        if (s.parentContact) phoneById[s.id] = s.parentContact;
-      });
-      reference?.stops.forEach((s) => {
-        if (s.referenceLocation?.lat) byId[s.studentId] = s.referenceLocation;
-      });
-      setDestinations(byId);
-      setPhones(phoneById);
+        // Destinos para el botón "Navegar" y teléfonos para "Llamar": primero
+        // la última ubicación real capturada en un recorrido previo de esta
+        // misma ruta/turno (más precisa), y si no existe, la dirección de
+        // texto guardada del alumno (útil el primer día en una ruta nueva).
+        const [reference, students] = await Promise.all([
+          getReferenceTrip(routeId, shift),
+          Students.listByRoute(routeId),
+        ]);
+        if (cancelled) return;
+        const byId = {};
+        const phoneById = {};
+        students.forEach((s) => {
+          if (s.address) byId[s.id] = s.address;
+          if (s.parentContact) phoneById[s.id] = s.parentContact;
+        });
+        reference?.stops.forEach((s) => {
+          if (s.referenceLocation?.lat) byId[s.studentId] = s.referenceLocation;
+        });
+        setDestinations(byId);
+        setPhones(phoneById);
+      } catch (err) {
+        // Sin este try/catch, cualquier error aquí (permisos, ruta
+        // inexistente, sin conexión) dejaba la pantalla en "Preparando
+        // recorrido…" para siempre, porque `route` nunca se llegaba a
+        // asignar y no había forma de saber qué pasó.
+        console.error('TripRunner init error:', err);
+        if (!cancelled) setLoadError(err.message || 'No se pudo cargar la ruta. Revisa tu conexión e intenta de nuevo.');
+      }
     }
     init();
+    return () => { cancelled = true; };
   }, [routeId, shift]);
 
   // Se suscribe al recorrido de HOY en tiempo real, exista o no todavía.
   // Así, si la nanny entra antes que el operador, ve en vivo el momento en
   // que él registra su kilometraje y arranca el recorrido.
   useEffect(() => {
-    const unsub = subscribeTodayTrip(routeId, shift, (t) => {
-      setTrip(t);
-      setTripLoaded(true);
-    });
+    const unsub = subscribeTodayTrip(
+      routeId,
+      shift,
+      (t) => {
+        setTrip(t);
+        setTripLoaded(true);
+      },
+      (err) => {
+        setTripLoaded(true);
+        setLoadError(err.message || 'No se pudo cargar el recorrido de hoy. Revisa tu conexión e intenta de nuevo.');
+      }
+    );
     return unsub;
   }, [routeId, shift]);
 
   useEffect(() => {
     if (!trip?.id) { setStops([]); return undefined; }
-    const unsub = subscribeTripStops(trip.id, setStops);
+    const unsub = subscribeTripStops(trip.id, setStops, (err) => {
+      setLoadError(err.message || 'No se pudieron cargar los alumnos de este recorrido.');
+    });
     return unsub;
   }, [trip?.id]);
 
@@ -363,6 +388,19 @@ export default function TripRunner() {
       setKmError(err.message);
       setFinishing(false);
     }
+  }
+
+  if (loadError) {
+    return (
+      <div className="card text-center mt-10 cascade-item">
+        <p className="text-3xl mb-2">⚠️</p>
+        <p className="font-display font-semibold text-lg mb-1">No se pudo abrir el recorrido</p>
+        <p className="text-navy-400 text-sm mb-4">{loadError}</p>
+        <button onClick={() => window.location.reload()} className="btn-admin-primary mx-auto">
+          Reintentar
+        </button>
+      </div>
+    );
   }
 
   if (!tripLoaded || !route) {
