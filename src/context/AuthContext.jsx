@@ -72,27 +72,43 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      const existing = await getDoc(doc(db, 'users', firebaseUser.uid));
-      let profileData = existing.exists() ? existing.data() : null;
+      // IMPORTANTE: todo lo de aquí abajo va en try/catch. Sin esto, un
+      // error (permisos, sin conexión, etc.) al leer el perfil dejaba
+      // `loading` en true para siempre y la app entera se quedaba
+      // pegada en la pantalla de "Cargando…" sin explicación — el bug
+      // detrás de "el módulo del operador se queda cargando y no abre".
+      try {
+        const existing = await getDoc(doc(db, 'users', firebaseUser.uid));
+        let profileData = existing.exists() ? existing.data() : null;
 
-      if (!profileData) {
-        profileData = await provisionProfile(firebaseUser);
-      }
+        if (!profileData) {
+          profileData = await provisionProfile(firebaseUser);
+        }
 
-      if (!profileData) {
+        if (!profileData) {
+          setAuthError(
+            'Tu cuenta de Google no tiene acceso todavía. Pide al administrador que registre tu correo institucional en la app.'
+          );
+          await signOut(auth);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
+        setUser(firebaseUser);
+        setProfile(profileData);
+        setLoading(false);
+      } catch (err) {
+        console.error('Error cargando el perfil:', err);
         setAuthError(
-          'Tu cuenta de Google no tiene acceso todavía. Pide al administrador que registre tu correo institucional en la app.'
+          `No se pudo cargar tu perfil (${err.message || 'error desconocido'}). Revisa tu conexión e intenta de nuevo.`
         );
-        await signOut(auth);
+        try { await signOut(auth); } catch { /* ignora */ }
         setUser(null);
         setProfile(null);
         setLoading(false);
-        return;
       }
-
-      setUser(firebaseUser);
-      setProfile(profileData);
-      setLoading(false);
     });
     return unsub;
   }, []);
