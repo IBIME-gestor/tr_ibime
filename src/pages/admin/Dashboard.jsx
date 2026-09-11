@@ -31,7 +31,7 @@ export default function Dashboard() {
   const cards = [
     { label: 'Planteles', value: counts?.schools, to: '/admin/planteles', icon: School },
     { label: 'Alumnos', value: counts?.students, to: '/admin/alumnos', icon: Users },
-    { label: 'Choferes y nannies', value: counts?.drivers, to: '/admin/choferes', icon: Contact },
+    { label: 'Operadores y nannies', value: counts?.drivers, to: '/admin/choferes', icon: Contact },
     { label: 'Unidades', value: counts?.units, to: '/admin/unidades', icon: Truck },
     { label: 'Rutas', value: counts?.routes, to: '/admin/rutas', icon: RouteIcon },
   ];
@@ -61,8 +61,8 @@ export default function Dashboard() {
           <li>Da de alta los planteles (colegios).</li>
           <li>Carga la lista de alumnos (manual o por CSV) con su matrícula, plantel y domicilio.</li>
           <li>Registra las unidades (camionetas/camiones) disponibles.</li>
-          <li>Da de alta a los choferes y nannies, con su correo para poder iniciar sesión.</li>
-          <li>Crea las rutas: asigna plantel, chofer, nanny, unidad y alumnos.</li>
+          <li>Da de alta a los operadores y nannies, con su correo para poder iniciar sesión.</li>
+          <li>Crea las rutas: asigna plantel, operador, nanny, unidad y alumnos.</li>
         </ol>
       </div>
     </div>
