@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students } from '../../firebase/services';
 import {
@@ -25,6 +28,13 @@ import StopCard from '../../components/StopCard';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
 // No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
 // nada para un ETA aproximado). Con una actualización cada 15s es más que
 // suficiente para que el mapa del padre se vea "en vivo".
@@ -44,6 +54,36 @@ function navUrls(destination) {
     maps: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
     waze: `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
   };
+}
+
+/**
+ * Ruta completa en Google Maps con todas las paradas pendientes como
+ * waypoints, en el orden del recorrido — Google Maps se encarga de la
+ * navegación real y de recalcular solo con tráfico en vivo (eso ya lo
+ * hace mejor que cualquier cosa que podamos construir aquí). Solo se
+ * arma con paradas de las que ya tenemos coordenadas exactas (de un
+ * recorrido de referencia anterior); las que solo tienen dirección de
+ * texto (ruta nueva, primer día) se quedan fuera de este botón.
+ */
+function buildFullRouteUrl(pendingStops, destinations) {
+  const coords = pendingStops
+    .map((s) => destinations[s.studentId])
+    .filter((d) => d && typeof d === 'object' && d.lat != null);
+  if (coords.length === 0) return null;
+
+  const last = coords[coords.length - 1];
+  const waypoints = coords
+    .slice(0, -1)
+    .map((c) => `${c.lat},${c.lng}`)
+    .join('|');
+
+  const params = new URLSearchParams({
+    api: '1',
+    destination: `${last.lat},${last.lng}`,
+    travelmode: 'driving',
+  });
+  if (waypoints) params.set('waypoints', waypoints);
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
 const SHIFT_CONFIG = {
@@ -101,6 +141,8 @@ export default function TripRunner() {
   const [sendingAlert, setSendingAlert] = useState(false);
 
   const lastSentAtRef = useRef(0);
+  const [showMap, setShowMap] = useState(false);
+  const [myLocation, setMyLocation] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -131,7 +173,7 @@ export default function TripRunner() {
   }, [routeId, shift]);
 
   // Se suscribe al recorrido de HOY en tiempo real, exista o no todavía.
-  // Así, si la nanny entra antes que el chofer, ve en vivo el momento en
+  // Así, si la nanny entra antes que el operador, ve en vivo el momento en
   // que él registra su kilometraje y arranca el recorrido.
   useEffect(() => {
     const unsub = subscribeTodayTrip(routeId, shift, (t) => {
@@ -157,10 +199,11 @@ export default function TripRunner() {
   }, [trip, stops]);
 
   // Ubicación en vivo del camión mientras el recorrido está en curso
-  // (solo el chofer la transmite; la nanny no necesita duplicarla).
+  // (solo el operador la transmite; la nanny no necesita duplicarla).
   useEffect(() => {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
     const stop = watchLocation((location) => {
+      setMyLocation(location);
       const now = Date.now();
       if (now - lastSentAtRef.current < LOCATION_THROTTLE_MS) return;
       lastSentAtRef.current = now;
@@ -204,6 +247,29 @@ export default function TripRunner() {
     () => stops.length > 0 && stops.every((s) => s.status === 'delivered' || s.status === 'absent'),
     [stops]
   );
+
+  // Paradas que todavía faltan por resolver en esta fase: en la mañana,
+  // a quién falta recoger; en la tarde, a quién falta bajar.
+  const remainingStops = shift === 'morning' ? pendingBoarding : boardedWaitingDelivery;
+
+  const remainingWithCoords = useMemo(
+    () =>
+      remainingStops
+        .map((s) => ({ ...s, coords: destinations[s.studentId] }))
+        .filter((s) => s.coords && typeof s.coords === 'object' && s.coords.lat != null),
+    [remainingStops, destinations]
+  );
+
+  const fullRouteUrl = useMemo(
+    () => buildFullRouteUrl(remainingStops, destinations),
+    [remainingStops, destinations]
+  );
+
+  const mapCenter = myLocation
+    ? [myLocation.lat, myLocation.lng]
+    : remainingWithCoords[0]
+    ? [remainingWithCoords[0].coords.lat, remainingWithCoords[0].coords.lng]
+    : [19.4326, -99.1332];
 
   // ------------------------------------------------------------------
   // Fase 1: abordaje (individual en la mañana, masivo en la tarde)
@@ -305,16 +371,16 @@ export default function TripRunner() {
 
   // --------------------------------------------------------------
   // Candado de kilometraje: sin kmInicial no existe el recorrido ni
-  // aparece la lista de alumnos, ni para el chofer ni para la nanny.
+  // aparece la lista de alumnos, ni para el operador ni para la nanny.
   // --------------------------------------------------------------
   if (!trip) {
     if (!isDriver) {
       return (
         <div className="card text-center mt-10 cascade-item">
           <p className="text-3xl mb-2">⏳</p>
-          <p className="font-display font-semibold text-lg mb-1">Esperando al chofer</p>
+          <p className="font-display font-semibold text-lg mb-1">Esperando al operador</p>
           <p className="text-navy-400 text-sm">
-            El chofer todavía no registra su kilometraje inicial para arrancar este recorrido.
+            El operador todavía no registra su kilometraje inicial para arrancar este recorrido.
             En cuanto lo haga, esta pantalla se actualiza sola.
           </p>
         </div>
@@ -364,8 +430,73 @@ export default function TripRunner() {
         </h1>
       </div>
 
+      {/* Mapa de la ruta: vista rápida adentro de la app + un botón para
+          abrir la ruta completa (todas las paradas que faltan, en orden)
+          en Google Maps, para navegación real con tráfico en vivo y
+          recálculo automático — eso Google ya lo hace muy bien, no hace
+          falta reinventarlo aquí. */}
+      <div className="flex gap-2 cascade-item">
+        <button
+          type="button"
+          onClick={() => setShowMap((v) => !v)}
+          className="btn-admin-ghost text-xs flex-1 justify-center"
+        >
+          {showMap ? 'Ocultar mapa' : '🗺️ Ver mapa de la ruta'}
+        </button>
+        {fullRouteUrl ? (
+          <a
+            href={fullRouteUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="btn-admin-ghost text-xs flex-1 justify-center text-center"
+          >
+            🧭 Abrir ruta completa
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            title="Aún no hay ubicaciones exactas capturadas para esta ruta"
+            className="btn-admin-ghost text-xs flex-1 justify-center opacity-40 cursor-not-allowed"
+          >
+            🧭 Ruta completa (sin ubicaciones aún)
+          </button>
+        )}
+      </div>
+
+      {showMap && (
+        <div className="rounded-2xl overflow-hidden border border-navy-100 cascade-item" style={{ height: 280 }}>
+          <MapContainer
+            center={mapCenter}
+            zoom={remainingWithCoords.length || myLocation ? 13 : 11}
+            style={{ height: '100%', width: '100%' }}
+          >
+            <TileLayer
+              attribution="&copy; OpenStreetMap contributors"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {myLocation && (
+              <Marker position={[myLocation.lat, myLocation.lng]}>
+                <Popup>Tú (unidad)</Popup>
+              </Marker>
+            )}
+            {remainingWithCoords.map((s, i) => (
+              <Marker key={s.studentId} position={[s.coords.lat, s.coords.lng]}>
+                <Popup>{i + 1}. {s.name}</Popup>
+              </Marker>
+            ))}
+          </MapContainer>
+        </div>
+      )}
+      {showMap && remainingWithCoords.length < remainingStops.length && (
+        <p className="text-xs text-navy-400 cascade-item">
+          {remainingStops.length - remainingWithCoords.length} parada(s) todavía sin ubicación
+          exacta (se van a ir agregando solas conforme se recorran).
+        </p>
+      )}
+
       {/* Aviso de incidente en ruta: lo ve el padre de familia en vivo en
-          /seguimiento. Disponible tanto para el chofer como para la nanny. */}
+          /seguimiento. Disponible tanto para el operador como para la nanny. */}
       {trip.alert ? (
         <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3 flex items-start justify-between gap-3">
           <div>
@@ -565,7 +696,7 @@ export default function TripRunner() {
 
       {allResolved && !isDriver && (
         <p className="text-center text-navy-400 text-sm">
-          Todos los alumnos están resueltos. El chofer debe registrar el kilometraje final para
+          Todos los alumnos están resueltos. El operador debe registrar el kilometraje final para
           cerrar el recorrido.
         </p>
       )}
