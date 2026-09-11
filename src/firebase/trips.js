@@ -141,12 +141,22 @@ export function studentAppliesToday(student, dateStr, shift) {
  * chofer, ve en vivo el momento en que el chofer registra su kilometraje
  * inicial y arranca el recorrido, sin tener que refrescar.
  */
-export function subscribeTodayTrip(routeId, shift, callback) {
+export function subscribeTodayTrip(routeId, shift, callback, onError) {
   const id = tripDocId(routeId, todayString(), shift);
   const ref = doc(db, 'trips', id);
-  return onSnapshot(ref, (snap) => {
-    callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
-  });
+  return onSnapshot(
+    ref,
+    (snap) => {
+      callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
+    },
+    (err) => {
+      // Sin este manejador, un error aquí (permisos, sin conexión, etc.)
+      // deja a la pantalla del operador cargando para siempre, porque
+      // el callback normal nunca se vuelve a llamar.
+      console.error('subscribeTodayTrip error:', err);
+      if (onError) onError(err);
+    }
+  );
 }
 
 /**
@@ -226,12 +236,19 @@ function orderStudents(students, savedOrder = []) {
   return [...ordered, ...rest];
 }
 
-export function subscribeTripStops(tripId, callback) {
+export function subscribeTripStops(tripId, callback, onError) {
   const stopsRef = collection(db, 'trips', tripId, 'stops');
   const q = query(stopsRef, orderBy('order'));
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    },
+    (err) => {
+      console.error('subscribeTripStops error:', err);
+      if (onError) onError(err);
+    }
+  );
 }
 
 /**
@@ -273,6 +290,24 @@ export async function getTrip(tripId) {
 }
 
 /**
+ * Guarda en el propio expediente del alumno (students/{id}) la última
+ * ubicación en la que se le entregó (bajó del camión). Así, el panel de
+ * Alumnos puede mostrar "última ubicación de entrega" con un solo campo
+ * en el propio documento, sin tener que hacer consultas cruzadas contra
+ * todos los recorridos históricos. Solo se llama cuando field === 'delivered'
+ * y hay ubicación disponible — si nunca se ha entregado, el campo
+ * simplemente no existe y el panel no muestra mapa.
+ */
+async function saveLastDeliveredLocationOnStudent(studentId, location, tripId) {
+  if (!location) return;
+  await updateDoc(doc(db, 'students', studentId), {
+    lastDeliveredLocation: location,
+    lastDeliveredAt: serverTimestamp(),
+    lastDeliveredTripId: tripId,
+  });
+}
+
+/**
  * Marca a UN alumno como abordado (mañana: lo recogieron en su domicilio)
  * o como entregado (tarde: bajó del camión), guardando hora + ubicación.
  */
@@ -287,6 +322,9 @@ export async function markStopManual(tripId, studentId, field, location) {
     [locField]: location || null,
     [methodField]: 'manual',
   });
+  if (field === 'delivered' && location) {
+    await saveLastDeliveredLocationOnStudent(studentId, location, tripId);
+  }
 }
 
 export async function markStopAbsent(tripId, studentId) {
@@ -330,6 +368,16 @@ export async function markAllBulk(tripId, field, location, stops) {
     bulkEventAt: serverTimestamp(),
     bulkEventLocation: location || null,
   });
+
+  if (field === 'delivered' && location) {
+    eligible.forEach((stop) => {
+      batch.update(doc(db, 'students', stop.studentId || stop.id), {
+        lastDeliveredLocation: location,
+        lastDeliveredAt: serverTimestamp(),
+        lastDeliveredTripId: tripId,
+      });
+    });
+  }
 
   await batch.commit();
 }
