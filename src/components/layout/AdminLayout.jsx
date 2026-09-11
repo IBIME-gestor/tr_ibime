@@ -20,7 +20,7 @@ const links = [
   { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard },
   { to: '/admin/planteles', label: 'Planteles', icon: School },
   { to: '/admin/alumnos', label: 'Alumnos', icon: Users },
-  { to: '/admin/choferes', label: 'Choferes y nannies', icon: Contact },
+  { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact },
   { to: '/admin/unidades', label: 'Unidades', icon: Truck },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon },
   { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart },
