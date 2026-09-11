@@ -30,6 +30,32 @@ function fmtEta(minutesFromNow) {
   return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Recuerda, en este dispositivo, las últimas matrículas consultadas —
+// así el padre no tiene que volver a teclearla cada vez que entra.
+// Nada de esto se manda a Firestore, es solo localStorage del navegador.
+const SAVED_KEY = 'ibime_seguimiento_alumnos';
+const MAX_SAVED = 4;
+
+function readSavedStudents() {
+  try {
+    const raw = localStorage.getItem(SAVED_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberStudent(entry) {
+  try {
+    const current = readSavedStudents().filter((s) => s.matricula !== entry.matricula);
+    const next = [entry, ...current].slice(0, MAX_SAVED);
+    localStorage.setItem(SAVED_KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return readSavedStudents();
+  }
+}
+
 export default function PublicTrack() {
   const [matricula, setMatricula] = useState('');
   const [shift, setShift] = useState('afternoon');
@@ -39,17 +65,19 @@ export default function PublicTrack() {
   const [searching, setSearching] = useState(false);
   const unsubRef = useRef(null);
 
+  const [savedStudents, setSavedStudents] = useState(readSavedStudents);
+  const [showForm, setShowForm] = useState(() => readSavedStudents().length === 0);
+
   useEffect(() => () => unsubRef.current?.(), []);
 
-  async function handleSearch(e) {
-    e.preventDefault();
+  async function runSearch(matriculaValue, shiftValue = shift) {
     setError('');
     setTracking(null);
     unsubRef.current?.();
-    if (!matricula.trim()) return;
+    if (!matriculaValue.trim()) return;
 
     setSearching(true);
-    const idx = await getPublicStudentIndex(matricula);
+    const idx = await getPublicStudentIndex(matriculaValue);
     setSearching(false);
 
     if (!idx) {
@@ -58,7 +86,19 @@ export default function PublicTrack() {
       return;
     }
     setStudentIndex(idx);
-    unsubRef.current = subscribePublicTracking(idx.routeId, shift, setTracking);
+    unsubRef.current = subscribePublicTracking(idx.routeId, shiftValue, setTracking);
+    setSavedStudents(rememberStudent({ matricula: matriculaValue.trim(), name: idx.name }));
+    setShowForm(false);
+  }
+
+  function handleSearch(e) {
+    e.preventDefault();
+    runSearch(matricula);
+  }
+
+  function handleQuickSelect(entry) {
+    setMatricula(entry.matricula);
+    runSearch(entry.matricula);
   }
 
   const myStop = useMemo(
@@ -109,43 +149,79 @@ export default function PublicTrack() {
           <p className="text-navy-400 text-sm">Consulta con la matrícula de tu hijo(a)</p>
         </div>
 
-        <form onSubmit={handleSearch} className="card space-y-3 cascade-item" style={{ animationDelay: '70ms' }}>
-          <input
-            value={matricula}
-            onChange={(e) => setMatricula(e.target.value)}
-            inputMode="numeric"
-            placeholder="Matrícula"
-            className="w-full rounded-xl border border-navy-100 px-3 py-3 text-lg"
-          />
-          <div className="grid grid-cols-2 gap-2">
+        {savedStudents.length > 0 && !showForm && (
+          <div className="flex flex-wrap gap-2 cascade-item" style={{ animationDelay: '40ms' }}>
+            {savedStudents.map((s) => (
+              <button
+                key={s.matricula}
+                onClick={() => handleQuickSelect(s)}
+                className={`px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-transform active:scale-[0.97] ${
+                  matricula === s.matricula
+                    ? 'border-navy-800 bg-navy-800 text-white'
+                    : 'border-navy-100 bg-white text-navy-700'
+                }`}
+              >
+                👤 {s.name.split(' ')[0]}
+              </button>
+            ))}
             <button
-              type="button"
-              onClick={() => setShift('morning')}
-              className={`py-2 rounded-xl border-2 text-sm font-medium ${
-                shift === 'morning' ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100'
-              }`}
+              onClick={() => setShowForm(true)}
+              className="px-4 py-2.5 rounded-xl border-2 border-dashed border-navy-200 text-sm font-medium text-navy-400"
             >
-              ☀️ Recorrido de ida
-            </button>
-            <button
-              type="button"
-              onClick={() => setShift('afternoon')}
-              className={`py-2 rounded-xl border-2 text-sm font-medium ${
-                shift === 'afternoon' ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100'
-              }`}
-            >
-              🌇 Recorrido de vuelta
+              + Buscar otra matrícula
             </button>
           </div>
-          <button
-            type="submit"
-            disabled={searching}
-            className="w-full py-3 rounded-xl bg-go text-white font-display font-semibold"
-          >
-            {searching ? 'Buscando…' : 'Ver seguimiento'}
-          </button>
-          {error && <p className="text-stop text-sm">{error}</p>}
-        </form>
+        )}
+
+        {showForm && (
+          <form onSubmit={handleSearch} className="card space-y-3 cascade-item" style={{ animationDelay: '70ms' }}>
+            {savedStudents.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="text-xs text-navy-400 underline"
+              >
+                ‹ Ver mis alumnos guardados
+              </button>
+            )}
+            <input
+              value={matricula}
+              onChange={(e) => setMatricula(e.target.value)}
+              inputMode="numeric"
+              placeholder="Matrícula"
+              autoFocus={savedStudents.length > 0}
+              className="w-full rounded-xl border border-navy-100 px-3 py-3 text-lg"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShift('morning')}
+                className={`py-2 rounded-xl border-2 text-sm font-medium ${
+                  shift === 'morning' ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100'
+                }`}
+              >
+                ☀️ Recorrido de ida
+              </button>
+              <button
+                type="button"
+                onClick={() => setShift('afternoon')}
+                className={`py-2 rounded-xl border-2 text-sm font-medium ${
+                  shift === 'afternoon' ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100'
+                }`}
+              >
+                🌇 Recorrido de vuelta
+              </button>
+            </div>
+            <button
+              type="submit"
+              disabled={searching}
+              className="w-full py-3 rounded-xl bg-go text-white font-display font-semibold"
+            >
+              {searching ? 'Buscando…' : 'Ver seguimiento'}
+            </button>
+            {error && <p className="text-stop text-sm">{error}</p>}
+          </form>
+        )}
 
         {studentIndex && !tracking && (
           <div className="card text-center text-sm text-navy-400 cascade-item">
@@ -222,7 +298,7 @@ export default function PublicTrack() {
 
             {liveLoc?.lat && (
               <>
-                <div className="rounded-xl overflow-hidden" style={{ height: 260 }}>
+                <div className="rounded-xl overflow-hidden w-full min-w-0" style={{ height: 260 }}>
                   <MapContainer
                     center={[liveLoc.lat, liveLoc.lng]}
                     zoom={13}
