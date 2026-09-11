@@ -139,7 +139,7 @@ export default function Reports() {
               </div>
             </div>
 
-            <div className="admin-card p-0 overflow-hidden" style={{ height: 420 }}>
+            <div className="admin-card p-0 overflow-hidden w-full min-w-0" style={{ height: 420 }}>
               <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
                 <TileLayer
                   attribution='&copy; OpenStreetMap contributors'
