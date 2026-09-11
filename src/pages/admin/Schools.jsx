@@ -36,7 +36,7 @@ export default function SchoolsPage() {
     <div>
       <h1 className="admin-h1 mb-5">Planteles</h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
         <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 cascade-item">
           <p className="font-display font-semibold text-sm text-navy-800 mb-3">
             {editingId ? 'Editar plantel' : 'Nuevo plantel'}
