@@ -18,7 +18,7 @@ const STATUS_LABEL = {
 /**
  * Tarjeta táctil grande para un alumno dentro del recorrido.
  * `actionLabel` cambia según el turno: "Recogido" en la mañana,
- * "Bajó" en la tarde. El chofer toca UNA vez, no hay menús ni pasos extra.
+ * "Bajó" en la tarde. El operador toca UNA vez, no hay menús ni pasos extra.
  *
  * El nombre siempre va en su propio renglón y los botones abajo, en una
  * fila que se puede envolver (flex-wrap) — así no se aprietan ni se
