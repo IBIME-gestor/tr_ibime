@@ -32,7 +32,7 @@ export default function DriversPage() {
   }
 
   async function handleDelete(id) {
-    if (window.confirm('¿Dar de baja a este chofer/nanny? Ya no podrá iniciar sesión.')) {
+    if (window.confirm('¿Dar de baja a este operador/nanny? Ya no podrá iniciar sesión.')) {
       await Drivers.remove(id);
     }
   }
@@ -41,10 +41,10 @@ export default function DriversPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-1">Choferes y nannies</h1>
+      <h1 className="admin-h1 mb-1">Operadores y nannies</h1>
       <p className="text-sm text-navy-400 mb-5">{drivers.length} personas dadas de alta</p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
         <div className="space-y-4 lg:sticky lg:top-6 cascade-item">
           <div className="bg-signal-yellow/20 border border-signal-yellow rounded-lg px-4 py-3 text-sm text-navy-800">
             No necesitas crear ninguna contraseña: cada persona entra sola con su cuenta de Google
@@ -53,7 +53,7 @@ export default function DriversPage() {
 
           <form onSubmit={handleSubmit} className="admin-card shadow-panel">
             <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-              {editingId ? 'Editar' : 'Nuevo chofer / nanny'}
+              {editingId ? 'Editar' : 'Nuevo operador / nanny'}
             </p>
             <div className="space-y-3">
               <div>
@@ -80,7 +80,7 @@ export default function DriversPage() {
                   onChange={(e) => setForm({ ...form, role: e.target.value })}
                   className="admin-select"
                 >
-                  <option value="driver">Chofer</option>
+                  <option value="driver">Operador</option>
                   <option value="nanny">Nanny</option>
                 </select>
               </div>
@@ -142,7 +142,7 @@ export default function DriversPage() {
                   <tr key={d.id} className="cascade-item" style={cascadeStyle(i, 25)}>
                     <td className="pl-5 font-medium text-navy-700">{d.name}</td>
                     <td>
-                      <span className="badge">{d.role === 'nanny' ? 'Nanny' : 'Chofer'}</span>
+                      <span className="badge">{d.role === 'nanny' ? 'Nanny' : 'Operador'}</span>
                     </td>
                     <td className="text-navy-500">{schoolName(d.schoolId)}</td>
                     <td className="text-navy-500">{d.email}</td>
@@ -155,7 +155,7 @@ export default function DriversPage() {
               </tbody>
             </table>
             {drivers.length === 0 && (
-              <p className="text-navy-400 text-sm py-6 text-center">Sin choferes registrados.</p>
+              <p className="text-navy-400 text-sm py-6 text-center">Sin operadores registrados.</p>
             )}
           </div>
         </div>
