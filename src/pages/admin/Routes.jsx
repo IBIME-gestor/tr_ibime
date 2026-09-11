@@ -98,7 +98,7 @@ export default function RoutesPage() {
             </select>
           </div>
           <div>
-            <label className="admin-label">Chofer</label>
+            <label className="admin-label">Operador</label>
             <select
               value={form.driverId}
               onChange={(e) => setForm({ ...form, driverId: e.target.value })}
@@ -361,7 +361,7 @@ function RouteOptimizer({ route, assigned, school }) {
             ))}
           </ol>
           <p className="text-xs text-navy-500 mb-3">
-            Se aplicará mañana en la app del chofer. Ojo: si el chofer marca a los alumnos en un orden distinto
+            Se aplicará mañana en la app del operador. Ojo: si el operador marca a los alumnos en un orden distinto
             al sugerido, el sistema vuelve a ajustarse solo con el orden real del día siguiente.
           </p>
           <div className="flex gap-2">
