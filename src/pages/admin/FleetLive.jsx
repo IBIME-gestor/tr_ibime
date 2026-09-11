@@ -108,7 +108,7 @@ export default function FleetLive() {
         no hace falta refrescar.
       </p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-4">
         <div className="space-y-2 order-2 lg:order-1 max-h-[520px] overflow-y-auto">
           {trips.length === 0 && (
             <div className="admin-card text-center text-sm text-navy-400 cascade-item">
@@ -150,7 +150,7 @@ export default function FleetLive() {
           })}
         </div>
 
-        <div className="rounded-2xl overflow-hidden border border-navy-100 order-1 lg:order-2" style={{ height: 520 }}>
+        <div className="rounded-2xl overflow-hidden border border-navy-100 order-1 lg:order-2 w-full min-w-0" style={{ height: 520 }}>
           <MapContainer center={MEXICO_CITY} zoom={12} style={{ height: '100%', width: '100%' }}>
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
