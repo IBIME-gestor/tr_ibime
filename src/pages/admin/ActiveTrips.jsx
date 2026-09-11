@@ -61,7 +61,7 @@ export default function ActiveTrips() {
         </button>
       </div>
       <p className="text-sm text-navy-400 mb-5">
-        Recorridos que un chofer o nanny inició hoy (o algún día anterior) y que nunca se
+        Recorridos que un operador inició hoy (o algún día anterior) y que nunca se
         cerraron — normalmente porque se quedaron sin datos o se les apagó el celular a media
         ruta. Desde aquí puedes revisar qué alcanzaron a marcar y cerrar el recorrido tú mismo.
       </p>
