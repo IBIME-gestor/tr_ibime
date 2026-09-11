@@ -21,7 +21,7 @@ function navUrls(lat, lng) {
 }
 
 /**
- * Pensada para cuando a un chofer lo asignan a una ruta que no conoce:
+ * Pensada para cuando a un operador lo asignan a una ruta que no conoce:
  * trae el ÚLTIMO recorrido completado de esa ruta/turno (sin importar
  * quién lo haya manejado) y deja navegar parada por parada, respetando
  * el orden real con el que se hizo ese día. No permite marcar nada —
@@ -71,7 +71,7 @@ export default function ReferenceRoute() {
         <div className="card text-center">
           <p className="text-navy-400 text-sm">
             Todavía no hay ningún recorrido guardado de esta ruta/turno para usar de referencia.
-            En cuanto alguien la corra una vez, aquí quedará disponible para el siguiente chofer.
+            En cuanto alguien la corra una vez, aquí quedará disponible para el siguiente operador.
           </p>
         </div>
       )}
