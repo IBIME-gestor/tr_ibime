@@ -74,7 +74,8 @@ service cloud.firestore {
       allow update: if isAdmin() ||
         (isDriver() && resource.data.driverId == myStaffId() &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['studentOrderMorning', 'studentOrderAfternoon', 'updatedAt']));
+            .hasOnly(['studentOrderMorning', 'studentOrderAfternoon',
+                      'avgStopMinutesMorning', 'avgStopMinutesAfternoon', 'updatedAt']));
       allow create, delete: if isAdmin();
     }
 
