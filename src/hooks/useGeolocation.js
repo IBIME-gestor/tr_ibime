@@ -18,7 +18,7 @@ export function getCurrentLocation(options = {}) {
         });
       },
       () => resolve(null), // si el chofer niega el permiso, seguimos sin bloquear el flujo
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000, ...options }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0, ...options }
     );
   });
 }
