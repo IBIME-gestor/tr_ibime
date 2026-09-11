@@ -12,24 +12,52 @@ export default function RouteHome() {
   const navigate = useNavigate();
   const [routes, setRoutesState] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
+      setLoadError('');
       if (!profile?.staffId) {
         setLoading(false);
         return;
       }
-      const mine =
-        profile.role === 'nanny'
-          ? await Routes.listByNanny(profile.staffId)
-          : await Routes.listByDriver(profile.staffId);
-      setRoutesState(mine);
-      setLoading(false);
+      try {
+        const mine =
+          profile.role === 'nanny'
+            ? await Routes.listByNanny(profile.staffId)
+            : await Routes.listByDriver(profile.staffId);
+        if (cancelled) return;
+        setRoutesState(mine);
+        setLoading(false);
+      } catch (err) {
+        // Igual que en AuthContext: sin try/catch, un error aquí dejaba
+        // esta pantalla pegada en "Cargando tu ruta…" para siempre.
+        console.error('RouteHome load error:', err);
+        if (!cancelled) {
+          setLoadError(err.message || 'No se pudo cargar tu ruta. Revisa tu conexión e intenta de nuevo.');
+          setLoading(false);
+        }
+      }
     }
     load();
+    return () => { cancelled = true; };
   }, [profile]);
 
   if (loading) return <LoadingOverlay show label="Cargando tu ruta…" />;
+
+  if (loadError) {
+    return (
+      <div className="card text-center mt-10 cascade-item">
+        <p className="text-3xl mb-2">⚠️</p>
+        <p className="font-display font-semibold text-lg mb-1">No se pudo cargar tu ruta</p>
+        <p className="text-navy-400 text-sm mb-4">{loadError}</p>
+        <button onClick={() => window.location.reload()} className="btn-admin-primary mx-auto">
+          Reintentar
+        </button>
+      </div>
+    );
+  }
 
   if (routes.length === 0) {
     return (
