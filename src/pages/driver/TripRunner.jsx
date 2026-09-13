@@ -24,6 +24,7 @@ import {
 } from '../../firebase/trips';
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import { getFarewellMessage } from '../../utils/greetings';
+import { weekdayName, fmtCoords } from '../../utils/dates';
 import StopCard from '../../components/StopCard';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
@@ -520,7 +521,14 @@ export default function TripRunner() {
             )}
             {remainingWithCoords.map((s, i) => (
               <Marker key={s.studentId} position={[s.coords.lat, s.coords.lng]}>
-                <Popup>{i + 1}. {s.name}</Popup>
+                <Popup>
+                  <div className="text-xs leading-relaxed">
+                    <p className="font-semibold">{i + 1}. {s.name}</p>
+                    <p>Matrícula: {s.matricula}</p>
+                    <p>{weekdayName(trip?.date)} · {trip?.date}</p>
+                    <p className="text-navy-400">{fmtCoords(s.coords.lat, s.coords.lng)}</p>
+                  </div>
+                </Popup>
               </Marker>
             ))}
           </MapContainer>
