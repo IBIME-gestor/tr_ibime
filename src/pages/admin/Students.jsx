@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { Students, Schools, Routes } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
+import { weekdayName, fmtCoords } from '../../utils/dates';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -84,7 +85,7 @@ function DetailRow({ icon: Icon, label, children }) {
 function fmtDateTime(ts) {
   const ms = ts?.toMillis ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : null;
   if (!ms) return null;
-  return new Date(ms).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+  return new Date(ms).toLocaleString('es-MX', { dateStyle: 'full', timeStyle: 'short' });
 }
 
 const emptyForm = {
@@ -841,7 +842,18 @@ export default function StudentsPage() {
                           <Marker
                             position={[selectedStudent.lastDeliveredLocation.lat, selectedStudent.lastDeliveredLocation.lng]}
                           >
-                            <Popup>{selectedStudent.name}</Popup>
+                            <Popup>
+                              <div className="text-xs leading-relaxed">
+                                <p className="font-semibold">{selectedStudent.name}</p>
+                                <p>Matrícula: {selectedStudent.matricula}</p>
+                                {fmtDateTime(selectedStudent.lastDeliveredAt) && (
+                                  <p>{fmtDateTime(selectedStudent.lastDeliveredAt)}</p>
+                                )}
+                                <p className="text-navy-400">
+                                  {fmtCoords(selectedStudent.lastDeliveredLocation.lat, selectedStudent.lastDeliveredLocation.lng)}
+                                </p>
+                              </div>
+                            </Popup>
                           </Marker>
                         </MapContainer>
                       </div>
