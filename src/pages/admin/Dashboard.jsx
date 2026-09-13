@@ -7,25 +7,37 @@ import { cascadeStyle } from '../../utils/cascade';
 
 export default function Dashboard() {
   const [counts, setCounts] = useState(null);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
     async function load() {
-      const [schools, students, drivers, units, routes] = await Promise.all([
-        Schools.list(),
-        Students.list(),
-        Drivers.list(),
-        Units.list(),
-        Routes.list(),
-      ]);
-      setCounts({
-        schools: schools.length,
-        students: students.length,
-        drivers: drivers.length,
-        units: units.length,
-        routes: routes.length,
-      });
+      try {
+        const [schools, students, drivers, units, routes] = await Promise.all([
+          Schools.list(),
+          Students.list(),
+          Drivers.list(),
+          Units.list(),
+          Routes.list(),
+        ]);
+        if (cancelled) return;
+        setCounts({
+          schools: schools.length,
+          students: students.length,
+          drivers: drivers.length,
+          units: units.length,
+          routes: routes.length,
+        });
+      } catch (err) {
+        // Sin try/catch, un error aquí dejaba el Resumen pegado en
+        // "Cargando resumen…" para siempre, sin decir por qué.
+        console.error('Dashboard load error:', err);
+        if (!cancelled) setLoadError(err.message || 'No se pudo cargar el resumen. Revisa tu conexión e intenta de nuevo.');
+      }
     }
     load();
+    return () => { cancelled = true; };
   }, []);
 
   const cards = [
@@ -38,8 +50,18 @@ export default function Dashboard() {
 
   return (
     <div>
-      <LoadingOverlay show={!counts} label="Cargando resumen…" />
+      <LoadingOverlay show={!counts && !loadError} label="Cargando resumen…" />
       <h1 className="admin-h1 mb-5">Resumen</h1>
+      {loadError && (
+        <div className="admin-card text-center py-8 mb-5 cascade-item">
+          <p className="text-3xl mb-2">⚠️</p>
+          <p className="font-display font-semibold text-base mb-1">No se pudo cargar el resumen</p>
+          <p className="text-navy-400 text-sm mb-4">{loadError}</p>
+          <button onClick={() => window.location.reload()} className="btn-admin-primary mx-auto">
+            Reintentar
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {cards.map((c, i) => (
           <Link
