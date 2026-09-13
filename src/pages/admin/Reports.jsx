@@ -5,6 +5,7 @@ import L from 'leaflet';
 import { Routes } from '../../firebase/services';
 import { listTripsByRoute, getTripStopsOnce } from '../../firebase/trips';
 import { cascadeStyle } from '../../utils/cascade';
+import { weekdayName, fmtCoords } from '../../utils/dates';
 
 // Ícono por defecto de Leaflet no carga bien con bundlers; se reconfigura aquí.
 delete L.Icon.Default.prototype._getIconUrl;
@@ -148,7 +149,12 @@ export default function Reports() {
                 {markers.map((m) => (
                   <Marker key={m.id} position={[m.loc.lat, m.loc.lng]}>
                     <Popup>
-                      {m.name} · {fmtTime(m[timeKey])}
+                      <div className="text-xs leading-relaxed">
+                        <p className="font-semibold">{m.name}</p>
+                        <p>Matrícula: {m.matricula}</p>
+                        <p>{weekdayName(trip.date)} · {trip.date} · {fmtTime(m[timeKey])}</p>
+                        <p className="text-navy-400">{fmtCoords(m.loc.lat, m.loc.lng)}</p>
+                      </div>
                     </Popup>
                   </Marker>
                 ))}
