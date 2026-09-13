@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes as RoutesService } from '../../firebase/services';
 import { getReferenceTrip } from '../../firebase/trips';
+import { weekdayName, fmtCoords } from '../../utils/dates';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -97,7 +98,14 @@ export default function ReferenceRoute() {
                     position={[s.referenceLocation.lat, s.referenceLocation.lng]}
                     eventHandlers={{ click: () => setActiveStop(s.id) }}
                   >
-                    <Popup>{s.order + 1}. {s.name}</Popup>
+                    <Popup>
+                      <div className="text-xs leading-relaxed">
+                        <p className="font-semibold">{s.order + 1}. {s.name}</p>
+                        <p>Matrícula: {s.matricula}</p>
+                        <p>{weekdayName(reference.trip.date)} · {reference.trip.date}</p>
+                        <p className="text-navy-400">{fmtCoords(s.referenceLocation.lat, s.referenceLocation.lng)}</p>
+                      </div>
+                    </Popup>
                   </Marker>
                 ))}
               </MapContainer>
