@@ -19,28 +19,78 @@ export default function TripSummary() {
   const [trip, setTrip] = useState(null);
   const [stops, setStops] = useState([]);
   const [phones, setPhones] = useState({});
+  const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadError('');
+    setNotFound(false);
     async function load() {
-      const t = await getTrip(tripId);
-      const s = await getTripStopsOnce(tripId);
-      setTrip(t);
-      setStops(s);
+      try {
+        const t = await getTrip(tripId);
+        if (cancelled) return;
+        if (!t) {
+          // El recorrido no existe (id incorrecto, o se borró). Sin este
+          // control, la pantalla se quedaba en "Cargando resumen…" para
+          // siempre, porque `trip` nunca dejaba de ser null.
+          setNotFound(true);
+          return;
+        }
+        const s = await getTripStopsOnce(tripId);
+        if (cancelled) return;
+        setTrip(t);
+        setStops(s);
 
-      // Una sola consulta adicional (no un listener) para tener el
-      // teléfono del padre a la mano y poder llamar directo desde aquí,
-      // igual que durante el recorrido en vivo.
-      if (t?.routeId) {
-        const routeStudents = await Students.listByRoute(t.routeId);
-        const phoneById = {};
-        routeStudents.forEach((st) => {
-          if (st.parentContact) phoneById[st.id] = st.parentContact;
-        });
-        setPhones(phoneById);
+        // Una sola consulta adicional (no un listener) para tener el
+        // teléfono del padre a la mano y poder llamar directo desde aquí,
+        // igual que durante el recorrido en vivo.
+        if (t?.routeId) {
+          const routeStudents = await Students.listByRoute(t.routeId);
+          if (cancelled) return;
+          const phoneById = {};
+          routeStudents.forEach((st) => {
+            if (st.parentContact) phoneById[st.id] = st.parentContact;
+          });
+          setPhones(phoneById);
+        }
+      } catch (err) {
+        // Igual que en TripRunner/RouteHome/AuthContext: sin try/catch,
+        // cualquier error (permisos, sin conexión) dejaba esta pantalla
+        // pegada en "Cargando resumen…" para siempre.
+        console.error('TripSummary load error:', err);
+        if (!cancelled) {
+          setLoadError(err.message || 'No se pudo cargar el resumen. Revisa tu conexión e intenta de nuevo.');
+        }
       }
     }
     load();
+    return () => { cancelled = true; };
   }, [tripId]);
+
+  if (loadError) {
+    return (
+      <div className="card text-center mt-10 cascade-item">
+        <p className="text-3xl mb-2">⚠️</p>
+        <p className="font-display font-semibold text-lg mb-1">No se pudo abrir el resumen</p>
+        <p className="text-navy-400 text-sm mb-4">{loadError}</p>
+        <div className="flex gap-2 justify-center">
+          <button onClick={() => window.location.reload()} className="btn-admin-primary">Reintentar</button>
+          <button onClick={() => navigate('/chofer')} className="btn-admin-ghost">Volver al inicio</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <div className="card text-center mt-10 cascade-item">
+        <p className="text-3xl mb-2">🤔</p>
+        <p className="font-display font-semibold text-lg mb-1">Ese recorrido ya no existe</p>
+        <button onClick={() => navigate('/chofer')} className="btn-primary mt-3">Volver al inicio</button>
+      </div>
+    );
+  }
 
   if (!trip) return <LoadingOverlay show label="Cargando resumen…" />;
 
