@@ -7,9 +7,10 @@ import {
   Search, Upload, User, MapPin, Bus, CircleDollarSign, Pencil, Trash2, X,
   Phone, CreditCard, IdCard, School as SchoolIcon, Navigation,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { Students, Schools, Routes } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
-import { weekdayName, fmtCoords } from '../../utils/dates';
+import { weekdayName, fmtCoords, fmtTimestamp24 } from '../../utils/dates';
 import { routeColorClasses } from '../../utils/routeColor';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -43,9 +44,9 @@ export const BILLING_MODES = {
 };
 
 export const PAYMENT_STATUSES = {
-  al_corriente: { label: 'Al corriente', badgeClass: 'badge-go' },
-  desfase: { label: 'Con desfase', badgeClass: 'badge-amber' },
-  sin_pago: { label: 'Sin pago', badgeClass: 'badge-stop' },
+  al_corriente: { label: 'Pagado', badgeClass: 'badge-go' },
+  desfase: { label: 'Pendiente de pago', badgeClass: 'badge-amber' },
+  sin_pago: { label: 'En mora', badgeClass: 'badge-stop' },
 };
 
 export const WEEKDAYS = [
@@ -106,6 +107,7 @@ const emptyForm = {
 };
 
 export default function StudentsPage() {
+  const { profile } = useAuth();
   const [students, setStudents] = useState([]);
   const [schools, setSchools] = useState([]);
   const [routes, setRoutesState] = useState([]);
@@ -196,7 +198,7 @@ export default function StudentsPage() {
   }
 
   async function handlePaymentStatusChange(id, paymentStatus) {
-    await Students.update(id, { paymentStatus });
+    await Students.setPaymentStatus(id, paymentStatus, profile?.name);
   }
 
   function handleTipoServicioChange(tipoServicio) {
@@ -832,6 +834,18 @@ export default function StudentsPage() {
                   <DetailRow icon={CircleDollarSign} label="Monto">
                     {selectedStudent.billingAmount ? `$${selectedStudent.billingAmount}` : 'Sin monto registrado'}
                   </DetailRow>
+                  {selectedStudent.paymentStatusUpdatedAt && (
+                    <DetailRow icon={CreditCard} label="Estatus actualizado">
+                      {fmtTimestamp24(selectedStudent.paymentStatusUpdatedAt)}
+                      {selectedStudent.paymentStatusUpdatedBy ? ` · ${selectedStudent.paymentStatusUpdatedBy}` : ''}
+                    </DetailRow>
+                  )}
+                  {selectedStudent.lastPaymentAt && (
+                    <DetailRow icon={CircleDollarSign} label="Último pago registrado">
+                      {selectedStudent.lastPaymentAmount ? `$${selectedStudent.lastPaymentAmount} · ` : ''}
+                      {fmtTimestamp24(selectedStudent.lastPaymentAt)}
+                    </DetailRow>
+                  )}
                 </div>
               )}
 
