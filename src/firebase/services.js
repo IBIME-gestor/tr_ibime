@@ -1,4 +1,4 @@
-import { where, orderBy, doc, setDoc, deleteDoc, collection, writeBatch } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc, collection, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './config';
 import {
   listAll,
@@ -100,6 +100,51 @@ export const Students = {
       await deleteDoc(doc(db, 'publicStudentIndex', existing.matricula.trim()));
     }
   },
+
+  /**
+   * Cambia el estatus de pago SIN registrar un cobro (para marcar
+   * "Pendiente de pago" o "En mora"). Siempre deja sello de quién y
+   * cuándo exactamente se hizo el cambio — es lo que alimenta el
+   * "actualizado el dd/mm/aaaa HH:mm:ss" que se ve en Caja y Alumnos.
+   */
+  async setPaymentStatus(id, paymentStatus, byName) {
+    await updateDocById('students', id, {
+      paymentStatus,
+      paymentStatusUpdatedAt: serverTimestamp(),
+      paymentStatusUpdatedBy: byName || '',
+    });
+  },
+
+  /**
+   * Registra un pago con folio propio en students/{id}/payments — el
+   * inicio de una bitácora de cobranza real (monto, método, quién lo
+   * capturó y a qué hora exacta), no solo un banderazo de "pagado".
+   * Además marca al alumno como al corriente y deja el último pago a
+   * la mano en su propio expediente para no tener que abrir el
+   * historial completo nada más para ver "cuándo pagó por última vez".
+   */
+  async registerPayment(id, { amount, method, note, byName, byUid }) {
+    const paymentRef = await addDoc(collection(db, 'students', id, 'payments'), {
+      amount: amount === '' || amount == null ? null : Number(amount),
+      method: method || 'efectivo',
+      note: note || '',
+      registeredByName: byName || '',
+      registeredByUid: byUid || '',
+      at: serverTimestamp(),
+    });
+    await updateDocById('students', id, {
+      paymentStatus: 'al_corriente',
+      lastPaymentAt: serverTimestamp(),
+      lastPaymentAmount: amount === '' || amount == null ? null : Number(amount),
+      lastPaymentMethod: method || 'efectivo',
+      paymentStatusUpdatedAt: serverTimestamp(),
+      paymentStatusUpdatedBy: byName || '',
+    });
+    return paymentRef.id;
+  },
+
+  /** Bitácora completa de pagos de un alumno (folio, monto, método, fecha). */
+  listPayments: (id) => listAll(`students/${id}/payments`, [orderBy('at', 'desc')]),
 
   /**
    * Búsqueda por matrícula exacta. Se usa cuando el chofer digita
