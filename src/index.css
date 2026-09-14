@@ -49,13 +49,29 @@ h1, h2, h3 {
 /* Panel administrativo: densidad compacta, pensado para escritorio    */
 /* pero responsivo. Deliberadamente MÁS COMPACTO que los .btn-huge/    */
 /* .card de arriba, que son para la app del chofer en el celular.      */
+/*                                                                      */
+/* Lenguaje visual: "bitácora de despacho" — bordes finos tipo         */
+/* ticket/manifiesto en vez de sombra difusa gris de tarjeta de SaaS;  */
+/* un acento de color a la izquierda que se usa como luz de estado     */
+/* real, no como decoración.                                           */
 /* ------------------------------------------------------------------ */
 .admin-h1 {
-  @apply text-xl font-display font-bold text-navy-900;
+  @apply relative pl-3 text-xl font-display font-bold text-navy-900 tracking-tight;
+}
+
+.admin-h1::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.15em;
+  bottom: 0.15em;
+  width: 4px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #FFC93C 0%, #F2A93B 100%);
 }
 
 .admin-card {
-  @apply bg-white rounded-xl border border-navy-100 p-5;
+  @apply relative bg-white rounded-lg border border-navy-100 p-5 shadow-ticket;
 }
 
 .admin-label {
@@ -63,7 +79,7 @@ h1, h2, h3 {
 }
 
 .admin-input {
-  @apply w-full h-10 rounded-lg border border-navy-100 bg-white px-3 text-sm text-navy-800 placeholder:text-navy-400 focus:outline-none focus:border-navy-400 focus:ring-2 focus:ring-signal-yellow/40 transition-shadow;
+  @apply w-full h-10 rounded-md border border-navy-100 bg-white px-3 text-sm text-navy-800 placeholder:text-navy-400 focus:outline-none focus:border-navy-600 focus:ring-2 focus:ring-signal-yellow/40 transition-shadow;
 }
 
 .admin-select {
@@ -71,7 +87,7 @@ h1, h2, h3 {
 }
 
 .btn-admin {
-  @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-semibold transition-colors whitespace-nowrap;
+  @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-md text-sm font-semibold transition-all whitespace-nowrap active:scale-[0.98];
 }
 
 .btn-admin-primary {
@@ -79,7 +95,7 @@ h1, h2, h3 {
 }
 
 .btn-admin-ghost {
-  @apply btn-admin border border-navy-100 text-navy-600 hover:bg-navy-50;
+  @apply btn-admin border border-navy-100 text-navy-600 hover:border-navy-400 hover:bg-navy-50;
 }
 
 .link-action {
@@ -92,10 +108,11 @@ h1, h2, h3 {
 
 .table-admin {
   @apply w-full text-sm border-collapse;
+  font-variant-numeric: tabular-nums;
 }
 
 .table-admin thead th {
-  @apply text-left text-xs font-semibold text-navy-400 pb-2 pr-3 border-b border-navy-100;
+  @apply text-left text-[0.7rem] font-semibold text-navy-400 pb-2 pr-3 border-b-2 border-navy-100 tracking-wide;
 }
 
 .table-admin tbody tr {
@@ -107,19 +124,29 @@ h1, h2, h3 {
 }
 
 .badge {
-  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-navy-50 text-navy-600;
+  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-navy-50 text-navy-600 border border-navy-100;
 }
 
 .badge-go {
-  @apply badge bg-go-light text-go;
+  @apply badge bg-go-light text-go border-go/20;
 }
 
 .badge-stop {
-  @apply badge bg-stop-light text-stop;
+  @apply badge bg-stop-light text-stop border-stop/20;
 }
 
 .badge-amber {
-  @apply badge bg-signal-amber/15 text-signal-amber;
+  @apply badge bg-signal-amber/15 text-signal-amber border-signal-amber/25;
+}
+
+/* Boleto de acceso (login): borde perforado como un pase de abordar,     */
+/* en vez de la tarjeta centrada genérica.                                */
+.ticket-card {
+  @apply relative bg-white rounded-2xl p-6 shadow-ticket;
+  --perf: 14px;
+  --gap: 10px;
+  -webkit-mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
+  mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
 }
 
 /* Enfoque visible para accesibilidad de teclado */
