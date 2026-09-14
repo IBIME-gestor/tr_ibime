@@ -5,6 +5,7 @@ import { listTripsByDate, getTripStopsOnce, todayString } from '../../firebase/t
 import { PAYMENT_STATUSES, BILLING_MODES } from './Students';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
+import { routeColorClasses } from '../../utils/routeColor';
 
 function DetailRow({ icon: Icon, label, children }) {
   return (
@@ -201,7 +202,17 @@ export default function Cashier() {
                       <p className="font-medium">{r.name}</p>
                       <p className="text-xs text-navy-400">{r.matricula}</p>
                     </td>
-                    <td className="p-2 text-navy-500">{r.routeName}</td>
+                    <td className="p-2">
+                      {r.routeId ? (
+                        <span
+                          className={`badge ${routeColorClasses(r.routeId).bg} ${routeColorClasses(r.routeId).text} ${routeColorClasses(r.routeId).border}`}
+                        >
+                          {r.routeName}
+                        </span>
+                      ) : (
+                        <span className="text-navy-400">{r.routeName}</span>
+                      )}
+                    </td>
                     <td className="p-2 text-xs whitespace-nowrap">
                       {r.morning && r.afternoon ? 'Ida y vuelta' : r.morning ? 'Solo ida' : 'Solo vuelta'}
                       {(r.adHocMorning || r.adHocAfternoon) && (
@@ -318,7 +329,15 @@ export default function Cashier() {
                 </div>
 
                 <div className="divide-y divide-navy-50">
-                  <DetailRow icon={Bus} label="Ruta">{selectedRow.routeName}</DetailRow>
+                  <DetailRow icon={Bus} label="Ruta">
+                    {selectedRow.routeId ? (
+                      <span
+                        className={`badge ${routeColorClasses(selectedRow.routeId).bg} ${routeColorClasses(selectedRow.routeId).text} ${routeColorClasses(selectedRow.routeId).border}`}
+                      >
+                        {selectedRow.routeName}
+                      </span>
+                    ) : selectedRow.routeName}
+                  </DetailRow>
                   <DetailRow icon={Bus} label="Tomó ese día">
                     {selectedRow.morning && selectedRow.afternoon
                       ? 'Ida y vuelta'
