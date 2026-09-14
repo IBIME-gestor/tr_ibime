@@ -10,6 +10,7 @@ import {
 import { Students, Schools, Routes } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 import { weekdayName, fmtCoords } from '../../utils/dates';
+import { routeColorClasses } from '../../utils/routeColor';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -414,7 +415,11 @@ export default function StudentsPage() {
                       <td className="text-navy-500">{schoolName(s.schoolId)}</td>
                       <td>
                         {routeName(s.routeId) ? (
-                          <span className="badge">{routeName(s.routeId)}</span>
+                          <span
+                            className={`badge ${routeColorClasses(s.routeId).bg} ${routeColorClasses(s.routeId).text} ${routeColorClasses(s.routeId).border}`}
+                          >
+                            {routeName(s.routeId)}
+                          </span>
                         ) : (
                           <span className="text-navy-400">Sin ruta</span>
                         )}
@@ -807,7 +812,13 @@ export default function StudentsPage() {
               {activeTab === 'servicio' && (
                 <div className="divide-y divide-navy-50">
                   <DetailRow icon={Bus} label="Ruta">
-                    {routeName(selectedStudent.routeId) || 'Sin ruta asignada'}
+                    {routeName(selectedStudent.routeId) ? (
+                      <span
+                        className={`badge ${routeColorClasses(selectedStudent.routeId).bg} ${routeColorClasses(selectedStudent.routeId).text} ${routeColorClasses(selectedStudent.routeId).border}`}
+                      >
+                        {routeName(selectedStudent.routeId)}
+                      </span>
+                    ) : 'Sin ruta asignada'}
                   </DetailRow>
                   <DetailRow icon={Bus} label="Tipo de servicio">
                     {TIPOS_SERVICIO[selectedStudent.tipoServicio || 'completo']}
