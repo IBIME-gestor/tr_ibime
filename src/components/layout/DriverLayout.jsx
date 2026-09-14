@@ -3,8 +3,8 @@ import { Home, History } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const navLinkClass = ({ isActive }) =>
-  `flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-    isActive ? 'bg-navy-700 text-white' : 'text-navy-300 hover:text-white'
+  `flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors border-b-2 ${
+    isActive ? 'text-white border-signal-yellow' : 'text-navy-300 border-transparent hover:text-white'
   }`;
 
 export default function DriverLayout() {
