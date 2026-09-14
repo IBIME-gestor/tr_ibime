@@ -91,6 +91,12 @@ service cloud.firestore {
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId']));
       allow create, delete: if isAdmin();
+
+      // Bitácora de cobranza (folio, monto, método, quién y cuándo).
+      // Es información financiera — solo el admin la puede ver o tocar.
+      match /payments/{paymentId} {
+        allow read, write: if isAdmin();
+      }
     }
 
     // El chofer es el único que puede crear el recorrido (requiere el
