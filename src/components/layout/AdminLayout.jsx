@@ -59,7 +59,9 @@ export default function AdminLayout() {
           </div>
         </div>
 
-        <nav className="flex flex-col gap-0.5">
+        <nav className="relative flex flex-col gap-0.5">
+          {/* La línea de la ruta: corre detrás de todas las paradas (secciones) */}
+          <div className="absolute left-[15px] top-2 bottom-2 w-px bg-navy-600" aria-hidden="true" />
           {links.map((l) => {
             const Icon = l.icon;
             return (
@@ -69,15 +71,26 @@ export default function AdminLayout() {
                 end={l.end}
                 onClick={() => setOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-signal-yellow text-navy-900'
-                      : 'text-navy-100 hover:bg-navy-700'
+                  `group relative flex items-center gap-3 pr-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    isActive ? 'text-white' : 'text-navy-100 hover:text-white'
                   }`
                 }
               >
-                <Icon size={17} strokeWidth={2} />
-                {l.label}
+                {({ isActive }) => (
+                  <>
+                    <span className="relative z-10 flex items-center justify-center w-[30px] shrink-0">
+                      <span
+                        className={
+                          isActive
+                            ? 'w-2.5 h-2.5 rounded-full bg-signal-yellow ring-4 ring-signal-yellow/25'
+                            : 'w-1.5 h-1.5 rounded-full bg-navy-400 group-hover:bg-navy-100 transition-colors'
+                        }
+                      />
+                    </span>
+                    <Icon size={16} strokeWidth={2} className="shrink-0" />
+                    {l.label}
+                  </>
+                )}
               </NavLink>
             );
           })}
