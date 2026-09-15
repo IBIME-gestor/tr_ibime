@@ -1,4 +1,4 @@
-import { where, orderBy, doc, setDoc, deleteDoc, collection, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc, collection, collectionGroup, writeBatch, addDoc, getDocs, query, serverTimestamp } from 'firebase/firestore';
 import { db } from './config';
 import {
   listAll,
@@ -119,23 +119,27 @@ export const Students = {
    * Registra un pago con folio propio en students/{id}/payments — el
    * inicio de una bitácora de cobranza real (monto, método, quién lo
    * capturó y a qué hora exacta), no solo un banderazo de "pagado".
-   * Además marca al alumno como al corriente y deja el último pago a
-   * la mano en su propio expediente para no tener que abrir el
-   * historial completo nada más para ver "cuándo pagó por última vez".
+   * Además marca al alumno como al corriente, guarda cuándo vence su
+   * SIGUIENTE pago (para que la mora se calcule sola contra la fecha de
+   * hoy, sin que nadie tenga que ir a marcarla a mano) y deja el último
+   * pago a la mano en su propio expediente.
    */
-  async registerPayment(id, { amount, method, note, byName, byUid }) {
+  async registerPayment(id, { amount, method, note, nextDueDate, byName, byUid }) {
+    const numAmount = amount === '' || amount == null ? null : Number(amount);
     const paymentRef = await addDoc(collection(db, 'students', id, 'payments'), {
-      amount: amount === '' || amount == null ? null : Number(amount),
+      amount: numAmount,
       method: method || 'efectivo',
       note: note || '',
       registeredByName: byName || '',
       registeredByUid: byUid || '',
+      cancelled: false,
       at: serverTimestamp(),
     });
     await updateDocById('students', id, {
       paymentStatus: 'al_corriente',
+      nextDueDate: nextDueDate || null,
       lastPaymentAt: serverTimestamp(),
-      lastPaymentAmount: amount === '' || amount == null ? null : Number(amount),
+      lastPaymentAmount: numAmount,
       lastPaymentMethod: method || 'efectivo',
       paymentStatusUpdatedAt: serverTimestamp(),
       paymentStatusUpdatedBy: byName || '',
@@ -143,8 +147,43 @@ export const Students = {
     return paymentRef.id;
   },
 
+  /**
+   * Cancela/reembolsa un pago ya registrado. NO se borra (se necesita
+   * para la auditoría): se marca como cancelado, con quién y cuándo, y
+   * por qué. El alumno regresa a "pendiente de pago" — no se asume que
+   * automáticamente está en mora, eso lo decide la fecha de vencimiento.
+   */
+  async cancelPayment(studentId, paymentId, reason, byName) {
+    await setDoc(
+      doc(db, 'students', studentId, 'payments', paymentId),
+      { cancelled: true, cancelledAt: serverTimestamp(), cancelledBy: byName || '', cancelReason: reason || '' },
+      { merge: true }
+    );
+    await updateDocById('students', studentId, {
+      paymentStatus: 'desfase',
+      paymentStatusUpdatedAt: serverTimestamp(),
+      paymentStatusUpdatedBy: byName || '',
+    });
+  },
+
   /** Bitácora completa de pagos de un alumno (folio, monto, método, fecha). */
   listPayments: (id) => listAll(`students/${id}/payments`, [orderBy('at', 'desc')]),
+
+  /**
+   * Todos los pagos de TODOS los alumnos entre dos fechas (para la
+   * proyección/corte de ingresos y la conciliación). `since`/`until`
+   * son objetos Date.
+   */
+  async listPaymentsBetween(since, until) {
+    const q = query(
+      collectionGroup(db, 'payments'),
+      where('at', '>=', since),
+      where('at', '<=', until),
+      orderBy('at', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, studentId: d.ref.parent.parent.id, ...d.data() }));
+  },
 
   /**
    * Búsqueda por matrícula exacta. Se usa cuando el chofer digita
@@ -242,4 +281,18 @@ export const Routes = {
     const field = shift === 'morning' ? 'studentOrderMorning' : 'studentOrderAfternoon';
     await updateDocById('routes', routeId, { [field]: orderedStudentIds });
   },
+};
+
+/**
+ * "Buzón" para la extensión oficial de Firebase "Trigger Email"
+ * (firestore-send-email): esta app solo escribe aquí el correo que hay
+ * que mandar; quien REALMENTE lo envía es la extensión, ya configurada
+ * en la consola de Firebase con el relay SMTP de Workspace. Sin la
+ * extensión instalada, estos documentos se quedan aquí guardados sin
+ * enviarse — no truena nada, pero tampoco llega el correo hasta que se
+ * instale y configure (ver instrucciones aparte).
+ */
+export const Mail = {
+  queue: ({ to, subject, html }) =>
+    createDoc('mail', { to: [to], message: { subject, html } }),
 };
