@@ -10,7 +10,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { Students, Schools, Routes } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
-import { weekdayName, fmtCoords, fmtTimestamp24 } from '../../utils/dates';
+import { weekdayName, fmtCoords, fmtTimestamp24, fmtDateOnly } from '../../utils/dates';
 import { routeColorClasses } from '../../utils/routeColor';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -97,6 +97,7 @@ const emptyForm = {
   routeId: '',
   address: '',
   parentContact: '',
+  parentEmail: '',
   tipoServicio: 'completo',
   medioServicio: 'entrada',
   diasFijos: [],
@@ -104,6 +105,7 @@ const emptyForm = {
   billingMode: 'mensual',
   billingAmount: '',
   paymentStatus: 'al_corriente',
+  nextDueDate: '',
 };
 
 export default function StudentsPage() {
@@ -527,7 +529,17 @@ export default function StudentsPage() {
                       <input
                         value={form.parentContact}
                         onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
-                        placeholder="10 dígitos, para el botón de llamada del operador"
+                        placeholder="10 dígitos, para el botón de llamada del operador y WhatsApp"
+                        className="admin-input"
+                      />
+                    </div>
+                    <div>
+                      <label className="admin-label">Correo del padre/madre (opcional)</label>
+                      <input
+                        type="email"
+                        value={form.parentEmail}
+                        onChange={(e) => setForm({ ...form, parentEmail: e.target.value })}
+                        placeholder="para avisos de pago por correo"
                         className="admin-input"
                       />
                     </div>
@@ -726,6 +738,20 @@ export default function StudentsPage() {
                     </div>
 
                     <div>
+                      <label className="admin-label">Próxima fecha de vencimiento</label>
+                      <input
+                        type="date"
+                        value={form.nextDueDate}
+                        onChange={(e) => setForm({ ...form, nextDueDate: e.target.value })}
+                        className="admin-input"
+                      />
+                      <p className="text-xs text-navy-400 mt-1">
+                        Si pasa esta fecha sin registrar un pago en Caja, el alumno cae en "En
+                        mora" automáticamente — no hace falta marcarlo a mano.
+                      </p>
+                    </div>
+
+                    <div>
                       <label className="admin-label">Estatus de pago</label>
                       <div className="flex items-center gap-2">
                         <select
@@ -808,6 +834,9 @@ export default function StudentsPage() {
                   <DetailRow icon={Phone} label="Contacto padre/madre">
                     {selectedStudent.parentContact || 'Sin registrar'}
                   </DetailRow>
+                  <DetailRow icon={Phone} label="Correo padre/madre">
+                    {selectedStudent.parentEmail || 'Sin registrar'}
+                  </DetailRow>
                 </div>
               )}
 
@@ -834,6 +863,11 @@ export default function StudentsPage() {
                   <DetailRow icon={CircleDollarSign} label="Monto">
                     {selectedStudent.billingAmount ? `$${selectedStudent.billingAmount}` : 'Sin monto registrado'}
                   </DetailRow>
+                  {selectedStudent.nextDueDate && (
+                    <DetailRow icon={CreditCard} label="Próxima fecha de vencimiento">
+                      {fmtDateOnly(selectedStudent.nextDueDate)}
+                    </DetailRow>
+                  )}
                   {selectedStudent.paymentStatusUpdatedAt && (
                     <DetailRow icon={CreditCard} label="Estatus actualizado">
                       {fmtTimestamp24(selectedStudent.paymentStatusUpdatedAt)}
