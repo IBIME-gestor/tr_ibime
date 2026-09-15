@@ -27,6 +27,10 @@ service cloud.firestore {
       return isSignedIn() && userDoc().data.role == 'nanny';
     }
 
+    function isCashier() {
+      return isSignedIn() && userDoc().data.role == 'cashier';
+    }
+
     function myStaffId() {
       return userDoc().data.staffId;
     }
@@ -81,21 +85,27 @@ service cloud.firestore {
 
     match /students/{id} {
       allow read: if isSignedIn();
-      // El admin puede modificar cualquier campo. El chofer/nanny SOLO
-      // puede tocar el espejo de "última ubicación de entrega" que se
-      // escribe automáticamente al marcar a un alumno como entregado
-      // (ver markStopManual/markAllBulk en trips.js) — nunca el resto
-      // del expediente (nombre, domicilio, ruta, cobro, etc.).
+      // El admin puede modificar cualquier campo. El cajero SOLO puede
+      // tocar lo relacionado con el cobro (estatus, vencimiento, montos),
+      // nunca datos del alumno (nombre, domicilio, ruta, etc). El
+      // chofer/nanny SOLO puede tocar el espejo de "última ubicación de
+      // entrega" que se escribe automáticamente al marcar a un alumno
+      // como entregado (ver markStopManual/markAllBulk en trips.js).
       allow update: if isAdmin() ||
+        (isCashier() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['paymentStatus', 'paymentStatusUpdatedAt', 'paymentStatusUpdatedBy',
+                      'nextDueDate', 'lastPaymentAt', 'lastPaymentAmount', 'lastPaymentMethod',
+                      'billingAmount', 'billingMode'])) ||
         ((isDriver() || isNanny()) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId']));
       allow create, delete: if isAdmin();
 
       // Bitácora de cobranza (folio, monto, método, quién y cuándo).
-      // Es información financiera — solo el admin la puede ver o tocar.
+      // Es información financiera — solo admin y cajero la ven/tocan.
       match /payments/{paymentId} {
-        allow read, write: if isAdmin();
+        allow read, write: if isAdmin() || isCashier();
       }
     }
 
@@ -104,7 +114,7 @@ service cloud.firestore {
     // final). La nanny puede leerlo y actualizar solo lo relacionado con
     // marcar alumnos/ubicación en vivo — nunca el kilometraje ni el status.
     match /trips/{tripId} {
-      allow read: if isAdmin()
+      allow read: if isAdmin() || isCashier()
         || (isDriver() && (resource == null || resource.data.driverId == myStaffId()))
         || (isNanny() && resource != null && resource.data.nannyId == myStaffId());
 
@@ -117,9 +127,26 @@ service cloud.firestore {
               .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'alert', 'updatedAt']));
 
       match /stops/{studentId} {
-        allow read: if isAdmin() || isDriver() || isNanny();
+        allow read: if isAdmin() || isCashier() || isDriver() || isNanny();
         allow write: if isAdmin() || isDriver() || isNanny();
       }
+    }
+
+    // Nómina / bitácora diaria de personal (horarios, bonos, sustitutos).
+    // Es información de RH — solo el admin la ve o la toca.
+    match /staffLogs/{date} {
+      allow read: if isAdmin();
+      match /entries/{entryId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // "Buzón" de la extensión Trigger Email (firestore-send-email): la
+    // app solo escribe aquí el aviso a mandar; la extensión ya
+    // configurada en Firebase es quien realmente lo envía por SMTP.
+    match /mail/{id} {
+      allow create: if isAdmin() || isCashier();
+      allow read: if isAdmin() || isCashier();
     }
 
     // ------------------------------------------------------------------
