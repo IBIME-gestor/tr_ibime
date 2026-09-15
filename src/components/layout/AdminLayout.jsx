@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   School,
@@ -11,27 +11,42 @@ import {
   Radio,
   LifeBuoy,
   Wallet,
+  ClipboardList,
   Menu,
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const links = [
-  { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard },
-  { to: '/admin/planteles', label: 'Planteles', icon: School },
-  { to: '/admin/alumnos', label: 'Alumnos', icon: Users },
-  { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact },
-  { to: '/admin/unidades', label: 'Unidades', icon: Truck },
-  { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon },
-  { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart },
-  { to: '/admin/en-vivo', label: 'Flota en vivo', icon: Radio },
-  { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy },
-  { to: '/admin/caja', label: 'Caja', icon: Wallet },
+  { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard, roles: ['admin'] },
+  { to: '/admin/planteles', label: 'Planteles', icon: School, roles: ['admin'] },
+  { to: '/admin/alumnos', label: 'Alumnos', icon: Users, roles: ['admin'] },
+  { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
+  { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
+  { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
+  { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: ['admin'] },
+  { to: '/admin/en-vivo', label: 'Flota en vivo', icon: Radio, roles: ['admin'] },
+  { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
+  { to: '/admin/caja', label: 'Caja', icon: Wallet, roles: ['admin', 'cashier'] },
+  { to: '/admin/nomina', label: 'Nómina de personal', icon: ClipboardList, roles: ['admin'] },
 ];
 
 export default function AdminLayout() {
   const { logout, profile } = useAuth();
   const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const visibleLinks = links.filter((l) => l.roles.includes(profile?.role));
+
+  // El rol "cajero" solo tiene acceso a Caja — si intenta entrar a otra
+  // ruta admin por URL (o queda en /admin, que es solo para admin),
+  // lo mandamos derechito a lo único que le corresponde.
+  useEffect(() => {
+    if (profile?.role === 'cashier' && location.pathname !== '/admin/caja') {
+      navigate('/admin/caja', { replace: true });
+    }
+  }, [profile?.role, location.pathname, navigate]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-navy-50 overflow-x-hidden">
@@ -55,14 +70,16 @@ export default function AdminLayout() {
           <img src="/ibime-shield.png" alt="IBIME" className="w-8 h-8" />
           <div>
             <p className="font-display text-base font-semibold leading-tight">Ruta Segura</p>
-            <p className="text-navy-400 text-xs">Panel administrativo</p>
+            <p className="text-navy-400 text-xs">
+              {profile?.role === 'cashier' ? 'Caja' : 'Panel administrativo'}
+            </p>
           </div>
         </div>
 
         <nav className="relative flex flex-col gap-0.5">
           {/* La línea de la ruta: corre detrás de todas las paradas (secciones) */}
           <div className="absolute left-[15px] top-2 bottom-2 w-px bg-navy-600" aria-hidden="true" />
-          {links.map((l) => {
+          {visibleLinks.map((l) => {
             const Icon = l.icon;
             return (
               <NavLink
