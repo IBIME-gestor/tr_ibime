@@ -82,6 +82,7 @@ export default function DriversPage() {
                 >
                   <option value="driver">Operador</option>
                   <option value="nanny">Nanny</option>
+                  <option value="cashier">Cajero(a)</option>
                 </select>
               </div>
               <div>
@@ -142,7 +143,9 @@ export default function DriversPage() {
                   <tr key={d.id} className="cascade-item" style={cascadeStyle(i, 25)}>
                     <td className="pl-5 font-medium text-navy-700">{d.name}</td>
                     <td>
-                      <span className="badge">{d.role === 'nanny' ? 'Nanny' : 'Operador'}</span>
+                      <span className="badge">
+                        {d.role === 'nanny' ? 'Nanny' : d.role === 'cashier' ? 'Cajero(a)' : 'Operador'}
+                      </span>
                     </td>
                     <td className="text-navy-500">{schoolName(d.schoolId)}</td>
                     <td className="text-navy-500">{d.email}</td>
