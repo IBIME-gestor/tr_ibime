@@ -30,3 +30,36 @@ export function fmtTimestamp24(ts) {
   if (!ms) return '';
   return fmtDateTime24(new Date(ms));
 }
+
+/** 'dd/mm/aaaa' a partir de una fecha 'YYYY-MM-DD' (sin líos de zona horaria). */
+export function fmtDateOnly(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/** Días de diferencia entre 'YYYY-MM-DD' y ahora (positivo = ya pasó / vencido). */
+export function daysOverdue(dateStr, now = new Date()) {
+  if (!dateStr) return null;
+  const due = new Date(`${dateStr}T23:59:59`);
+  return Math.floor((now - due) / 86400000);
+}
+
+/** Lista de fechas 'YYYY-MM-DD' entre dos fechas (inclusive), para exportar un rango. */
+export function dateRange(startStr, endStr) {
+  const out = [];
+  let cur = new Date(`${startStr}T00:00:00`);
+  const end = new Date(`${endStr}T00:00:00`);
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return out;
+}
+
+/** Primer y último instante del mes de `date` (para "ingresos de este mes"). */
+export function monthBounds(date = new Date()) {
+  const since = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0);
+  const until = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+  return { since, until };
+}
