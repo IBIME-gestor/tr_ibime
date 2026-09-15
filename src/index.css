@@ -149,6 +149,24 @@ h1, h2, h3 {
   mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
 }
 
+/* Boleto de servicio imprimible (Caja): al imprimir, solo se ve el
+   boleto — todo lo demás de la app (menú, botones, overlays) se oculta. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .ticket-print, .ticket-print * {
+    visibility: visible;
+  }
+  .ticket-print {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    max-width: 380px;
+    height: fit-content;
+  }
+}
+
 /* Enfoque visible para accesibilidad de teclado */
 :focus-visible {
   outline: 3px solid #FFC93C;
