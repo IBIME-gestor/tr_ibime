@@ -10,7 +10,7 @@ export default function Login() {
   // En cuanto haya sesión + perfil (admin o chofer), redirige solo.
   useEffect(() => {
     if (user && profile) {
-      navigate(profile.role === 'admin' ? '/admin' : '/chofer', { replace: true });
+      navigate(profile.role === 'driver' || profile.role === 'nanny' ? '/chofer' : '/admin', { replace: true });
     }
   }, [user, profile, navigate]);
 
