@@ -17,6 +17,7 @@ import Reports from './pages/admin/Reports';
 import FleetLive from './pages/admin/FleetLive';
 import ActiveTrips from './pages/admin/ActiveTrips';
 import Cashier from './pages/admin/Cashier';
+import Payroll from './pages/admin/Payroll';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -34,7 +35,7 @@ export default function App() {
       <Route
         path="/admin"
         element={
-          <ProtectedRoute role="admin">
+          <ProtectedRoute role={['admin', 'cashier']}>
             <AdminLayout />
           </ProtectedRoute>
         }
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="en-vivo" element={<FleetLive />} />
         <Route path="recorridos-activos" element={<ActiveTrips />} />
         <Route path="caja" element={<Cashier />} />
+        <Route path="nomina" element={<Payroll />} />
       </Route>
 
       <Route
