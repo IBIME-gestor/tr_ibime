@@ -1,11 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import { Printer } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getTrip, getTripStopsOnce, todayString } from '../../firebase/trips';
 import { Students } from '../../firebase/services';
 import { getFirstName, getFarewellMessage } from '../../utils/greetings';
+import { fmtCoords } from '../../utils/dates';
+import { numberedIcon } from '../../utils/mapIcons';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
 
 function fmtTime(ts) {
   if (!ts?.toDate) return '—';
@@ -95,12 +108,19 @@ export default function TripSummary() {
   if (!trip) return <LoadingOverlay show label="Cargando resumen…" />;
 
   const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
+  const locKey = trip.shift === 'morning' ? 'boardedLocation' : 'deliveredLocation';
   const timeLabel = trip.shift === 'morning' ? 'Hora de recogida' : 'Hora de bajada';
   const isToday = trip.date === todayString();
+  const withLocation = stops
+    .filter((s) => s.status !== 'absent' && s[locKey]?.lat)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const mapCenter = withLocation[0]
+    ? [withLocation[0][locKey].lat, withLocation[0][locKey].lng]
+    : [19.4326, -99.1332];
 
   return (
     <div className="space-y-4 pb-10">
-      <div className="bg-navy-800 text-white rounded-2xl px-5 py-6 text-center cascade-item">
+      <div className="bg-navy-800 text-white rounded-2xl px-5 py-6 text-center cascade-item print:hidden">
         <p className="text-3xl mb-2">{trip.shift === 'afternoon' ? '🏡' : '🎉'}</p>
         <h1 className="text-lg font-display font-bold">
           {isToday
@@ -113,7 +133,7 @@ export default function TripSummary() {
         <p className="text-navy-400 text-xs mt-2">{trip.date}</p>
       </div>
 
-      <div className="card flex justify-around text-center text-sm cascade-item" style={cascadeStyle(1, 60)}>
+      <div className="card flex justify-around text-center text-sm cascade-item print:hidden" style={cascadeStyle(1, 60)}>
         <div>
           <p className="text-navy-400">Km inicial</p>
           <p className="font-display font-semibold text-lg">{trip.kmInicial ?? '—'}</p>
@@ -132,7 +152,51 @@ export default function TripSummary() {
         </div>
       </div>
 
-      <div className="card divide-y divide-navy-100 cascade-item" style={cascadeStyle(2, 60)}>
+      {withLocation.length > 0 && (
+        <div className="summary-print">
+          <div className="flex items-center justify-between mb-2 print:hidden">
+            <p className="text-sm font-medium text-navy-600">
+              Mapa de {trip.shift === 'morning' ? 'recolección' : 'entrega'} ({withLocation.length} puntos)
+            </p>
+            <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm font-medium text-navy-600 underline shrink-0">
+              <Printer size={14} /> Imprimir mapa
+            </button>
+          </div>
+          <p className="hidden print:block text-sm text-navy-600 mb-2">
+            {trip.shift === 'morning' ? 'Recolección' : 'Entrega'} · {trip.date}
+          </p>
+          <div className="card p-0 overflow-hidden print:shadow-none print:border print:border-navy-200" style={{ height: 300 }}>
+            <MapContainer center={mapCenter} zoom={13} style={{ height: '100%', width: '100%' }}>
+              <TileLayer
+                attribution="&copy; OpenStreetMap contributors"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {withLocation.map((s, i) => (
+                <Marker key={s.id} position={[s[locKey].lat, s[locKey].lng]} icon={numberedIcon(i + 1)}>
+                  <Popup>
+                    <div className="text-xs leading-relaxed">
+                      <p className="font-semibold">{i + 1}. {s.name}</p>
+                      <p>Matrícula: {s.matricula}</p>
+                      <p>{timeLabel}: {fmtTime(s[timeKey])}</p>
+                      <p className="text-navy-400">{fmtCoords(s[locKey].lat, s[locKey].lng)}</p>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </div>
+          <div className="hidden print:block mt-3">
+            <p className="text-xs font-semibold text-navy-600 mb-1">Nomenclatura</p>
+            {withLocation.map((s, i) => (
+              <p key={s.id} className="text-xs text-navy-700">
+                {i + 1}. {s.name} — matrícula {s.matricula} · {timeLabel.toLowerCase()}: {fmtTime(s[timeKey])}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card divide-y divide-navy-100 cascade-item print:hidden" style={cascadeStyle(2, 60)}>
         {stops.map((s, i) => (
           <div key={s.id} className="py-2 flex items-center justify-between gap-2 cascade-item" style={cascadeStyle(i, 20, 260)}>
             <div className="min-w-0">
@@ -161,7 +225,7 @@ export default function TripSummary() {
         ))}
       </div>
 
-      <button onClick={() => navigate('/chofer')} className="btn-primary">
+      <button onClick={() => navigate('/chofer')} className="btn-primary print:hidden">
         Volver al inicio
       </button>
     </div>
