@@ -3,9 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { Printer } from 'lucide-react';
 import { Routes as RoutesService } from '../../firebase/services';
 import { getReferenceTrip } from '../../firebase/trips';
+import { getCurrentLocation } from '../../hooks/useGeolocation';
 import { weekdayName, fmtCoords } from '../../utils/dates';
+import { numberedIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -34,6 +37,7 @@ export default function ReferenceRoute() {
   const [route, setRoute] = useState(null);
   const [reference, setReference] = useState(undefined); // undefined = cargando, null = no hay
   const [activeStop, setActiveStop] = useState(null);
+  const [myLocation, setMyLocation] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -43,6 +47,10 @@ export default function ReferenceRoute() {
       setReference(ref);
     }
     load();
+    // El mapa abre centrado donde está el operador ahorita, no en un
+    // centro de ciudad genérico — así ve de inmediato dónde está él
+    // respecto a las paradas.
+    getCurrentLocation().then(setMyLocation);
   }, [routeId, shift]);
 
   const withLocation = useMemo(
@@ -50,9 +58,11 @@ export default function ReferenceRoute() {
     [reference]
   );
 
-  const center = withLocation[0]?.referenceLocation
+  const center = myLocation
+    ? [myLocation.lat, myLocation.lng]
+    : withLocation[0]?.referenceLocation
     ? [withLocation[0].referenceLocation.lat, withLocation[0].referenceLocation.lng]
-    : [19.4326, -99.1332];
+    : [19.4326, -99.1332]; // último recurso: sin GPS y sin puntos guardados
 
   if (reference === undefined) {
     return <p className="text-center text-navy-400 mt-10">Buscando el recorrido más reciente…</p>;
@@ -60,7 +70,14 @@ export default function ReferenceRoute() {
 
   return (
     <div className="space-y-4 pb-10">
-      <Link to="/chofer" className="text-navy-400 text-sm underline">← Volver</Link>
+      <div className="flex items-center justify-between print:hidden">
+        <Link to="/chofer" className="text-navy-400 text-sm underline">← Volver</Link>
+        {withLocation.length > 0 && (
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm font-medium text-navy-600 underline">
+            <Printer size={14} /> Imprimir mapa
+          </button>
+        )}
+      </div>
       <div>
         <p className="text-navy-400 text-sm">Ruta de referencia</p>
         <h1 className="text-xl font-display font-bold text-navy-900">
@@ -78,24 +95,34 @@ export default function ReferenceRoute() {
       )}
 
       {reference && (
-        <>
-          <p className="text-sm text-navy-400">
+        <div className="route-print">
+          <p className="text-sm text-navy-400 print:hidden">
             Basado en el recorrido del {reference.trip.date}. Toca "Navegar" en cada parada, en
             orden, para ir abriendo Maps una por una — así respetas la secuencia real con la que
             se atendió esta ruta.
           </p>
+          <p className="hidden print:block text-sm text-navy-600 mb-2">
+            {route?.name} · {shift === 'morning' ? 'Ida (matutino)' : 'Vuelta (vespertino)'} ·
+            basado en el recorrido del {reference.trip.date}
+          </p>
 
           {withLocation.length > 0 && (
-            <div className="card p-0 overflow-hidden" style={{ height: 320 }}>
-              <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
+            <div className="card p-0 overflow-hidden print:shadow-none print:border print:border-navy-200" style={{ height: 320 }}>
+              <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
                 <TileLayer
                   attribution="&copy; OpenStreetMap contributors"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
+                {myLocation && (
+                  <Marker position={[myLocation.lat, myLocation.lng]} icon={numberedIcon('•', '#152238')}>
+                    <Popup>Tu ubicación</Popup>
+                  </Marker>
+                )}
                 {withLocation.map((s) => (
                   <Marker
                     key={s.id}
                     position={[s.referenceLocation.lat, s.referenceLocation.lng]}
+                    icon={numberedIcon(s.order + 1)}
                     eventHandlers={{ click: () => setActiveStop(s.id) }}
                   >
                     <Popup>
@@ -112,7 +139,19 @@ export default function ReferenceRoute() {
             </div>
           )}
 
-          <div>
+          {/* Nomenclatura: en pantalla ya se ve en las tarjetas de abajo;
+              al imprimir, este es el legado que acompaña al mapa. */}
+          <div className="hidden print:block mt-3">
+            <p className="text-xs font-semibold text-navy-600 mb-1">Nomenclatura</p>
+            {reference.stops.map((s) => (
+              <p key={s.id} className="text-xs text-navy-700">
+                {s.order + 1}. {s.name} — matrícula {s.matricula}
+                {s.referenceLocation?.lat ? '' : ' (sin ubicación guardada)'}
+              </p>
+            ))}
+          </div>
+
+          <div className="print:hidden">
             {reference.stops.map((s) => (
               <div
                 key={s.id}
@@ -155,7 +194,7 @@ export default function ReferenceRoute() {
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
