@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students } from '../../firebase/services';
 import {
@@ -25,6 +26,8 @@ import {
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import { getFarewellMessage } from '../../utils/greetings';
 import { weekdayName, fmtCoords } from '../../utils/dates';
+import { numberedIcon } from '../../utils/mapIcons';
+import { optimizeStopOrder } from '../../utils/routeOptimizer';
 import StopCard from '../../components/StopCard';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
@@ -145,6 +148,16 @@ export default function TripRunner() {
   const lastSentAtRef = useRef(0);
   const [showMap, setShowMap] = useState(false);
   const [myLocation, setMyLocation] = useState(null);
+  const [recalcOrder, setRecalcOrder] = useState(null); // ids en el orden recalculado, o null
+  const [recalculating, setRecalculating] = useState(false);
+
+  // El mapa (y el "Recalcular orden") necesitan saber dónde está el
+  // operador desde que abre la pantalla, no solo hasta que arranca el
+  // recorrido — así el mapa abre centrado en él, no en el centro de la
+  // ciudad ni en la primera parada.
+  useEffect(() => {
+    getCurrentLocation().then((loc) => { if (loc) setMyLocation(loc); });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,6 +303,34 @@ export default function TripRunner() {
     () => buildFullRouteUrl(remainingStops, destinations),
     [remainingStops, destinations]
   );
+
+  /**
+   * "Recalcular ruta": no vuelve a pedir direcciones a nadie — reordena
+   * las paradas que faltan por cercanía real desde donde está el
+   * operador AHORITA (vecino más cercano + mejora 2-opt), usando el
+   * mismo motor de optimización que ya usa el admin al armar una ruta
+   * nueva. Útil si se tuvo que desviar, o si el orden original ya no
+   * tiene sentido a media ruta.
+   */
+  async function handleRecalculate() {
+    setRecalculating(true);
+    const loc = myLocation || (await getCurrentLocation());
+    if (loc) setMyLocation(loc);
+    const points = remainingStops
+      .map((s) => ({ id: s.studentId, ...(destinations[s.studentId] || {}) }))
+      .filter((p) => p.lat != null);
+    if (loc && points.length > 1) {
+      const { order } = optimizeStopOrder(points, loc, 'start');
+      setRecalcOrder(order);
+    }
+    setRecalculating(false);
+  }
+
+  function applyRecalcOrder(list) {
+    if (!recalcOrder) return list;
+    const idx = Object.fromEntries(recalcOrder.map((id, i) => [id, i]));
+    return [...list].sort((a, b) => (idx[a.studentId] ?? Infinity) - (idx[b.studentId] ?? Infinity));
+  }
 
   const mapCenter = myLocation
     ? [myLocation.lat, myLocation.lng]
@@ -519,8 +560,8 @@ export default function TripRunner() {
                 <Popup>Tú (unidad)</Popup>
               </Marker>
             )}
-            {remainingWithCoords.map((s, i) => (
-              <Marker key={s.studentId} position={[s.coords.lat, s.coords.lng]}>
+            {applyRecalcOrder(remainingWithCoords).map((s, i) => (
+              <Marker key={s.studentId} position={[s.coords.lat, s.coords.lng]} icon={numberedIcon(i + 1)}>
                 <Popup>
                   <div className="text-xs leading-relaxed">
                     <p className="font-semibold">{i + 1}. {s.name}</p>
@@ -653,13 +694,20 @@ export default function TripRunner() {
       {/* Fase de abordaje */}
       {!boardingPhaseDone && (
         <div>
-          <p className="text-sm font-medium text-navy-600 mb-2">{config.boardPhaseTitle}</p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-sm font-medium text-navy-600">{config.boardPhaseTitle}</p>
+            {!config.boardedBulk && pendingBoarding.length > 1 && (
+              <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline shrink-0">
+                <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
+              </button>
+            )}
+          </div>
           {config.boardedBulk ? (
             <button onClick={handleBulkBoard} disabled={busy} className="btn-signal mb-4">
               {config.bulkBoardLabel}
             </button>
           ) : (
-            pendingBoarding.map((stop, i) => (
+            applyRecalcOrder(pendingBoarding).map((stop, i) => (
               <StopCard
                 key={stop.id}
                 stop={stop}
@@ -681,15 +729,22 @@ export default function TripRunner() {
       {/* Fase de entrega */}
       {boardingPhaseDone && !allResolved && (
         <div>
-          <p className="text-sm font-medium text-navy-600 mb-2">
-            {config.deliverPhaseTitle || 'Ve marcando a cada alumno'}
-          </p>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-sm font-medium text-navy-600">
+              {config.deliverPhaseTitle || 'Ve marcando a cada alumno'}
+            </p>
+            {!config.deliveredBulk && boardedWaitingDelivery.length > 1 && (
+              <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline shrink-0">
+                <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
+              </button>
+            )}
+          </div>
           {config.deliveredBulk ? (
             <button onClick={handleBulkDeliver} disabled={busy} className="btn-signal mb-4">
               {config.bulkDeliverLabel}
             </button>
           ) : (
-            boardedWaitingDelivery.map((stop, i) => (
+            applyRecalcOrder(boardedWaitingDelivery).map((stop, i) => (
               <StopCard
                 key={stop.id}
                 stop={stop}
