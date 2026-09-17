@@ -5,6 +5,7 @@ import L from 'leaflet';
 import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES, ARRIVAL_WAIT_SECONDS } from '../firebase/trips';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { useArrivalCountdown, fmtCountdown } from '../utils/countdown';
+import { busIcon } from '../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -136,6 +137,43 @@ export default function PublicTrack() {
   const liveIsStale =
     liveLoc?.updatedAt?.toMillis &&
     Date.now() - liveLoc.updatedAt.toMillis() > 3 * 60 * 1000;
+
+  // El GPS del camión se actualiza cada ~15s, pero mostrar el ícono
+  // saltando de golpe cada vez se ve "muerto". Aquí interpolamos la
+  // posición del ícono entre la ubicación anterior y la nueva a lo
+  // largo de ~13s, para dar sensación de avance real mientras llega la
+  // siguiente lectura real del GPS.
+  const [animatedLoc, setAnimatedLoc] = useState(null);
+  const animFrameRef = useRef(null);
+  const prevLocRef = useRef(null);
+
+  useEffect(() => {
+    if (!liveLoc?.lat) return undefined;
+    const from = prevLocRef.current || liveLoc;
+    const to = liveLoc;
+    prevLocRef.current = liveLoc;
+
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    // Si el camión no se movió (o es la primera lectura), no hace falta animar.
+    if (from.lat === to.lat && from.lng === to.lng) {
+      setAnimatedLoc(to);
+      return undefined;
+    }
+    const duration = 13000; // un poco menos que los 15s entre actualizaciones
+    const start = performance.now();
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration);
+      setAnimatedLoc({
+        lat: from.lat + (to.lat - from.lat) * t,
+        lng: from.lng + (to.lng - from.lng) * t,
+      });
+      if (t < 1) animFrameRef.current = requestAnimationFrame(tick);
+    }
+    animFrameRef.current = requestAnimationFrame(tick);
+    return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
+  }, [liveLoc?.lat, liveLoc?.lng]);
+
+  const displayLoc = animatedLoc || liveLoc;
 
   const arrivalSecondsLeft = useArrivalCountdown(myStop?.arrivedAt, ARRIVAL_WAIT_SECONDS);
   const arrivalTimeUp = arrivalSecondsLeft === 0;
@@ -308,7 +346,7 @@ export default function PublicTrack() {
                       attribution="&copy; OpenStreetMap contributors"
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
-                    <Marker position={[liveLoc.lat, liveLoc.lng]}>
+                    <Marker position={[displayLoc.lat, displayLoc.lng]} icon={busIcon()}>
                       <Popup>Ubicación del camión</Popup>
                     </Marker>
                   </MapContainer>
