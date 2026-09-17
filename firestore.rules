@@ -109,14 +109,20 @@ service cloud.firestore {
       }
     }
 
-    // El chofer es el único que puede crear el recorrido (requiere el
-    // kilometraje inicial, validado en la app) y cerrarlo (kilometraje
-    // final). La nanny puede leerlo y actualizar solo lo relacionado con
-    // marcar alumnos/ubicación en vivo — nunca el kilometraje ni el status.
+    // Lectura de recorridos: cualquier miembro del personal con sesión
+    // iniciada puede leer (es una app interna, todo el personal es de
+    // confianza). Ojo: NO se puede restringir esto a "solo mis propios
+    // recorridos" con reglas de Firestore, porque varias pantallas hacen
+    // consultas por ruta/turno/fecha (no por chofer) — p. ej. el mapa de
+    // referencia y el recorrido en curso buscan "el último recorrido
+    // completado de ESTA ruta", sin importar qué chofer lo manejó ese
+    // día (pudo haber sido un sustituto). Una regla que exigiera
+    // resource.data.driverId == miStaffId en una consulta que no filtra
+    // por driverId hace que Firestore rechace la consulta COMPLETA con
+    // "Missing or insufficient permissions", aunque el chofer sí tenga
+    // derecho a ver esos datos.
     match /trips/{tripId} {
-      allow read: if isAdmin() || isCashier()
-        || (isDriver() && (resource == null || resource.data.driverId == myStaffId()))
-        || (isNanny() && resource != null && resource.data.nannyId == myStaffId());
+      allow read: if isSignedIn();
 
       allow create: if isDriver() && request.resource.data.driverId == myStaffId();
 
@@ -127,7 +133,7 @@ service cloud.firestore {
               .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'alert', 'updatedAt']));
 
       match /stops/{studentId} {
-        allow read: if isAdmin() || isCashier() || isDriver() || isNanny();
+        allow read: if isSignedIn();
         allow write: if isAdmin() || isDriver() || isNanny();
       }
     }
