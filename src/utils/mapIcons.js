@@ -23,6 +23,30 @@ export function numberedIcon(n, color = '#FFC93C') {
 }
 
 /**
+ * Ícono del plantel (punto fijo de inicio/fin de ruta) para las
+ * previsualizaciones de mapa — distinto a los numerados de alumnos para
+ * que se distinga de un vistazo cuál pin es la escuela.
+ */
+export function schoolIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width: 30px; height: 30px; border-radius: 8px;
+      background: #152238; display: flex; align-items: center; justify-content: center;
+      border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      transform: rotate(45deg);
+    ">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFC93C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(-45deg);">
+        <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/>
+      </svg>
+    </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 22],
+    popupAnchor: [0, -20],
+  });
+}
+
+/**
  * Ícono de camión escolar para el mapa del padre de familia, en vez del
  * pin genérico de Leaflet — de un vistazo se entiende que es el camión,
  * no un lugar. El wrapper con id fijo es lo que anima suavemente el
