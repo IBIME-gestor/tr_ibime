@@ -4,12 +4,37 @@ import * as XLSX from 'xlsx';
 import { Link, useNavigate } from 'react-router-dom';
 import { Schools, Students } from '../../firebase/services';
 
-// Columnas esperadas: matricula, name, school, address, parentContact
-// Funciona tanto con .csv como con .xlsx/.xls reales de Excel.
-const REQUIRED_COLUMNS = ['matricula', 'name', 'school'];
+// Columnas esperadas para validar el padrón antes de importarlo.
+// address y parentEmail siguen siendo opcionales.
+const REQUIRED_COLUMNS = ['matricula', 'name', 'correo alumno', 'school', 'nivel', 'grado', 'grupo esp', 'familiar responsable', 'telefono', 'correo padre familia'];
+
+const COLUMN_ALIASES = {
+  'matrícula': 'matricula',
+  'nombre': 'name',
+  'plantel': 'school',
+  'grupo': 'grupo esp',
+  'grupo_especial': 'grupo esp',
+  'grupoesp': 'grupo esp',
+  'familiar': 'familiar responsable',
+  'responsable': 'familiar responsable',
+  'teléfono': 'telefono',
+  'phone': 'telefono',
+  'parentcontact': 'telefono',
+  'correo': 'correo alumno',
+  'correo alumno': 'correo alumno',
+  'email alumno': 'correo alumno',
+  'studentemail': 'correo alumno',
+  'student email': 'correo alumno',
+  'correo padre': 'correo padre familia',
+  'correo padre familia': 'correo padre familia',
+  'email padre': 'correo padre familia',
+  'parentemail': 'correo padre familia',
+  'parent email': 'correo padre familia',
+};
 
 function normalizeHeader(h) {
-  return String(h || '').trim().toLowerCase();
+  const normalized = String(h || '').trim().toLowerCase();
+  return COLUMN_ALIASES[normalized] || normalized;
 }
 
 // Lee un .xlsx/.xls real (binario) con SheetJS y regresa filas con los
@@ -46,6 +71,7 @@ export default function StudentImport() {
   const [fileError, setFileError] = useState('');
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
+  const [editingIndex, setEditingIndex] = useState(null);
 
   useEffect(() => Schools.subscribe(setSchools), []);
 
@@ -56,7 +82,15 @@ export default function StudentImport() {
       setRows([]);
       return;
     }
-    setRows(data);
+    setRows(data.map((row) => ({
+      ...row,
+      'grupo esp': row['grupo esp'] ?? '',
+      'familiar responsable': row['familiar responsable'] ?? '',
+      telefono: row.telefono ?? '',
+      'correo alumno': row['correo alumno'] ?? '',
+      'correo padre familia': row['correo padre familia'] ?? '',
+    })));
+    setEditingIndex(null);
   }
 
   function handleFile(e) {
@@ -101,10 +135,17 @@ export default function StudentImport() {
       }
       valid.push({
         matricula: String(row.matricula).trim(),
-        name: row.name.trim(),
+        name: String(row.name).trim(),
         schoolId,
+        nivel: String(row.nivel || '').trim(),
+        grado: String(row.grado || '').trim(),
+        grupoEsp: String(row['grupo esp'] || '').trim(),
+        familiarResponsable: String(row['familiar responsable'] || '').trim(),
+        telefono: String(row.telefono || '').trim(),
         address: row.address || '',
-        parentContact: row.parentcontact || row.parentContact || '',
+        parentContact: row.telefono || '',
+        studentEmail: String(row['correo alumno'] || '').trim().toLowerCase(),
+        parentEmail: String(row['correo padre familia'] || '').trim().toLowerCase(),
       });
     }
     const ok = valid.length ? await Students.bulkImport(valid) : 0;
@@ -122,9 +163,13 @@ export default function StudentImport() {
         <code className="bg-navy-100 px-1 rounded">.xls</code>. La primera fila debe tener
         columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>,{' '}
         <code className="bg-navy-100 px-1 rounded">name</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">school</code> (nombre exacto del plantel ya dado de alta),
-        y opcionalmente <code className="bg-navy-100 px-1 rounded">address</code> y{' '}
-        <code className="bg-navy-100 px-1 rounded">parentContact</code>.
+        <code className="bg-navy-100 px-1 rounded">school</code>,{' '}
+        <code className="bg-navy-100 px-1 rounded">nivel</code>,{' '}
+        <code className="bg-navy-100 px-1 rounded">grado</code>,{' '}
+        <code className="bg-navy-100 px-1 rounded">grupo esp</code>,{' '}
+        <code className="bg-navy-100 px-1 rounded">familiar responsable</code> y{' '}
+        <code className="bg-navy-100 px-1 rounded">telefono</code>.{' '}
+        <code className="bg-navy-100 px-1 rounded">address</code> y <code className="bg-navy-100 px-1 rounded">parentEmail</code> son opcionales.
       </p>
 
       <div className="admin-card space-y-4">
@@ -133,36 +178,69 @@ export default function StudentImport() {
 
         {rows.length > 0 && !result && (
           <>
-            <p className="text-sm text-navy-600">{rows.length} filas detectadas. Vista previa:</p>
-            <div className="overflow-x-auto max-h-64 border border-navy-100 rounded-lg">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left bg-navy-50">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-navy-600">{rows.length} filas detectadas. Revisa y corrige antes de importar:</p>
+              <span className="text-xs text-navy-400">La edición aquí no modifica tu archivo original.</span>
+            </div>
+            <div className="overflow-x-auto max-h-[32rem] border border-navy-100 rounded-lg">
+              <table className="w-full text-xs min-w-[1100px]">
+                <thead className="sticky top-0 z-10 bg-navy-50">
+                  <tr className="text-left">
                     <th className="p-2">Matrícula</th>
                     <th className="p-2">Nombre</th>
+                    <th className="p-2">Correo alumno</th>
                     <th className="p-2">Plantel</th>
+                    <th className="p-2">Nivel</th>
+                    <th className="p-2">Grado</th>
+                    <th className="p-2">Grupo ESP</th>
+                    <th className="p-2">Familiar responsable</th>
+                    <th className="p-2">Teléfono</th>
+                    <th className="p-2">Correo padre familia</th>
+                    <th className="p-2">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 20).map((r, i) => (
-                    <tr key={i} className="border-t border-navy-50">
-                      <td className="p-2">{r.matricula}</td>
-                      <td className="p-2">{r.name}</td>
-                      <td className="p-2">
-                        {schoolIdFor(r.school) ? r.school : <span className="text-stop">{r.school} (no existe)</span>}
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((r, i) => {
+                    const editing = editingIndex === i;
+                    const update = (key, value) => setRows((prev) => prev.map((row, idx) => idx === i ? { ...row, [key]: value } : row));
+                    return (
+                      <tr key={i} className="border-t border-navy-50 align-top">
+                        {['matricula','name','correo alumno','school','nivel','grado','grupo esp','familiar responsable','telefono','correo padre familia'].map((key) => (
+                          <td key={key} className="p-2">
+                            {editing ? (
+                              <input
+                                value={r[key] ?? ''}
+                                onChange={(e) => update(key, e.target.value)}
+                                className="admin-input py-1.5 text-xs min-w-[110px]"
+                              />
+                            ) : (
+                              key === 'school' && !schoolIdFor(r.school) ? <span className="text-stop">{r.school} (no existe)</span> : (r[key] || '—')
+                            )}
+                          </td>
+                        ))}
+                        <td className="p-2 whitespace-nowrap">
+                          {editing ? (
+                            <button type="button" onClick={() => setEditingIndex(null)} className="btn-admin-primary text-xs py-1.5">Guardar</button>
+                          ) : (
+                            <button type="button" onClick={() => setEditingIndex(i)} className="btn-admin-ghost text-xs py-1.5">Editar</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             <button
               onClick={handleImport}
-              disabled={importing}
+              disabled={importing || editingIndex !== null}
               className="btn-admin bg-go text-white hover:bg-go/90"
             >
               {importing ? 'Importando…' : `Importar ${rows.length} alumnos`}
             </button>
+            {editingIndex !== null && (
+              <p className="text-xs text-signal-amber">Guarda la fila que estás editando antes de importar.</p>
+            )}
           </>
         )}
 
