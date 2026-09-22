@@ -70,6 +70,28 @@ export const Drivers = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  Usuarios / acceso                                                  */
+/* ------------------------------------------------------------------ */
+export const Users = {
+  list: () => listAll('users', [orderBy('name')]),
+
+  subscribe: (cb) =>
+    subscribeAll('users', [orderBy('name')], cb),
+
+  get: (id) =>
+    getOne('users', id),
+
+  create: (data) =>
+    createDoc('users', data),
+
+  update: (id, data) =>
+    updateDocById('users', id, data),
+
+  remove: (id) =>
+    removeDoc('users', id),
+};
+
+/* ------------------------------------------------------------------ */
 /*  Alumnos (students)                                                  */
 /* ------------------------------------------------------------------ */
 export const Students = {
