@@ -149,13 +149,37 @@ h1, h2, h3 {
   mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
 }
 
-/* Boleto de servicio imprimible (Caja): al imprimir, solo se ve el
-   boleto — todo lo demás de la app (menú, botones, overlays) se oculta. */
+/* Marca de agua del escudo IBIME — de fondo, sutil, en las pantallas
+   principales (admin, operador, login). Se pone en el contenedor raíz
+   de cada layout, nunca sobre texto encima sin un fondo sólido debajo. */
+.ibime-watermark {
+  background-image: url('/escudo-ibime-watermark.png');
+  background-repeat: no-repeat;
+  background-position: bottom -60px right -60px;
+  background-size: 420px;
+}
+@media (max-width: 640px) {
+  .ibime-watermark {
+    background-position: bottom -40px right -80px;
+    background-size: 260px;
+  }
+}
+@media print {
+  .ibime-watermark { background-image: none; }
+}
+
+/* Impresión: boleto de Caja, mapa de referencia del operador y resumen
+   del recorrido. Al imprimir, solo se ve el bloque marcado como
+   imprimible — todo lo demás de la app (menú, botones, overlays) se
+   oculta, para que el papel salga limpio. */
 @media print {
   body * {
     visibility: hidden;
   }
-  .ticket-print, .ticket-print * {
+  .ticket-print, .ticket-print *,
+  .route-print, .route-print *,
+  .summary-print, .summary-print *,
+  .roster-print, .roster-print * {
     visibility: visible;
   }
   .ticket-print {
@@ -164,6 +188,12 @@ h1, h2, h3 {
     margin: auto;
     max-width: 380px;
     height: fit-content;
+  }
+  .route-print, .summary-print, .roster-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
   }
 }
 
