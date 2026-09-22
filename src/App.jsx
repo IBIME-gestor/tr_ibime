@@ -18,6 +18,8 @@ import FleetLive from './pages/admin/FleetLive';
 import ActiveTrips from './pages/admin/ActiveTrips';
 import Cashier from './pages/admin/Cashier';
 import Payroll from './pages/admin/Payroll';
+import AccessControl from './pages/admin/AccessControl';
+import RouteBuilder from './pages/admin/RouteBuilder';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -53,6 +55,8 @@ export default function App() {
         <Route path="recorridos-activos" element={<ActiveTrips />} />
         <Route path="caja" element={<Cashier />} />
         <Route path="nomina" element={<Payroll />} />
+        <Route path="acceso" element={<AccessControl />} />
+        <Route path="formar-ruta" element={<RouteBuilder />} />
       </Route>
 
       <Route
