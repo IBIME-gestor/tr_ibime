@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -117,6 +117,9 @@ const emptyForm = {
 export default function StudentsPage() {
   const { profile } = useAuth();
   const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 100;
   const [schools, setSchools] = useState([]);
   const [routes, setRoutesState] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -137,7 +140,13 @@ export default function StudentsPage() {
   const [editingEventIndex, setEditingEventIndex] = useState(null);
   const [eventualError, setEventualError] = useState('');
 
-  useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => {
+    setStudentsLoading(true);
+    return Students.subscribe((data) => {
+      setStudents(data);
+      setStudentsLoading(false);
+    });
+  }, []);
   useEffect(() => Schools.subscribe(setSchools), []);
   useEffect(() => Routes.subscribe(setRoutesState), []);
 
@@ -293,15 +302,24 @@ export default function StudentsPage() {
     if (editingEventIndex === index) resetEventualInputs();
   }
 
-  const filtered = students.filter((s) => {
+  const filtered = useMemo(() => students.filter((s) => {
+    const q = search.trim().toLowerCase();
     const matchSchool = !filterSchool || s.schoolId === filterSchool;
     const matchPayment = !filterPayment || (s.paymentStatus || 'al_corriente') === filterPayment;
-    const matchSearch =
-      !search ||
-      s.name?.toLowerCase().includes(search.toLowerCase()) ||
-      s.matricula?.includes(search);
+    const matchSearch = !q || s.name?.toLowerCase().includes(q) || String(s.matricula || '').toLowerCase().includes(q);
     return matchSchool && matchPayment && matchSearch;
-  });
+  }), [students, filterSchool, filterPayment, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visibleStudents = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterSchool, filterPayment]);
 
   const paymentCounts = students.reduce(
     (acc, s) => {
@@ -341,7 +359,7 @@ export default function StudentsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
           <h1 className="admin-h1">Alumnos</h1>
-          <p className="text-sm text-navy-400 mt-0.5">{students.length} alumnos dados de alta</p>
+          <p className="text-sm text-navy-400 mt-0.5">{studentsLoading ? 'Cargando alumnos…' : `${students.length} alumnos dados de alta`}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/admin/alumnos/importar" className="btn-admin-ghost">
@@ -429,7 +447,7 @@ export default function StudentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((s, i) => (
+                  {visibleStudents.map((s, i) => (
                     <tr
                       key={s.id}
                       onClick={() => handleSelectRow(s)}
@@ -475,10 +493,23 @@ export default function StudentsPage() {
                   ))}
                 </tbody>
               </table>
-              {filtered.length === 0 && (
+              {filtered.length === 0 && !studentsLoading && (
                 <p className="text-navy-400 text-sm py-6 text-center">No hay alumnos que coincidan.</p>
               )}
+              {studentsLoading && (
+                <div className="py-10 text-center text-sm text-navy-400">Cargando padrón de alumnos…</div>
+              )}
             </div>
+            {!studentsLoading && filtered.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-navy-100 text-sm">
+                <span className="text-navy-400">Mostrando {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length}</span>
+                <div className="flex gap-2">
+                  <button className="btn-admin-ghost" disabled={safePage === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+                  <span className="px-2 py-1 text-navy-500">Página {safePage} de {totalPages}</span>
+                  <button className="btn-admin-ghost" disabled={safePage === totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Siguiente</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
