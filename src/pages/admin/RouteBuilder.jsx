@@ -30,7 +30,9 @@ const emptyAddForm = { tipoServicio: 'completo', medioServicio: 'entrada', diasF
 export default function RouteBuilder() {
   const [routes, setRoutesState] = useState([]);
   const [students, setStudents] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [drivers, setDrivers] = useState([]);
   const [schools, setSchools] = useState([]);
   const [routeId, setRouteId] = useState('');
@@ -44,6 +46,16 @@ export default function RouteBuilder() {
   const inputRef = useRef(null);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
+  useEffect(() => {
+    let alive = true;
+    setCatalogLoading(true);
+    Students.list().then((data) => {
+      if (alive) { setAllStudents(data); setCatalogLoading(false); }
+    }).catch(() => {
+      if (alive) { setAllStudents([]); setCatalogLoading(false); }
+    });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     if (!routeId) {
       setStudents([]);
@@ -86,6 +98,44 @@ export default function RouteBuilder() {
     return schools.find((s) => s.id === id)?.name || '—';
   }
 
+  function normalizeLookup(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[\s._-]+/g, '');
+  }
+
+  const searchResults = useMemo(() => {
+    const q = normalizeLookup(matricula);
+    if (!q || catalogLoading) return [];
+    return allStudents
+      .filter((s) => {
+        const mat = normalizeLookup(s.matricula);
+        const name = normalizeLookup(s.name);
+        return mat.includes(q) || name.includes(q);
+      })
+      .sort((a, b) => {
+        const aMat = normalizeLookup(a.matricula);
+        const bMat = normalizeLookup(b.matricula);
+        const aName = normalizeLookup(a.name);
+        const bName = normalizeLookup(b.name);
+        const score = (mat, name) => (mat === q ? 0 : mat.startsWith(q) ? 1 : name.startsWith(q) ? 2 : 3);
+        return score(aMat, aName) - score(bMat, bName) || String(a.name || '').localeCompare(String(b.name || ''));
+      })
+      .slice(0, 8);
+  }, [matricula, allStudents, catalogLoading]);
+
+  function selectLookupStudent(found) {
+    setLookupError('');
+    setLookupStudent(found);
+    setAddForm({
+      tipoServicio: found.tipoServicio || 'completo',
+      medioServicio: found.medioServicio || 'entrada',
+      diasFijos: found.diasFijos || [],
+    });
+  }
+
   function resetAddFlow() {
     setMatricula('');
     setLookupStudent(null);
@@ -99,19 +149,46 @@ export default function RouteBuilder() {
     setLookupError('');
     const key = matricula.trim();
     if (!key) return;
-    const local = students.find((s) => s.matricula?.trim().toLowerCase() === key.toLowerCase());
-    const found = local || await Students.findByMatricula(key);
-    if (!found) {
-      setLookupError('No existe ningún alumno con esa matrícula. Dalo de alta primero en Alumnos.');
-      setLookupStudent(null);
+
+    const normalizedKey = normalizeLookup(key);
+    const foundByMatricula = allStudents.find(
+      (s) => normalizeLookup(s.matricula) === normalizedKey
+    );
+
+    if (foundByMatricula) {
+      selectLookupStudent(foundByMatricula);
       return;
     }
-    setLookupStudent(found);
-    setAddForm({
-      tipoServicio: found.tipoServicio || 'completo',
-      medioServicio: found.medioServicio || 'entrada',
-      diasFijos: found.diasFijos || [],
-    });
+
+    const exactNames = allStudents.filter(
+      (s) => normalizeLookup(s.name) === normalizedKey
+    );
+    if (exactNames.length === 1) {
+      selectLookupStudent(exactNames[0]);
+      return;
+    }
+
+    if (searchResults.length === 1) {
+      selectLookupStudent(searchResults[0]);
+      return;
+    }
+
+    // Último intento contra Firestore por si el catálogo todavía no alcanzó
+    // a cargar o el dato fue agregado recientemente. La comparación también
+    // se normaliza para tolerar mayúsculas, espacios, guiones y acentos.
+    const fallback = await Students.findByMatricula(key);
+    if (fallback) {
+      selectLookupStudent(fallback);
+      setAllStudents((prev) => prev.some((s) => s.id === fallback.id) ? prev : [...prev, fallback]);
+      return;
+    }
+
+    setLookupStudent(null);
+    setLookupError(
+      searchResults.length > 1
+        ? 'Hay varios alumnos que coinciden. Selecciona uno de la lista.'
+        : 'No encontramos ese alumno. Verifica nombre o matrícula; no es necesario volver a cargar el padrón.'
+    );
   }
 
   function toggleDiaFijo(dia) {
@@ -236,15 +313,16 @@ export default function RouteBuilder() {
             </div>
           </div>
 
-          {/* Captura rápida por matrícula */}
+          {/* Búsqueda rápida por matrícula o nombre */}
           <form onSubmit={handleLookup} className="admin-card mb-5 print:hidden">
-            <p className="font-display font-semibold text-navy-800 mb-3">Agregar alumno por matrícula</p>
+            <p className="font-display font-semibold text-navy-800 mb-1">Agregar alumno</p>
+            <p className="text-xs text-navy-400 mb-3">Busca por matrícula o por nombre. El alumno debe estar dado de alta en el padrón; no necesitas volver a cargarlo.</p>
             <div className="flex gap-2">
               <input
                 ref={inputRef}
                 value={matricula}
-                onChange={(e) => setMatricula(e.target.value)}
-                placeholder="Escanea o escribe la matrícula…"
+                onChange={(e) => { setMatricula(e.target.value); setLookupError(''); }}
+                placeholder="Escribe matrícula o nombre…"
                 className="admin-input flex-1"
                 autoFocus
               />
@@ -252,6 +330,24 @@ export default function RouteBuilder() {
                 <Search size={14} /> Buscar
               </button>
             </div>
+
+            {matricula.trim() && !lookupStudent && searchResults.length > 0 && (
+              <div className="mt-2 border border-navy-100 rounded-lg overflow-hidden bg-white">
+                {searchResults.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectLookupStudent(s)}
+                    className="w-full text-left px-3 py-2.5 hover:bg-navy-50 border-b last:border-b-0 border-navy-100"
+                  >
+                    <span className="block font-medium text-navy-800">{s.name}</span>
+                    <span className="block text-xs text-navy-400">Matrícula: {s.matricula || '—'} · {schoolName(s.schoolId)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {lookupError && <p className="text-stop text-sm mt-2">{lookupError}</p>}
 
             {lookupStudent && (
