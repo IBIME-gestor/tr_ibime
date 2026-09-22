@@ -12,6 +12,8 @@ import {
   LifeBuoy,
   Wallet,
   ClipboardList,
+  UserCog,
+  ListOrdered,
   Menu,
   X,
 } from 'lucide-react';
@@ -21,6 +23,7 @@ const links = [
   { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard, roles: ['admin'] },
   { to: '/admin/planteles', label: 'Planteles', icon: School, roles: ['admin'] },
   { to: '/admin/alumnos', label: 'Alumnos', icon: Users, roles: ['admin'] },
+  { to: '/admin/formar-ruta', label: 'Formar lista de ruta', icon: ListOrdered, roles: ['admin'] },
   { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
   { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
@@ -29,6 +32,7 @@ const links = [
   { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
   { to: '/admin/caja', label: 'Caja', icon: Wallet, roles: ['admin', 'cashier'] },
   { to: '/admin/nomina', label: 'Nómina de personal', icon: ClipboardList, roles: ['admin'] },
+  { to: '/admin/acceso', label: 'Personas con acceso', icon: UserCog, roles: ['admin'] },
 ];
 
 export default function AdminLayout() {
@@ -124,7 +128,7 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0 p-4 md:p-8 min-h-screen">
+      <main className="flex-1 min-w-0 p-4 md:p-8 min-h-screen ibime-watermark">
         <Outlet />
       </main>
     </div>
