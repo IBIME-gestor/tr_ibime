@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Truck, Baby,
+  Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Truck, Baby, Pencil,
 } from 'lucide-react';
 import { Students, Routes, Drivers, Schools } from '../../firebase/services';
 import { TIPOS_SERVICIO, OPCIONES_SERVICIO, WEEKDAYS } from './Students';
@@ -29,6 +30,7 @@ const emptyAddForm = { tipoServicio: 'completo', medioServicio: 'entrada', diasF
 export default function RouteBuilder() {
   const [routes, setRoutesState] = useState([]);
   const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
   const [drivers, setDrivers] = useState([]);
   const [schools, setSchools] = useState([]);
   const [routeId, setRouteId] = useState('');
@@ -42,7 +44,21 @@ export default function RouteBuilder() {
   const inputRef = useRef(null);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
-  useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => {
+    if (!routeId) {
+      setStudents([]);
+      setStudentsLoading(false);
+      return;
+    }
+    let alive = true;
+    setStudentsLoading(true);
+    Students.listByRoute(routeId).then((data) => {
+      if (alive) { setStudents(data); setStudentsLoading(false); }
+    }).catch(() => {
+      if (alive) { setStudents([]); setStudentsLoading(false); }
+    });
+    return () => { alive = false; };
+  }, [routeId]);
   useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => Schools.subscribe(setSchools), []);
 
@@ -78,10 +94,13 @@ export default function RouteBuilder() {
     inputRef.current?.focus();
   }
 
-  function handleLookup(e) {
+  async function handleLookup(e) {
     e.preventDefault();
     setLookupError('');
-    const found = students.find((s) => s.matricula?.trim().toLowerCase() === matricula.trim().toLowerCase());
+    const key = matricula.trim();
+    if (!key) return;
+    const local = students.find((s) => s.matricula?.trim().toLowerCase() === key.toLowerCase());
+    const found = local || await Students.findByMatricula(key);
     if (!found) {
       setLookupError('No existe ningún alumno con esa matrícula. Dalo de alta primero en Alumnos.');
       setLookupStudent(null);
@@ -105,12 +124,23 @@ export default function RouteBuilder() {
 
   async function handleAddToList() {
     if (!lookupStudent || !route) return;
+    const updatedStudent = {
+      ...lookupStudent,
+      routeId: route.id,
+      tipoServicio: addForm.tipoServicio,
+      medioServicio: addForm.medioServicio,
+      diasFijos: addForm.diasFijos,
+    };
     await Students.update(lookupStudent.id, {
       routeId: route.id,
       tipoServicio: addForm.tipoServicio,
       medioServicio: addForm.medioServicio,
       diasFijos: addForm.diasFijos,
     });
+    setStudents((prev) => prev.some((s) => s.id === updatedStudent.id)
+      ? prev.map((s) => s.id === updatedStudent.id ? updatedStudent : s)
+      : [...prev, updatedStudent]
+    );
     if (!order.includes(lookupStudent.id)) {
       await Routes.update(route.id, { [orderField]: [...order, lookupStudent.id] });
     }
@@ -181,6 +211,12 @@ export default function RouteBuilder() {
           </select>
         </div>
       </div>
+
+      {routeId && studentsLoading && (
+        <div className="mb-4 rounded-lg border border-navy-100 bg-navy-50 px-4 py-3 text-sm text-navy-500 print:hidden">
+          Cargando únicamente los alumnos asignados a esta ruta…
+        </div>
+      )}
 
       {route && (
         <>
@@ -353,8 +389,15 @@ export default function RouteBuilder() {
                       </td>
                       <td className="print:hidden text-navy-500 text-xs">
                         {schoolName(s.schoolId)}
-                        {(s.nivel || s.grado || s.grupo) && (
-                          <span className="block">{[s.nivel, s.grado, s.grupo].filter(Boolean).join(' ')}</span>
+                        {(s.nivel || s.grado || s.grupoEsp || s.grupo || s.familiarResponsable || s.telefono || s.parentContact) && (
+                          <span className="block">
+                            {[s.nivel, s.grado, s.grupoEsp || s.grupo].filter(Boolean).join(' ')}
+                            {(s.familiarResponsable || s.telefono || s.parentContact) && (
+                              <span className="block text-navy-400">
+                                {s.familiarResponsable || 'Sin responsable'} · {s.telefono || s.parentContact || 'Sin teléfono'}
+                              </span>
+                            )}
+                          </span>
                         )}
                       </td>
                       <td className="print:hidden text-xs">{scheduleSummary(s)}</td>
@@ -374,9 +417,21 @@ export default function RouteBuilder() {
                         </td>
                       )}
                       <td className="pr-5 print:hidden">
-                        <button onClick={() => removeFromList(s.id)} className="link-danger">
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            to={`/admin/alumnos?editar=${encodeURIComponent(s.id)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="link-action"
+                            title="Editar datos del alumno"
+                          >
+                            <Pencil size={13} />
+                          </Link>
+                          <button onClick={() => removeFromList(s.id)} className="link-danger">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
