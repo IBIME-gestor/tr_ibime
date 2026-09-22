@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import {
-  Search, Upload, User, MapPin, Bus, CircleDollarSign, Pencil, Trash2, X,
+  Search, Upload, User, MapPin, Mail, Bus, CircleDollarSign, Pencil, Trash2, X,
   Phone, CreditCard, IdCard, School as SchoolIcon, Navigation,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -93,7 +93,13 @@ function fmtDateTime(ts) {
 const emptyForm = {
   matricula: '',
   name: '',
+  studentEmail: '',
   schoolId: '',
+  nivel: '',
+  grado: '',
+  grupoEsp: '',
+  familiarResponsable: '',
+  telefono: '',
   routeId: '',
   address: '',
   parentContact: '',
@@ -120,6 +126,7 @@ export default function StudentsPage() {
   const [mode, setMode] = useState('view');
   const [selectedId, setSelectedId] = useState(null);
   const [activeTab, setActiveTab] = useState('info');
+  const [searchParams] = useSearchParams();
 
   const [filterSchool, setFilterSchool] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
@@ -133,6 +140,17 @@ export default function StudentsPage() {
   useEffect(() => Students.subscribe(setStudents), []);
   useEffect(() => Schools.subscribe(setSchools), []);
   useEffect(() => Routes.subscribe(setRoutesState), []);
+
+  useEffect(() => {
+    const editId = searchParams.get('editar');
+    if (!editId || !students.length) return;
+    const student = students.find((s) => s.id === editId);
+    if (!student) return;
+    setSelectedId(student.id);
+    setForm({ ...emptyForm, ...student });
+    setMode('edit');
+    setActiveTab('info');
+  }, [searchParams, students]);
 
   const selectedStudent = students.find((s) => s.id === selectedId) || null;
 
@@ -398,7 +416,13 @@ export default function StudentsPage() {
                   <tr>
                     <th className="pl-5">Matrícula</th>
                     <th>Nombre</th>
+                    <th>Correo alumno</th>
                     <th>Plantel</th>
+                    <th>Nivel</th>
+                    <th>Grado</th>
+                    <th>Grupo ESP</th>
+                    <th>Familiar responsable</th>
+                    <th>Teléfono</th>
                     <th>Ruta</th>
                     <th>Servicio</th>
                     <th className="pr-5">Pago</th>
@@ -416,7 +440,13 @@ export default function StudentsPage() {
                     >
                       <td className="pl-5 font-medium text-navy-700">{s.matricula}</td>
                       <td>{s.name}</td>
+                      <td className="text-navy-500">{s.studentEmail || "—"}</td>
                       <td className="text-navy-500">{schoolName(s.schoolId)}</td>
+                      <td>{s.nivel || "—"}</td>
+                      <td>{s.grado || "—"}</td>
+                      <td>{s.grupoEsp || s.grupo || "—"}</td>
+                      <td>{s.familiarResponsable || "—"}</td>
+                      <td>{s.telefono || s.parentContact || "—"}</td>
                       <td>
                         {routeName(s.routeId) ? (
                           <span
@@ -484,6 +514,33 @@ export default function StudentsPage() {
                       />
                     </div>
                     <div>
+                      <label className="admin-label">Correo alumno</label>
+                      <input
+                        type="email"
+                        value={form.studentEmail}
+                        onChange={(e) => setForm({ ...form, studentEmail: e.target.value })}
+                        className="admin-input"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="admin-label">Nivel</label>
+                        <input value={form.nivel} onChange={(e) => setForm({ ...form, nivel: e.target.value })} className="admin-input" />
+                      </div>
+                      <div>
+                        <label className="admin-label">Grado</label>
+                        <input value={form.grado} onChange={(e) => setForm({ ...form, grado: e.target.value })} className="admin-input" />
+                      </div>
+                      <div>
+                        <label className="admin-label">Grupo ESP</label>
+                        <input value={form.grupoEsp} onChange={(e) => setForm({ ...form, grupoEsp: e.target.value })} className="admin-input" />
+                      </div>
+                      <div>
+                        <label className="admin-label">Familiar responsable</label>
+                        <input value={form.familiarResponsable} onChange={(e) => setForm({ ...form, familiarResponsable: e.target.value })} className="admin-input" />
+                      </div>
+                    </div>
+                    <div>
                       <label className="admin-label">Plantel</label>
                       <select
                         value={form.schoolId}
@@ -525,7 +582,11 @@ export default function StudentsPage() {
                       />
                     </div>
                     <div>
-                      <label className="admin-label">Contacto del padre/madre (opcional)</label>
+                      <label className="admin-label">Teléfono del familiar responsable (opcional)</label>
+                      <input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value, parentContact: e.target.value })} placeholder="10 dígitos" className="admin-input" />
+                    </div>
+                    <div>
+                      <label className="admin-label">Contacto del padre/madre (compatibilidad)</label>
                       <input
                         value={form.parentContact}
                         onChange={(e) => setForm({ ...form, parentContact: e.target.value })}
@@ -534,7 +595,7 @@ export default function StudentsPage() {
                       />
                     </div>
                     <div>
-                      <label className="admin-label">Correo del padre/madre (opcional)</label>
+                      <label className="admin-label">Correo padre familia</label>
                       <input
                         type="email"
                         value={form.parentEmail}
@@ -828,6 +889,10 @@ export default function StudentsPage() {
                   <DetailRow icon={User} label="Nombre completo">{selectedStudent.name}</DetailRow>
                   <DetailRow icon={IdCard} label="Matrícula">{selectedStudent.matricula}</DetailRow>
                   <DetailRow icon={SchoolIcon} label="Plantel">{schoolName(selectedStudent.schoolId)}</DetailRow>
+                  <DetailRow icon={SchoolIcon} label="Nivel / grado / grupo ESP">{[selectedStudent.nivel, selectedStudent.grado, selectedStudent.grupoEsp || selectedStudent.grupo].filter(Boolean).join(" · ") || "Sin registrar"}</DetailRow>
+                  <DetailRow icon={User} label="Familiar responsable">{selectedStudent.familiarResponsable || "Sin registrar"}</DetailRow>
+                  <DetailRow icon={Phone} label="Teléfono">{selectedStudent.telefono || selectedStudent.parentContact || "Sin registrar"}</DetailRow>
+                  <DetailRow icon={Mail} label="Correo alumno">{selectedStudent.studentEmail || 'Sin registrar'}</DetailRow>
                   <DetailRow icon={MapPin} label="Domicilio">
                     {selectedStudent.address || 'Sin domicilio registrado'}
                   </DetailRow>
