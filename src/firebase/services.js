@@ -299,6 +299,14 @@ export const RouteLists = {
 /* ------------------------------------------------------------------ */
 /*  Rutas (routes) — asigna chofer + nanny + unidad + plantel + turno   */
 /* ------------------------------------------------------------------ */
+export const FinanceRecords = {
+  list: () => listAll('financeRecords', [orderBy('studentName')]),
+  get: (id) => getOne('financeRecords', id),
+  upsert: async (id, data) => { await setDoc(doc(db, 'financeRecords', id), { ...data, updatedAt: serverTimestamp() }, { merge: true }); return id; },
+  update: (id, data) => updateDocById('financeRecords', id, { ...data, updatedAt: serverTimestamp() }),
+  remove: (id) => removeDoc('financeRecords', id),
+};
+
 export const Routes = {
   list: () => listAll('routes', [orderBy('name')]),
   listBySchool: (schoolId) =>
