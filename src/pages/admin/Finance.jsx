@@ -41,10 +41,18 @@ export default function Finance() {
   async function load(){ setLoading(true); try { const [r,s,sch,lists]=await Promise.all([FinanceRecords.list(),Students.list(),Schools.list(),RouteLists.list()]);
       // Reparación segura: solo reconstruye registros de Finanzas que están en $0, usando el monto que ya existe en las listas.
       // No modifica listas, alumnos, pagos ni registros que ya tengan un monto.
+      // Modo actual de Finanzas: solo muestra registros cuyo listId
+      // corresponde a una lista que actualmente existe en RouteLists.
+      // Esto evita que pruebas/listas eliminadas vuelvan a aparecer en Finanzas.
+      // Más adelante podremos agregar un modo Histórico que consulte también
+      // los registros financieros que ya no tengan una lista activa.
+      const activeListIds = new Set((lists || []).map(list => list.id).filter(Boolean));
+      const activeFinanceRecords = (r || []).filter(rec => rec.listId && activeListIds.has(rec.listId));
+
       const listRows = new Map();
       (lists || []).forEach(list => (list.rows || []).forEach(row => listRows.set(`${list.id}_${row.studentId}`, { list, row })));
       const repaired = [];
-      for (const rec of (r || [])) {
+      for (const rec of activeFinanceRecords) {
         const source = listRows.get(rec.id || `${rec.listId}_${rec.studentId}`);
         const amount = Number(rec.montoEstimado || 0);
         const sourceAmount = Number(source?.row?.estimatedAmount || 0);
