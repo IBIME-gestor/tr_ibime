@@ -14,7 +14,7 @@ import { cascadeStyle } from '../../utils/cascade';
 import { routeColorClasses } from '../../utils/routeColor';
 import { fmtDateTime24, fmtTimestamp24, fmtDateOnly, daysOverdue, monthBounds } from '../../utils/dates';
 
-const METHODS = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta' };
+const METHODS = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', lista: 'Pago desde lista' };
 
 /**
  * Estatus "de verdad", calculado contra HOY — no lo que quedó guardado
@@ -116,6 +116,7 @@ export default function Cashier() {
       nextDueDate: payForm.nextDueDate,
       byName: profile?.name,
       byUid: user?.uid,
+      routeId: student.routeId,
     });
     setPayingId(null);
     setTicket({
