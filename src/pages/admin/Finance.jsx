@@ -1,42 +1,90 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, RefreshCw, Download } from 'lucide-react';
+import { Check, RefreshCw, Download, CalendarClock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { FinanceRecords, Students, Schools } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
 
-const EMPTY = { school:'', nivel:'', grado:'' };
+const EMPTY = { school:'', nivel:'', grado:'', service:'' };
 const money = (n) => `$${Number(n || 0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+const firstDayOfMonth = () => { const d = new Date(); d.setDate(1); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+
+function addDays(dateString, days) {
+  if (!dateString) return '';
+  const d = new Date(`${dateString}T12:00:00`);
+  d.setDate(d.getDate() + Number(days || 0));
+  const local = new Date(d);
+  local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+  return local.toISOString().slice(0,10);
+}
+
+function effectiveStatus(record) {
+  if (record.cobrado) return 'corriente';
+  const due = record.agreementDueDate || record.fechaVencimiento || addDays(record.periodoFin, record.paymentDays || 0);
+  if (record.paymentStatus === 'acuerdo' && due && due >= today()) return 'acuerdo';
+  if (!due || due >= today()) return 'corriente';
+  return due < firstDayOfMonth() ? 'mora' : 'atraso';
+}
+
+const STATUS = {
+  corriente: { label:'Corriente', cls:'badge-go' },
+  acuerdo: { label:'Acuerdo', cls:'badge-amber' },
+  atraso: { label:'Atraso', cls:'badge-stop' },
+  mora: { label:'Mora', cls:'badge-stop' },
+};
 
 export default function Finance() {
-  const { profile } = useAuth();
-  const [records,setRecords]=useState([]); const [students,setStudents]=useState([]); const [schoolRows,setSchoolRows]=useState([]); const [filters,setFilters]=useState(EMPTY); const [loading,setLoading]=useState(true);
+  const { profile, user } = useAuth();
+  const [records,setRecords]=useState([]); const [students,setStudents]=useState([]); const [schoolRows,setSchoolRows]=useState([]);
+  const [filters,setFilters]=useState(EMPTY); const [loading,setLoading]=useState(true); const [module,setModule]=useState('corriente');
+
   async function load(){ setLoading(true); try { const [r,s,sch]=await Promise.all([FinanceRecords.list(),Students.list(),Schools.list()]); setRecords(r); setStudents(s); setSchoolRows(sch); } catch(e){ console.error(e); setRecords([]); } finally { setLoading(false); } }
   useEffect(()=>{load();},[]);
-  const schools=useMemo(()=>schoolRows.map(s=>s.name).filter(Boolean),[schoolRows]);
-  const niveles=useMemo(()=>[...new Set(students.filter(s=>!filters.school||s.schoolName===filters.school).map(s=>s.nivel).filter(Boolean))].sort(),[students,filters.school]);
-  const grados=useMemo(()=>[...new Set(students.filter(s=>(!filters.school||s.schoolName===filters.school)&&(!filters.nivel||s.nivel===filters.nivel)).map(s=>s.grado).filter(Boolean))].sort(),[students,filters]);
-  const filtered=useMemo(()=>records.filter(r=>(!filters.school||r.schoolName===filters.school)&&(!filters.nivel||r.nivel===filters.nivel)&&(!filters.grado||r.grado===filters.grado)),[records,filters]);
-  const totals=useMemo(()=>filtered.reduce((a,r)=>({amount:a.amount+Number(r.montoEstimado||0),cobrado:a.cobrado+(r.cobrado?Number(r.montoEstimado||0):0),done:a.done+(r.solicitudAtendida?1:0),confirmed:a.confirmed+(r.servicioConfirmado?1:0),concept:a.concept+(r.conceptoCargado?1:0)}),{amount:0,cobrado:0,done:0,confirmed:0,concept:0}),[filtered]);
-  async function toggle(id,key,value){
-    const record=records.find(r=>r.id===id); if(!record) return;
+
+  const studentMap=useMemo(()=>new Map(students.map(s=>[s.id,s])),[students]);
+  const schoolMap=useMemo(()=>new Map(schoolRows.map(s=>[s.id,s])),[schoolRows]);
+  const enriched=useMemo(()=>records.map(r=>{ const st=studentMap.get(r.studentId)||{}; const school=schoolMap.get(st.schoolId); return {...r, _student:st, currentSchoolId:st.schoolId||r.schoolId||'', currentSchoolName:school?.name||st.schoolName||r.schoolName||'', currentNivel:st.nivel||r.nivel||'', currentGrado:st.grado||r.grado||'', currentStatus:effectiveStatus(r)}; }),[records,studentMap,schoolMap]);
+  const schools=useMemo(()=>[...new Set(enriched.map(r=>r.currentSchoolName).filter(Boolean))].sort(),[enriched]);
+  const niveles=useMemo(()=>[...new Set(enriched.filter(r=>!filters.school||r.currentSchoolName===filters.school).map(r=>r.currentNivel).filter(Boolean))].sort(),[enriched,filters.school]);
+  const grados=useMemo(()=>[...new Set(enriched.filter(r=>(!filters.school||r.currentSchoolName===filters.school)&&(!filters.nivel||r.currentNivel===filters.nivel)).map(r=>r.currentGrado).filter(Boolean))].sort(),[enriched,filters]);
+  const filtered=useMemo(()=>enriched.filter(r=>(!filters.school||r.currentSchoolName===filters.school)&&(!filters.nivel||r.currentNivel===filters.nivel)&&(!filters.grado||r.currentGrado===filters.grado)&&(!filters.service||r.tipoServicio===filters.service)&&r.currentStatus===module),[enriched,filters,module]);
+  const counts=useMemo(()=>enriched.reduce((a,r)=>({...a,[r.currentStatus]:(a[r.currentStatus]||0)+1}),{corriente:0,acuerdo:0,atraso:0,mora:0}),[enriched]);
+  const totals=useMemo(()=>filtered.reduce((a,r)=>({amount:a.amount+Number(r.montoEstimado||0),cobrado:a.cobrado+(r.cobrado?Number(r.montoEstimado||0):0)}),{amount:0,cobrado:0}),[filtered]);
+
+  async function markAgreement(record) {
+    const current = record.agreementDueDate || record.fechaVencimiento || addDays(record.periodoFin,record.paymentDays||0);
+    const due = window.prompt('Fecha límite del acuerdo (AAAA-MM-DD):', current || today());
+    if (!due) return;
     try {
-      if(key==='cobrado' && value && !record.pagoId){
-        if(Number(record.montoEstimado||0)<=0){ alert('El registro no tiene un monto mayor a cero.'); return; }
-        const paymentId=await Students.registerPayment(record.studentId,{amount:Number(record.montoEstimado||0),method:'finanzas',note:`Cargo ${record.conceptName||'Servicio'} · ${record.periodoInicio||''} al ${record.periodoFin||''}`,nextDueDate:record.periodoFin||null,byName:profile?.name,routeId:record.routeId,unitId:record.unitId,listId:record.listId});
-        await FinanceRecords.update(id,{cobrado:true,pagoId:paymentId,cobradoAt:new Date().toISOString(),cobradoBy:profile?.name||''});
-        setRecords(prev=>prev.map(r=>r.id===id?{...r,cobrado:true,pagoId:paymentId}:r));
-      } else {
-        await FinanceRecords.update(id,{[key]:value,[`${key}At`]:new Date().toISOString(),[`${key}By`]:profile?.name||''});
-        setRecords(prev=>prev.map(r=>r.id===id?{...r,[key]:value}:r));
-      }
-    } catch(e){ console.error(e); alert('No se pudo actualizar el checklist.'); }
+      await FinanceRecords.update(record.id,{paymentStatus:'acuerdo',agreementDueDate:due,agreementUpdatedAt:new Date().toISOString(),agreementUpdatedBy:profile?.name||''});
+      setRecords(prev=>prev.map(r=>r.id===record.id?{...r,paymentStatus:'acuerdo',agreementDueDate:due}:r));
+    } catch(e){console.error(e);window.alert('No se pudo guardar el acuerdo.');}
   }
+
+  async function markCurrent(record) {
+    try { await FinanceRecords.update(record.id,{paymentStatus:'corriente',agreementDueDate:'',paymentStatusUpdatedAt:new Date().toISOString(),paymentStatusUpdatedBy:profile?.name||''}); setRecords(prev=>prev.map(r=>r.id===record.id?{...r,paymentStatus:'corriente',agreementDueDate:''}:r)); }
+    catch(e){console.error(e);window.alert('No se pudo actualizar el estatus.');}
+  }
+
+  async function markPaid(record){
+    if(record.cobrado) return;
+    const amount=Number(record.montoEstimado||0); if(!(amount>0)){window.alert('El registro no tiene un monto mayor a cero.');return;}
+    if(!window.confirm(`Registrar pago de ${money(amount)} para ${record.studentName}?`)) return;
+    try{
+      const paymentId=await Students.registerPayment(record.studentId,{amount,method:'finanzas',note:`Cargo ${record.conceptName||'Servicio'} · ${record.periodoInicio||''} al ${record.periodoFin||''}`,nextDueDate:addDays(record.periodoFin,record.paymentDays||0),byName:profile?.name,byUid:user?.uid,routeId:record.routeId,unitId:record.unitId,listId:record.listId});
+      await FinanceRecords.update(record.id,{cobrado:true,pagoId:paymentId,cobradoAt:new Date().toISOString(),cobradoBy:profile?.name||'',paymentStatus:'corriente',agreementDueDate:''});
+      setRecords(prev=>prev.map(r=>r.id===record.id?{...r,cobrado:true,pagoId:paymentId,paymentStatus:'corriente',agreementDueDate:''}:r));
+    }catch(e){console.error(e);window.alert('No se pudo registrar el pago.');}
+  }
+
   function service(r){ if(r.tipoServicio==='completo') return 'Completo E+S'; if(r.tipoServicio==='medio') return `Medio ${r.medioServicio==='entrada'?'E':'S'} · ${(r.diasSemana||[]).map(d=>['','L','M','X','J','V'][d]).join(' ')}`; return `Diario · ${(r.fechasDiarias||[]).map(x=>x.slice(8,10)).join(', ')}`; }
-  function exportExcel(){ const data=filtered.map(r=>({Plantel:r.schoolName,Nivel:r.nivel,Grado:r.grado,Alumno:r.studentName,Matrícula:r.matricula,Ruta:r.routeName,'Tipo servicio':service(r),Concepto:r.conceptName,'Monto estimado':Number(r.montoEstimado||0),'Solicitud atendida':r.solicitudAtendida?'Sí':'No','Servicio confirmado':r.servicioConfirmado?'Sí':'No','Concepto cargado':r.conceptoCargado?'Sí':'No',Cobrado:r.cobrado?'Sí':'No'})); const ws=XLSX.utils.json_to_sheet(data); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Finanzas'); XLSX.writeFile(wb,'finanzas_ruta_segura.xlsx'); }
+  function exportExcel(){ const data=filtered.map(r=>({Estatus:STATUS[r.currentStatus]?.label||r.currentStatus,Plantel:r.currentSchoolName,Nivel:r.currentNivel,Grado:r.currentGrado,Alumno:r.studentName,Matrícula:r.matricula,Ruta:r.routeName,Operador:r.operatorName||'',Servicio:service(r),Concepto:r.conceptName,'Monto estimado':Number(r.montoEstimado||0),'Vencimiento':r.agreementDueDate||r.fechaVencimiento||addDays(r.periodoFin,r.paymentDays||0),Cobrado:r.cobrado?'Sí':'No'})); const ws=XLSX.utils.json_to_sheet(data); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Finanzas'); XLSX.writeFile(wb,'finanzas_ruta_segura.xlsx'); }
+
   return <div>
-    <div className="flex flex-wrap items-end justify-between gap-3 mb-5"><div><h1 className="admin-h1">Finanzas</h1><p className="text-sm text-navy-400 mt-1">Control de solicitudes y cargos por plantel, nivel y grado. El checklist alimenta Caja y reportes.</p></div><div className="flex gap-2"><button onClick={load} className="btn-admin-ghost"><RefreshCw size={14}/> Actualizar</button><button onClick={exportExcel} className="btn-admin-ghost"><Download size={14}/> Excel</button></div></div>
-    <div className="admin-card mb-5"><div className="grid grid-cols-1 md:grid-cols-3 gap-3"><div><label className="admin-label">Plantel</label><select value={filters.school} onChange={e=>setFilters({school:e.target.value,nivel:'',grado:''})} className="admin-select"><option value="">Todos</option>{schools.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Nivel</label><select value={filters.nivel} onChange={e=>setFilters({...filters,nivel:e.target.value,grado:''})} className="admin-select"><option value="">Todos</option>{niveles.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Grado</label><select value={filters.grado} onChange={e=>setFilters({...filters,grado:e.target.value})} className="admin-select"><option value="">Todos</option>{grados.map(x=><option key={x}>{x}</option>)}</select></div></div></div>
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">{[['Solicitudes',filtered.length],['Estimado',money(totals.amount)],['Cobrado',money(totals.cobrado)],['Conceptos cargados',`${totals.concept}/${filtered.length||0}`],['Servicios confirmados',`${totals.confirmed}/${filtered.length||0}`]].map(([l,v])=><div key={l} className="admin-card"><p className="text-xs text-navy-400">{l}</p><p className="font-display font-bold text-lg mt-1">{v}</p></div>)}</div>
-    <div className="admin-card p-0 overflow-hidden"><div className="px-4 py-3 border-b border-navy-100 text-xs text-navy-400">Marca cada etapa conforme se atiende en la otra plataforma de cargos. Al marcar <strong>Cobrado</strong> desde aquí se debe registrar el pago en Caja; por seguridad, esta pantalla muestra el estatus y la acción de cobro se mantiene centralizada en la lista/Caja.</div><div className="overflow-x-auto"><table className="table-admin text-xs min-w-[1100px]"><thead><tr><th>Plantel</th><th>Nivel</th><th>Grado</th><th>Alumno</th><th>Matrícula</th><th>Ruta</th><th>Servicio</th><th>Concepto</th><th>Monto</th><th>Solicitud</th><th>Confirmado</th><th>Concepto</th><th>Cobrado</th></tr></thead><tbody>{filtered.map(r=><tr key={r.id}><td>{r.schoolName||'—'}</td><td>{r.nivel||'—'}</td><td>{r.grado||'—'}</td><td className="font-medium">{r.studentName}</td><td>{r.matricula}</td><td>{r.routeName}</td><td>{service(r)}</td><td>{r.conceptName}</td><td className="font-medium">{money(r.montoEstimado)}</td>{[['solicitudAtendida','Solicitud'],['servicioConfirmado','Confirmado'],['conceptoCargado','Concepto'],['cobrado','Cobrado']].map(([k])=><td key={k} className="text-center"><button onClick={()=>toggle(r.id,k,!r[k])} className={`w-7 h-7 rounded border inline-flex items-center justify-center ${r[k]?'bg-go/15 border-go/40 text-go':'border-navy-200 text-navy-300'}`} title={r[k]?'Desmarcar':'Marcar'}><Check size={14}/></button></td>)}</tr>)}</tbody></table></div>{!loading&&!filtered.length&&<p className="p-6 text-center text-sm text-navy-400">No hay registros con los filtros seleccionados. Las nuevas listas generarán aquí sus solicitudes.</p>}</div>
+    <div className="flex flex-wrap items-end justify-between gap-3 mb-5"><div><h1 className="admin-h1">Finanzas</h1><p className="text-sm text-navy-400 mt-1">El Plantel, nivel y grado se toman del expediente actual del alumno. El estatus de pago se calcula por vencimiento y por mes.</p></div><div className="flex gap-2"><button onClick={load} className="btn-admin-ghost"><RefreshCw size={14}/> Actualizar</button><button onClick={exportExcel} className="btn-admin-ghost"><Download size={14}/> Excel</button></div></div>
+    <div className="admin-card mb-5"><div className="grid grid-cols-1 md:grid-cols-4 gap-3"><div><label className="admin-label">Plantel</label><select value={filters.school} onChange={e=>setFilters({school:e.target.value,nivel:'',grado:'',service:filters.service})} className="admin-select"><option value="">Todos</option>{schools.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Nivel</label><select value={filters.nivel} onChange={e=>setFilters({...filters,nivel:e.target.value,grado:''})} className="admin-select"><option value="">Todos</option>{niveles.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Grado</label><select value={filters.grado} onChange={e=>setFilters({...filters,grado:e.target.value})} className="admin-select"><option value="">Todos</option>{grados.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Servicio</label><select value={filters.service} onChange={e=>setFilters({...filters,service:e.target.value})} className="admin-select"><option value="">Todos</option><option value="completo">Completo</option><option value="medio">Medio</option><option value="diario">Diario</option></select></div></div></div>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-5">{Object.entries(STATUS).map(([key,v])=><button key={key} onClick={()=>setModule(key)} className={`admin-card text-left transition ${module===key?'ring-2 ring-navy-400':''}`}><p className="text-xs text-navy-400">{v.label}</p><p className="font-display font-bold text-lg mt-1">{counts[key]||0}</p></button>)}</div>
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5"><div className="admin-card"><p className="text-xs text-navy-400">Registros en {STATUS[module].label}</p><p className="font-display font-bold text-lg mt-1">{filtered.length}</p></div><div className="admin-card"><p className="text-xs text-navy-400">Estimado</p><p className="font-display font-bold text-lg mt-1">{money(totals.amount)}</p></div><div className="admin-card"><p className="text-xs text-navy-400">Cobrado</p><p className="font-display font-bold text-lg mt-1">{money(totals.cobrado)}</p></div></div>
+    <div className="admin-card p-0 overflow-hidden"><div className="px-4 py-3 border-b border-navy-100 text-xs text-navy-400">Vencimiento: fin de periodo + plazo configurado en Tarifas y Conceptos. Si vence dentro del mes aparece en <b>Atraso</b>; si llega el siguiente mes sin pago pasa a <b>Mora</b>.</div><div className="overflow-x-auto"><table className="table-admin text-xs min-w-[1250px]"><thead><tr><th>Estatus</th><th>Plantel</th><th>Nivel</th><th>Grado</th><th>Alumno</th><th>Matrícula</th><th>Ruta</th><th>Operador</th><th>Servicio</th><th>Concepto</th><th>Monto</th><th>Vencimiento</th><th>Acciones</th></tr></thead><tbody>{filtered.map(r=>{const st=STATUS[r.currentStatus]||STATUS.corriente;const due=r.agreementDueDate||r.fechaVencimiento||addDays(r.periodoFin,r.paymentDays||0);return <tr key={r.id}><td><span className={st.cls}>{st.label}</span></td><td>{r.currentSchoolName||'—'}</td><td>{r.currentNivel||'—'}</td><td>{r.currentGrado||'—'}</td><td className="font-medium">{r.studentName}</td><td>{r.matricula}</td><td>{r.routeName}</td><td>{r.operatorName||'—'}</td><td>{service(r)}</td><td>{r.conceptName}</td><td className="font-medium">{money(r.montoEstimado)}</td><td>{due||'—'}</td><td className="whitespace-nowrap"><button title="Registrar pago" onClick={()=>markPaid(r)} className="w-7 h-7 rounded border border-go/40 text-go inline-flex items-center justify-center mr-1"><Check size={14}/></button>{r.currentStatus!=='acuerdo'&&<button title="Crear acuerdo" onClick={()=>markAgreement(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center mr-1"><CalendarClock size={14}/></button>}{r.currentStatus==='acuerdo'&&<button title="Quitar acuerdo" onClick={()=>markCurrent(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center"><RefreshCw size={13}/></button>}</td></tr>})}</tbody></table></div>{!loading&&!filtered.length&&<p className="p-6 text-center text-sm text-navy-400">No hay alumnos en este módulo con los filtros seleccionados.</p>}</div>
   </div>;
 }
