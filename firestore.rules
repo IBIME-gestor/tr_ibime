@@ -74,6 +74,12 @@ service cloud.firestore {
     }
 
 
+    match /pricingConcepts/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Compatibilidad con registros antiguos; ya no se crean desde la app.
     match /pricing/{id} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
@@ -118,6 +124,12 @@ service cloud.firestore {
       match /payments/{paymentId} {
         allow read, write: if isAdmin() || isCashier();
       }
+    }
+
+    // Los reportes usan una consulta collectionGroup sobre payments.
+    // Esta regla es necesaria para autorizar esa consulta transversal.
+    match /{path=**}/payments/{paymentId} {
+      allow read, write: if isAdmin() || isCashier();
     }
 
     // Lectura de recorridos: cualquier miembro del personal con sesión
