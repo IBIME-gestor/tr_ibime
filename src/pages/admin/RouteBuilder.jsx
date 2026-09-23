@@ -254,7 +254,7 @@ export default function RouteBuilder() {
       });
     }
     return rows.sort(priorityCompare);
-  }, [currentList, serviceFilter]);
+  }, [currentList, serviceFilters]);
 
   const searchResults = useMemo(() => {
     const q = String(matricula || '').trim().toLowerCase();
