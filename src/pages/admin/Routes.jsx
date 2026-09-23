@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, Navigation2 } from 'lucide-react';
-import { Routes, Schools, Drivers, Units, Students } from '../../firebase/services';
+import { Routes, Schools, Drivers, Units, Students, PricingConcepts } from '../../firebase/services';
 import { getReferenceTrip } from '../../firebase/trips';
 import { resolveStudentLocation, resolveSchoolLocation } from '../../firebase/geocoding';
 import { optimizeStopOrder } from '../../utils/routeOptimizer';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 
-const emptyForm = { name: '', schoolId: '', driverId: '', nannyId: '', unitId: '' };
+const emptyForm = {
+  name: '', schoolId: '', driverId: '', nannyId: '', unitId: '',
+  pricingConcepts: { completo: '', medio_entrada: '', medio_salida: '', por_dia: '' },
+};
 
 export default function RoutesPage() {
   const [routes, setRoutesState] = useState([]);
@@ -15,6 +18,7 @@ export default function RoutesPage() {
   const [drivers, setDrivers] = useState([]);
   const [units, setUnits] = useState([]);
   const [students, setStudents] = useState([]);
+  const [concepts, setConcepts] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
@@ -24,6 +28,11 @@ export default function RoutesPage() {
   useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => Units.subscribe(setUnits), []);
   useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => {
+    let active = true;
+    PricingConcepts.list().then((rows) => { if (active) setConcepts(rows); }).catch((err) => console.error('Error cargando conceptos:', err));
+    return () => { active = false; };
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -124,6 +133,33 @@ export default function RoutesPage() {
             </select>
           </div>
         </div>
+
+        <div className="mt-5 pt-4 border-t border-navy-100">
+          <p className="font-display font-semibold text-sm text-navy-800 mb-1">Conceptos de cobro de esta ruta</p>
+          <p className="text-xs text-navy-400 mb-3">Selecciona el concepto que aplicará esta ruta para cada modalidad. El precio vive en el catálogo de conceptos.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              ['completo', 'Ruta completa'],
+              ['medio_entrada', 'Media ruta — entrada'],
+              ['medio_salida', 'Media ruta — salida'],
+              ['por_dia', 'Por día / evento'],
+            ].map(([key, label]) => (
+              <div key={key}>
+                <label className="admin-label">{label}</label>
+                <select
+                  value={form.pricingConcepts?.[key] || ''}
+                  onChange={(e) => setForm({ ...form, pricingConcepts: { ...form.pricingConcepts, [key]: e.target.value } })}
+                  className="admin-select"
+                >
+                  <option value="">Sin concepto</option>
+                  {concepts.filter((c) => c.active !== false).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} — ${Number(c.amount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
         <div className="flex gap-2 mt-4">
           <button type="submit" className="btn-admin-primary">
             {editingId ? 'Guardar cambios' : 'Crear ruta'}
@@ -148,6 +184,9 @@ export default function RoutesPage() {
                 <p className="font-display font-semibold text-navy-800">{r.name}</p>
                 <p className="text-sm text-navy-400">
                   {name(schools, r.schoolId)} · {driverName(r.driverId)} · {name(units, r.unitId)}
+                </p>
+                <p className="text-xs text-navy-400 mt-1">
+                  Conceptos: {['completo', 'medio_entrada', 'medio_salida', 'por_dia'].map((k) => r.pricingConcepts?.[k] ? (concepts.find((c) => c.id === r.pricingConcepts[k])?.name || 'Concepto') : null).filter(Boolean).join(' · ') || 'sin configurar'}
                 </p>
               </div>
               <div className="flex items-center gap-4">
