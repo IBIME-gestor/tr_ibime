@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react';
 import { Units } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 
-const emptyForm = { plate: '', model: '', capacity: '' };
+const emptyForm = {
+  plate: '',
+  model: '',
+  capacity: '',
+  costPerKm: '',
+  fixedTripCost: '',
+};
 
 export default function UnitsPage() {
   const [units, setUnits] = useState([]);
@@ -65,7 +71,32 @@ export default function UnitsPage() {
                 value={form.capacity}
                 onChange={(e) => setForm({ ...form, capacity: e.target.value })}
                 type="number"
+                min="0"
                 className="admin-input"
+              />
+            </div>
+            <div>
+              <label className="admin-label">Costo operativo por km</label>
+              <input
+                value={form.costPerKm}
+                onChange={(e) => setForm({ ...form, costPerKm: e.target.value })}
+                type="number"
+                min="0"
+                step="0.01"
+                className="admin-input"
+                placeholder="Ej. 4.50"
+              />
+            </div>
+            <div>
+              <label className="admin-label">Costo fijo por recorrido</label>
+              <input
+                value={form.fixedTripCost}
+                onChange={(e) => setForm({ ...form, fixedTripCost: e.target.value })}
+                type="number"
+                min="0"
+                step="0.01"
+                className="admin-input"
+                placeholder="Ej. 250"
               />
             </div>
           </div>
@@ -93,6 +124,8 @@ export default function UnitsPage() {
                   <th className="pl-5">Placas</th>
                   <th>Modelo</th>
                   <th>Capacidad</th>
+                  <th>Costo/km</th>
+                  <th>Costo fijo/recorrido</th>
                   <th className="pr-5"></th>
                 </tr>
               </thead>
@@ -102,6 +135,8 @@ export default function UnitsPage() {
                     <td className="pl-5 font-medium text-navy-700">{u.plate}</td>
                     <td className="text-navy-500">{u.model || '—'}</td>
                     <td className="text-navy-500">{u.capacity ? `${u.capacity} lugares` : '—'}</td>
+                    <td className="text-navy-500">${Number(u.costPerKm || 0).toFixed(2)}</td>
+                    <td className="text-navy-500">${Number(u.fixedTripCost || 0).toFixed(2)}</td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => handleEdit(u)} className="link-action mr-3">Editar</button>
                       <button onClick={() => handleDelete(u.id)} className="link-danger">Eliminar</button>
