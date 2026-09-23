@@ -8,6 +8,7 @@ const emptyForm = {
   mode: 'mensual',
   amount: '',
   active: true,
+  paymentDays: 5,
 };
 
 const MODE_OPTIONS = [
@@ -73,6 +74,7 @@ export default function Pricing() {
         mode: form.mode,
         amount,
         active: !!form.active,
+        paymentDays: Math.max(0, Number(form.paymentDays || 0)),
       };
       if (editingId) await PricingConcepts.update(editingId, data);
       else await PricingConcepts.create(data);
@@ -94,6 +96,7 @@ export default function Pricing() {
       mode: item.mode || 'mensual',
       amount: item.amount ?? '',
       active: item.active !== false,
+      paymentDays: item.paymentDays ?? item.diasPago ?? 5,
     });
     setError('');
   }
@@ -147,6 +150,11 @@ export default function Pricing() {
               <label className="admin-label">Monto</label>
               <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} type="number" min="0" step="0.01" className="admin-input" placeholder="0.00" required />
             </div>
+            <div>
+              <label className="admin-label">Días para pagar antes de pasar a atraso</label>
+              <input value={form.paymentDays} onChange={(e) => setForm({ ...form, paymentDays: e.target.value })} type="number" min="0" step="1" className="admin-input" placeholder="5" required />
+              <p className="text-[11px] text-navy-400 mt-1">Se cuentan desde el fin del periodo de la lista. Al vencer, pasa a Atraso; si cruza al mes siguiente sin pago, aparece en Mora.</p>
+            </div>
             <label className="flex items-center gap-2 text-sm text-navy-600">
               <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
               Concepto activo
@@ -171,6 +179,7 @@ export default function Pricing() {
                   <th className="pl-5">Concepto</th>
                   <th>Modalidad</th>
                   <th>Monto</th>
+                  <th>Plazo de pago</th>
                   <th>Estado</th>
                   <th className="pr-5"></th>
                 </tr>
@@ -184,6 +193,7 @@ export default function Pricing() {
                     </td>
                     <td className="text-xs text-navy-500">{MODE_OPTIONS.find((x) => x.key === item.mode)?.label || item.mode}</td>
                     <td className="font-semibold">{money(item.amount)}</td>
+                    <td className="text-xs">{Number(item.paymentDays ?? item.diasPago ?? 5)} días</td>
                     <td><span className={item.active === false ? 'badge-stop' : 'badge-go'}>{item.active === false ? 'Inactivo' : 'Activo'}</span></td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => edit(item)} className="link-action mr-3"><Pencil size={13} /></button>
