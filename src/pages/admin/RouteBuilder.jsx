@@ -157,6 +157,8 @@ export default function RouteBuilder() {
   const [concepts, setConcepts] = useState([]);
   const [routeId, setRouteId] = useState('');
   const [shift, setShift] = useState('morning');
+  const [operatorId, setOperatorId] = useState('');
+  const [unitId, setUnitId] = useState('');
 
   const [matricula, setMatricula] = useState('');
   const [lookupError, setLookupError] = useState('');
@@ -192,8 +194,15 @@ export default function RouteBuilder() {
   }, [routeId]);
 
   const route = routes.find((r) => r.id === routeId) || null;
-  const driver = drivers.find((d) => d.id === route?.driverId);
+  const driver = drivers.find((d) => d.id === (currentList?.driverId || operatorId || route?.driverId));
   const nanny = drivers.find((d) => d.id === route?.nannyId);
+
+  useEffect(() => {
+    if (!currentList) {
+      setOperatorId(route?.driverId || '');
+      setUnitId(route?.unitId || '');
+    }
+  }, [routeId, route?.driverId, route?.unitId, currentList]);
   const school = schools.find((s) => s.id === route?.schoolId);
   const orderField = ORDER_FIELD[shift];
   const order = route?.[orderField] || [];
@@ -313,6 +322,9 @@ export default function RouteBuilder() {
       const data = {
         routeId: route.id,
         shift,
+        driverId: operatorId || route.driverId || '',
+        driverName: drivers.find((d) => d.id === (operatorId || route.driverId))?.name || '',
+        unitId: route.unitId || '',
         startDate,
         endDate,
         weekdays: [1, 2, 3, 4, 5],
@@ -339,6 +351,8 @@ export default function RouteBuilder() {
     setListId(found.id);
     setRouteId(found.routeId || '');
     setShift(found.shift || 'morning');
+    setOperatorId(found.driverId || '');
+    setUnitId(found.unitId || '');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
     setWeekdays([1, 2, 3, 4, 5]);
@@ -437,7 +451,7 @@ export default function RouteBuilder() {
         <div>
           <h1 className="admin-h1">Formar lista de ruta</h1>
           <p className="text-sm text-navy-400 mt-1">
-            La lista se crea por periodo. Por defecto usa lunes, martes y miércoles y genera una casilla por día.
+            La lista se crea por periodo y detecta automáticamente lunes a viernes. El operador se asigna al recorrido, no queda amarrado a una sola ruta.
             Los alumnos con entrada + salida quedan sombreados y arriba como prioridad.
           </p>
         </div>
@@ -461,6 +475,16 @@ export default function RouteBuilder() {
               <option value="morning">Entrada / ida</option>
               <option value="afternoon">Salida / vuelta</option>
             </select>
+          </div>
+          <div>
+            <label className="admin-label">Operador de este recorrido</label>
+            <select value={operatorId || route?.driverId || ''} onChange={(e) => setOperatorId(e.target.value)} className="admin-select">
+              <option value="">Sin operador</option>
+              {drivers.filter((d) => d.role !== 'nanny').map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-navy-400 mt-1">Puede ser diferente al operador predeterminado de la ruta. El mismo operador puede realizar varias rutas.</p>
           </div>
           <div>
             <label className="admin-label">Desde</label>
@@ -504,7 +528,7 @@ export default function RouteBuilder() {
           <div className="admin-card mb-5 print:hidden">
             <div className="flex flex-wrap gap-6 text-sm">
               <p><span className="text-navy-400">Plantel:</span> <span className="font-medium">{school?.name || '—'}</span></p>
-              <p className="flex items-center gap-1.5"><Truck size={14} className="text-navy-400" /><span className="text-navy-400">Operador:</span> <span className="font-medium">{driver?.name || 'Sin asignar'}</span></p>
+              <p className="flex items-center gap-1.5"><Truck size={14} className="text-navy-400" /><span className="text-navy-400">Operador:</span> <span className="font-medium">{drivers.find((d) => d.id === (currentList?.driverId || operatorId || route?.driverId))?.name || 'Sin asignar'}</span></p>
               {route.nannyId && <p className="flex items-center gap-1.5"><Baby size={14} className="text-navy-400" /><span className="text-navy-400">Nanny:</span> <span className="font-medium">{nanny?.name || '—'}</span></p>}
             </div>
           </div>
@@ -610,6 +634,7 @@ export default function RouteBuilder() {
               <div>
                 <p className="font-display font-bold text-lg">{route?.name} · {shift === 'morning' ? 'Entrada' : 'Salida'}</p>
                 <p className="text-sm text-navy-500">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días · {list.length} alumnos</p>
+                <p className="text-xs text-navy-400 mt-1">Operador del recorrido: <strong>{currentList.driverName || drivers.find((d) => d.id === currentList.driverId)?.name || 'Sin asignar'}</strong></p>
               </div>
               <div className="flex gap-2 print:hidden">
                 <button onClick={() => doPrint('admin')} className="btn-admin-ghost"><Printer size={14} /> Imprimir</button>
