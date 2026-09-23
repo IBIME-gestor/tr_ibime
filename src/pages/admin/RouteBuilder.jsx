@@ -31,7 +31,7 @@ function localDateString(date) {
   return d.toISOString().slice(0, 10);
 }
 
-function dateRange(start, end, weekdays = [1, 2, 3]) {
+function dateRange(start, end) {
   if (!start || !end || start > end) return [];
   const out = [];
   const cursor = new Date(`${start}T12:00:00`);
@@ -39,7 +39,8 @@ function dateRange(start, end, weekdays = [1, 2, 3]) {
   while (cursor <= last) {
     const jsDay = cursor.getDay();
     const isoDay = jsDay === 0 ? 7 : jsDay;
-    if (weekdays.includes(isoDay)) out.push(localDateString(cursor));
+    // Los días hábiles se detectan automáticamente: lunes a viernes.
+    if (isoDay >= 1 && isoDay <= 5) out.push(localDateString(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
   return out;
@@ -142,7 +143,7 @@ function priorityCompare(a, b) {
   if (bothA !== bothB) return bothA ? -1 : 1;
 
   const beA = String(a.bloqueEntrada || '').localeCompare(String(b.bloqueEntrada || ''), undefined, { numeric: true });
-  const beB = String(b.bloqueEntrada || '').localeCompare(String(b.bloqueEntrada || ''), undefined, { numeric: true });
+  const beB = String(b.bloqueEntrada || '');
   if (beA !== beB) return beA.localeCompare(beB, undefined, { numeric: true });
 
   const bsA = String(a.bloqueSalida || '').localeCompare(String(b.bloqueSalida || ''), undefined, { numeric: true });
@@ -171,7 +172,6 @@ export default function RouteBuilder() {
 
   const [startDate, setStartDate] = useState(localDateString(new Date()));
   const [endDate, setEndDate] = useState(localDateString(new Date()));
-  const [weekdays, setWeekdays] = useState([1, 2, 3]);
   const [listId, setListId] = useState('');
   const [lists, setLists] = useState([]);
   const [currentList, setCurrentList] = useState(null);
@@ -199,7 +199,7 @@ export default function RouteBuilder() {
   const orderField = ORDER_FIELD[shift];
   const order = route?.[orderField] || [];
 
-  const dates = useMemo(() => dateRange(startDate, endDate, weekdays), [startDate, endDate, weekdays]);
+  const dates = useMemo(() => dateRange(startDate, endDate), [startDate, endDate]);
 
   const list = useMemo(() => {
     if (!currentList) return [];
@@ -248,10 +248,6 @@ export default function RouteBuilder() {
       || searchResults[0];
     if (found) selectLookupStudent(found);
     else setLookupError('No encontramos ese alumno en el padrón.');
-  }
-
-  function toggleWeekday(day) {
-    setWeekdays((prev) => prev.includes(day) ? prev.filter((x) => x !== day) : [...prev, day].sort((a, b) => a - b));
   }
 
   function toggleDiaFijo(dia) {
@@ -318,7 +314,7 @@ export default function RouteBuilder() {
         shift,
         startDate,
         endDate,
-        weekdays,
+        weekdays: [1, 2, 3, 4, 5],
         dates,
         rows,
         status: 'abierta',
@@ -344,7 +340,6 @@ export default function RouteBuilder() {
     setShift(found.shift || 'morning');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
-    setWeekdays(found.weekdays || [1, 2, 3]);
   }
 
   async function updateRows(rows) {
@@ -440,7 +435,7 @@ export default function RouteBuilder() {
         <div>
           <h1 className="admin-h1">Formar lista de ruta</h1>
           <p className="text-sm text-navy-400 mt-1">
-            La lista se crea por periodo. Por defecto usa lunes, martes y miércoles y genera una casilla por día.
+            La lista se crea por periodo. Al seleccionar las fechas Desde/Hasta, el sistema detecta automáticamente todos los días hábiles de lunes a viernes y genera una casilla por cada fecha.
             Los alumnos con entrada + salida quedan sombreados y arriba como prioridad.
           </p>
         </div>
@@ -476,14 +471,13 @@ export default function RouteBuilder() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-navy-400 mr-1">Días hábiles de la lista:</span>
-          {WEEKDAYS.slice(0, 3).map((d) => (
-            <label key={d.value} className={`badge cursor-pointer ${weekdays.includes(d.value) ? 'ring-2 ring-signal-yellow' : 'opacity-40'}`}>
-              <input type="checkbox" className="mr-1" checked={weekdays.includes(d.value)} onChange={() => toggleWeekday(d.value)} />
-              {d.label}
-            </label>
-          ))}
-          <span className="text-xs text-navy-400 ml-2">{dates.length} día(s) en el periodo</span>
+          <span className="text-xs text-navy-400 mr-1">Días hábiles detectados:</span>
+          <span className="badge">Lunes</span>
+          <span className="badge">Martes</span>
+          <span className="badge">Miércoles</span>
+          <span className="badge">Jueves</span>
+          <span className="badge">Viernes</span>
+          <span className="text-xs text-navy-400 ml-2">{dates.length} día(s) hábil(es) en el periodo</span>
           <button onClick={createList} disabled={!route || !dates.length || saving} className="btn-admin-primary ml-auto">
             <CalendarDays size={14} /> {saving ? 'Generando…' : 'Generar lista del periodo'}
           </button>
@@ -574,7 +568,7 @@ export default function RouteBuilder() {
                   <div className="mt-3">
                     <label className="admin-label">Días fijos y servicio de cada día</label>
                     <div className="space-y-2">
-                      {WEEKDAYS.slice(0, 3).map((d) => {
+                      {WEEKDAYS.filter((d) => Number(d.value) >= 1 && Number(d.value) <= 5).map((d) => {
                         const item = addForm.diasFijos.find((x) => Number(x.dia) === d.value);
                         return (
                           <div key={d.value} className="flex items-center gap-2">
