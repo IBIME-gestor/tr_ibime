@@ -633,7 +633,27 @@ export default function RouteBuilder() {
   }
 
   async function togglePaid(row) {
-    if (!currentList || row.paid) return;
+    if (!currentList) return;
+    // El pago se puede marcar/desmarcar sin crear un segundo pago.
+    // Si ya existe paymentId, al volver a marcar se reutiliza ese registro.
+    if (row.paid) {
+      setSaving(true);
+      try {
+        const rows = (currentList.rows || []).map((x) => x.studentId === row.studentId ? { ...x, paid: false } : x);
+        await updateRows(rows);
+        await FinanceRecords.update(`${currentList.id}_${row.studentId}`, {
+          cobrado: false,
+          cobradoAt: '',
+          cobradoBy: ''
+        });
+      } catch (err) {
+        console.error(err);
+        window.alert(err?.message || 'No se pudo desmarcar el pago.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     const amount = Number(row.estimatedAmount || 0);
     if (!(amount > 0)) {
       window.alert('Este alumno no tiene un monto calculado. Revisa el concepto de la ruta.');
@@ -642,17 +662,20 @@ export default function RouteBuilder() {
     if (!window.confirm(`Registrar pago de $${amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} para ${row.name}?`)) return;
     setSaving(true);
     try {
-      const paymentId = await Students.registerPayment(row.studentId, {
-        amount,
-        method: 'lista',
-        note: `${row.concept || 'Servicio'} · lista ${currentList.startDate} al ${currentList.endDate}`,
-        nextDueDate: currentList.endDate,
-        byName: profile?.name,
-        byUid: user?.uid,
-        routeId: currentList.routeId,
-        unitId: route?.unitId,
-        listId: currentList.id,
-      });
+      let paymentId = row.paymentId || '';
+      if (!paymentId) {
+        paymentId = await Students.registerPayment(row.studentId, {
+          amount,
+          method: 'lista',
+          note: `${row.concept || 'Servicio'} · lista ${currentList.startDate} al ${currentList.endDate}`,
+          nextDueDate: currentList.endDate,
+          byName: profile?.name,
+          byUid: user?.uid,
+          routeId: currentList.routeId,
+          unitId: route?.unitId,
+          listId: currentList.id,
+        });
+      }
       const rows = (currentList.rows || []).map((x) => x.studentId === row.studentId ? { ...x, paid: true, paymentId } : x);
       await updateRows(rows);
       await FinanceRecords.update(`${currentList.id}_${row.studentId}`, { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString() });
@@ -795,7 +818,7 @@ export default function RouteBuilder() {
                       </td>;
                     })}
                     <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</td>
-                    <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving || row.paid} className="w-3.5 h-3.5"/></td>
+                    <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving} className="w-3.5 h-3.5"/></td>
                     <td className="print:hidden whitespace-nowrap"><button title="Editar" onClick={() => editRow(row)} className="link-action mr-2"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action mr-2 text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 mr-1"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 mr-1"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
                   </tr>;
                 })}
