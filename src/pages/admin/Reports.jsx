@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, TrendingUp, Users, Truck, Route as RouteIcon, CircleDollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Routes, Units, Students, RouteLists, Drivers } from '../../firebase/services';
+import { Routes, Units, Students, RouteLists, FinanceRecords } from '../../firebase/services';
 import { listTripsBetween, getTripStopsOnce } from '../../firebase/trips';
 import { cascadeStyle } from '../../utils/cascade';
 
@@ -25,22 +25,22 @@ export default function Reports() {
   const [routes, setRoutes] = useState([]);
   const [units, setUnits] = useState([]);
   const [students, setStudents] = useState([]);
-  const [drivers, setDrivers] = useState([]);
   const [lists, setLists] = useState([]);
   const [startDate, setStartDate] = useState(addDays(today(), -30));
   const [endDate, setEndDate] = useState(today());
   const [trips, setTrips] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [financeRecords, setFinanceRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [unitFilter, setUnitFilter] = useState('');
 
   useEffect(() => Routes.subscribe(setRoutes), []);
   useEffect(() => Units.subscribe(setUnits), []);
   useEffect(() => Students.subscribe(setStudents), []);
-  useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => {
     let active = true;
     RouteLists.list().then((rows) => { if (active) setLists(rows); }).catch((err) => { console.error('Error cargando listas:', err); if (active) setLists([]); });
+    FinanceRecords.list().then((rows) => { if (active) setFinanceRecords(rows); }).catch((err) => { console.error('Error cargando finanzas:', err); if (active) setFinanceRecords([]); });
     return () => { active = false; };
   }, []);
 
@@ -157,34 +157,11 @@ export default function Reports() {
 
   const collectionRate = totals.estimatedRevenue ? (totals.collected / totals.estimatedRevenue) * 100 : 0;
   const overallMargin = totals.collected ? (totals.balance / totals.collected) * 100 : 0;
-
-  const operatorRows = useMemo(() => {
-    const map = new Map();
-    const ensure = (id, name) => {
-      const key = id || 'sin_operador';
-      if (!map.has(key)) map.set(key, { id: key, name: name || 'Sin operador', recorridos: 0, rutas: new Set(), estimado: 0 });
-      return map.get(key);
-    };
-
-    trips.forEach((trip) => {
-      const driver = drivers.find((d) => d.id === trip.driverId);
-      const row = ensure(trip.driverId, driver?.name);
-      row.recorridos += 1;
-      if (trip.routeId) row.rutas.add(trip.routeId);
-    });
-
-    lists.forEach((list) => {
-      if (list.startDate > endDate || list.endDate < startDate) return;
-      const driver = drivers.find((d) => d.id === list.driverId);
-      const row = ensure(list.driverId, list.driverName || driver?.name);
-      row.estimado += (list.rows || []).reduce((sum, item) => sum + Number(item.estimatedAmount || 0), 0);
-      if (list.routeId) row.rutas.add(list.routeId);
-    });
-
-    return [...map.values()]
-      .map((r) => ({ ...r, rutas: r.rutas.size }))
-      .sort((a, b) => b.recorridos - a.recorridos || b.estimado - a.estimado);
-  }, [trips, lists, drivers, startDate, endDate]);
+  const financeInPeriod = financeRecords.filter(r => r.periodoInicio <= endDate && r.periodoFin >= startDate);
+  const financeEstimated = financeInPeriod.reduce((a,r)=>a+Number(r.montoEstimado||0),0);
+  const financeCharged = financeInPeriod.filter(r=>r.conceptoCargado).length;
+  const financeConfirmed = financeInPeriod.filter(r=>r.servicioConfirmado).length;
+  const financeCollected = financeInPeriod.filter(r=>r.cobrado).reduce((a,r)=>a+Number(r.montoEstimado||0),0);
 
   function exportExcel() {
     const data = rows.map((r) => ({
@@ -204,13 +181,6 @@ export default function Reports() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'KPI unidades');
-    const opData = operatorRows.map((r) => ({
-      Operador: r.name,
-      Recorridos: r.recorridos,
-      Rutas: r.rutas,
-      'Ingreso estimado asociado': Number(r.estimado.toFixed(2)),
-    }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(opData), 'KPI operadores');
     XLSX.writeFile(wb, `kpi_unidades_${startDate}_${endDate}.xlsx`);
   }
 
@@ -226,6 +196,13 @@ export default function Reports() {
         <button onClick={exportExcel} className="btn-admin-ghost" disabled={!rows.length}>
           <Download size={14} /> Exportar KPI a Excel
         </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="admin-card"><p className="text-xs text-navy-400">Finanzas · solicitudes</p><p className="font-display font-bold text-lg">{financeInPeriod.length}</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Conceptos cargados</p><p className="font-display font-bold text-lg">{financeCharged}</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Servicios confirmados</p><p className="font-display font-bold text-lg">{financeConfirmed}</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Cobrado por finanzas</p><p className="font-display font-bold text-lg">{fmtMoney(financeCollected)}</p></div>
       </div>
 
       <div className="admin-card mb-5">
@@ -288,31 +265,6 @@ export default function Reports() {
           <p className="text-xs text-navy-400">Costo por km</p>
           <p className="text-2xl font-display font-bold">{totals.km ? fmtMoney(totals.cost / totals.km) : '—'}</p>
           <p className="text-xs text-navy-400 mt-1">Incluye costo/km + fijo por recorrido</p>
-        </div>
-      </div>
-
-      <div className="admin-card p-0 overflow-hidden mb-5">
-        <div className="px-5 py-4 border-b border-navy-100">
-          <p className="font-display font-semibold">Actividad por operador</p>
-          <p className="text-xs text-navy-400 mt-1">Un operador puede realizar varias rutas. Cada lista y recorrido conserva su propio operador, ruta y costo.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="table-admin min-w-[650px]">
-            <thead>
-              <tr><th className="pl-5">Operador</th><th>Recorridos</th><th>Rutas distintas</th><th className="pr-5">Ingreso estimado asociado</th></tr>
-            </thead>
-            <tbody>
-              {operatorRows.map((r, i) => (
-                <tr key={r.id} className="cascade-item" style={cascadeStyle(i, 20)}>
-                  <td className="pl-5 font-medium">{r.name}</td>
-                  <td>{r.recorridos}</td>
-                  <td>{r.rutas}</td>
-                  <td className="pr-5">{fmtMoney(r.estimado)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {operatorRows.length === 0 && <p className="text-center text-sm text-navy-400 py-8">No hay actividad de operadores en el periodo.</p>}
         </div>
       </div>
 
