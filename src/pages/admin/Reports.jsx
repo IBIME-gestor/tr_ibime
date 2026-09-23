@@ -36,7 +36,11 @@ export default function Reports() {
   useEffect(() => Routes.subscribe(setRoutes), []);
   useEffect(() => Units.subscribe(setUnits), []);
   useEffect(() => Students.subscribe(setStudents), []);
-  useEffect(() => RouteLists.list().then(setLists).catch(() => setLists([])), []);
+  useEffect(() => {
+    let active = true;
+    RouteLists.list().then((rows) => { if (active) setLists(rows); }).catch((err) => { console.error('Error cargando listas:', err); if (active) setLists([]); });
+    return () => { active = false; };
+  }, []);
 
   async function load() {
     if (!startDate || !endDate || startDate > endDate) return;
