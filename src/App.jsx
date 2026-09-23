@@ -21,6 +21,7 @@ import Payroll from './pages/admin/Payroll';
 import AccessControl from './pages/admin/AccessControl';
 import RouteBuilder from './pages/admin/RouteBuilder';
 import Pricing from './pages/admin/Pricing';
+import Finance from './pages/admin/Finance';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="acceso" element={<AccessControl />} />
         <Route path="formar-ruta" element={<RouteBuilder />} />
         <Route path="tarifas" element={<Pricing />} />
+        <Route path="finanzas" element={<Finance />} />
       </Route>
 
       <Route
