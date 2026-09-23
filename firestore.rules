@@ -73,6 +73,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+
+    match /pricing/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /routeLists/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
     match /routes/{id} {
       allow read: if isSignedIn();
       allow update: if isAdmin() ||
