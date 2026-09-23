@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Students, Routes, Schools, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
+import { Students, Routes, Schools, Drivers, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 
 const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
@@ -145,6 +145,7 @@ function buildStudentRow(student, dates, concepts, route) {
     pricingConceptId: concept?.id || student.pricingConceptId || '',
     concept: concept?.name || student.billingConcept || '',
     billingMode: concept?.mode || student.billingMode || '',
+    paymentDays: Number(concept?.paymentDays ?? concept?.diasPago ?? student.paymentDays ?? 0),
     paid: !!student.paid,
     paymentId: student.paymentId || '',
     days,
@@ -204,6 +205,7 @@ export default function RouteBuilder() {
   const [routes, setRoutesState] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
   const [schools, setSchools] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [concepts, setConcepts] = useState([]);
   const [routeId, setRouteId] = useState('');
   const [matricula, setMatricula] = useState('');
@@ -221,9 +223,14 @@ export default function RouteBuilder() {
   const [saving, setSaving] = useState(false);
   const [serviceFilters, setServiceFilters] = useState(['todos']);
   const [showAddStudent, setShowAddStudent] = useState(false);
+  const [operatorId, setOperatorId] = useState('');
+  const [movingRowId, setMovingRowId] = useState(null);
+  const [moveRouteId, setMoveRouteId] = useState('');
+  const [moveOperatorId, setMoveOperatorId] = useState('');
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
+  useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => {
     let active = true;
     Promise.all([Students.list(), PricingConcepts.list(), RouteLists.list()])
@@ -373,6 +380,19 @@ export default function RouteBuilder() {
     }
   }
 
+  function operatorName(id) { return drivers.find((d) => d.id === id)?.name || ''; }
+
+  function addDays(dateString, days) {
+    if (!dateString) return '';
+    const d = new Date(`${dateString}T12:00:00`);
+    d.setDate(d.getDate() + Number(days || 0));
+    return localDateString(d);
+  }
+
+  async function syncListFinance(listData, listRows = listData.rows || [], listRoute = route, listSchool = school) {
+    await Promise.all(listRows.map((row) => FinanceRecords.upsert(`${listData.id}_${row.studentId}`, financePayload(row, listData, listRoute, listSchool))));
+  }
+
   async function createList() {
     if (!route || !startDate || !endDate || startDate > endDate || !dates.length) return;
     setSaving(true);
@@ -389,6 +409,8 @@ export default function RouteBuilder() {
         status: 'abierta',
         createdByUid: user?.uid || '',
         createdByName: profile?.name || '',
+        operatorId: operatorId || '',
+        operatorName: operatorName(operatorId),
       };
       const id = await RouteLists.create(data);
       const created = { id, ...data };
@@ -413,7 +435,35 @@ export default function RouteBuilder() {
     setRouteId(found.routeId || '');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
+    setOperatorId(found.operatorId || '');
     setServiceFilters(['todos']);
+  }
+
+  async function deleteCurrentList() {
+    if (!currentList) return;
+    const ok = window.confirm(`¿Eliminar esta lista del ${currentList.startDate} al ${currentList.endDate}? También se eliminarán sus registros de Finanzas. Los alumnos NO se eliminarán.`);
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await FinanceRecords.removeByList(currentList.id);
+      await RouteLists.remove(currentList.id);
+      setLists((prev) => prev.filter((x) => x.id !== currentList.id));
+      setCurrentList(null); setListId(''); setShowAddStudent(false); setOperatorId(''); resetAddFlow();
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo eliminar la lista.'); }
+    finally { setSaving(false); }
+  }
+
+  async function saveListOperator(nextId) {
+    if (!currentList) return;
+    setOperatorId(nextId);
+    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId) };
+    setSaving(true);
+    try {
+      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName });
+      await syncListFinance(updated, updated.rows || [], route, school);
+      setCurrentList(updated); setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo actualizar el operador.'); }
+    finally { setSaving(false); }
   }
 
   async function updateRows(rows) {
@@ -444,6 +494,38 @@ export default function RouteBuilder() {
   async function removeRow(row) {
     if (!window.confirm(`¿Quitar a ${row.name} de esta lista? El alumno no se elimina.`)) return;
     await updateRows((currentList.rows || []).filter((x) => x.studentId !== row.studentId));
+  }
+
+  async function moveStudent(row) {
+    if (!currentList || !moveRouteId || moveRouteId === currentList.routeId) { window.alert('Selecciona una ruta destino diferente.'); return; }
+    const targetRoute = routes.find((r) => r.id === moveRouteId);
+    if (!targetRoute) return;
+    const targetSchool = schools.find((s) => s.id === targetRoute.schoolId) || null;
+    setSaving(true);
+    try {
+      let targetList = lists.find((l) => l.routeId === moveRouteId && l.startDate === currentList.startDate && l.endDate === currentList.endDate);
+      if (!targetList) {
+        const targetRows = [];
+        const data = { routeId: moveRouteId, startDate: currentList.startDate, endDate: currentList.endDate, weekdays: [1,2,3,4,5], dates: currentList.dates || [], rows: targetRows, status: 'abierta', createdByUid: user?.uid || '', createdByName: profile?.name || '', operatorId: moveOperatorId || '', operatorName: operatorName(moveOperatorId) };
+        const id = await RouteLists.create(data); targetList = { id, ...data };
+      }
+      const student = allStudents.find((s) => s.id === row.studentId);
+      const movedStudent = { ...student, routeId: moveRouteId };
+      await Students.update(row.studentId, { routeId: moveRouteId });
+      const targetRow = buildStudentRow({ ...movedStudent, tipoServicio: row.tipoServicio, medioServicio: row.medioServicio, diasSemana: row.diasSemana, fechasDiarias: row.fechasDiarias }, targetList.dates || dates, concepts, targetRoute);
+      const targetRows = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow].sort(priorityCompare);
+      await RouteLists.update(targetList.id, { rows: targetRows });
+      const targetUpdated = { ...targetList, rows: targetRows };
+      await FinanceRecords.upsert(`${targetList.id}_${row.studentId}`, financePayload(targetRow, targetUpdated, targetRoute, targetSchool));
+      await FinanceRecords.remove(`${currentList.id}_${row.studentId}`);
+      const currentRows = (currentList.rows || []).filter((x) => x.studentId !== row.studentId);
+      await RouteLists.update(currentList.id, { rows: currentRows });
+      const currentUpdated = { ...currentList, rows: currentRows };
+      setCurrentList(currentUpdated); setLists((prev) => { const exists = prev.some((x) => x.id === targetUpdated.id); return prev.map((x) => x.id === currentUpdated.id ? currentUpdated : x).concat(exists ? [] : [targetUpdated]); });
+      setMovingRowId(null); setMoveRouteId(''); setMoveOperatorId('');
+      window.alert(`${row.name} fue movido a ${targetRoute.name}.`);
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo mover al alumno.'); }
+    finally { setSaving(false); }
   }
 
   async function togglePaid(row) {
@@ -523,7 +605,7 @@ export default function RouteBuilder() {
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
-          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-sm"><option value="">Abrir lista existente…</option>{lists.filter((l) => !routeId || l.routeId === routeId).map((l) => <option key={l.id} value={l.id}>{l.startDate} → {l.endDate}</option>)}</select>
+          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-sm"><option value="">Abrir lista existente…</option>{lists.filter((l) => !routeId || l.routeId === routeId).map((l) => <option key={l.id} value={l.id}>{l.startDate} → {l.endDate}</option>)}</select>{currentList && <><select value={operatorId} onChange={(e) => saveListOperator(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
         </div>
       </div>
 
@@ -572,6 +654,7 @@ export default function RouteBuilder() {
       {currentList && (
         <div className="admin-card p-0 overflow-hidden">
           <div className="px-3 py-3 border-b border-navy-100 flex flex-wrap justify-between gap-2"><div><b>{route?.name || 'Ruta'}</b><span className="text-xs text-navy-400 ml-2">{list.length} alumnos visibles</span></div><div className="text-xs text-navy-500">Estimado: <b>${filteredTotal().toLocaleString('es-MX', { minimumFractionDigits: 2 })}</b></div></div>
+          {movingRowId && <div className="m-3 p-3 rounded-lg bg-signal-yellow/10 border border-signal-yellow/30 text-xs"><div className="font-semibold mb-2">Mover alumno a otra ruta</div><div className="flex flex-wrap gap-2 items-end"><div><label className="admin-label">Ruta destino</label><select value={moveRouteId} onChange={(e) => setMoveRouteId(e.target.value)} className="admin-select"><option value="">Selecciona…</option>{routes.filter((r) => r.id !== currentList.routeId).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div><label className="admin-label">Operador</label><select value={moveOperatorId} onChange={(e) => setMoveOperatorId(e.target.value)} className="admin-select"><option value="">Sin operador</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><button onClick={() => moveStudent(currentList.rows.find((x) => x.studentId === movingRowId))} disabled={saving} className="btn-admin-primary">Mover alumno</button><button onClick={() => setMovingRowId(null)} className="btn-admin-ghost">Cancelar</button></div></div>}
           <div className="overflow-x-auto">
             <table className="table-admin text-[11px] min-w-[850px]">
               <thead><tr><th className="w-10">#</th><th>Alumno</th><th>Matrícula</th><th>Tipo</th>{currentList.dates?.map((date) => <th key={date} className="text-center w-10 px-1">{dayHeader(date)}</th>)}<th className="text-right">Monto</th><th>Pago</th><th className="print:hidden"></th></tr></thead>
@@ -595,7 +678,7 @@ export default function RouteBuilder() {
                     })}
                     <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</td>
                     <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving || row.paid} className="w-3.5 h-3.5"/></td>
-                    <td className="print:hidden whitespace-nowrap"><button title="Editar" onClick={() => editRow(row)} className="link-action mr-2"><Pencil size={12}/></button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 mr-1"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 mr-1"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
+                    <td className="print:hidden whitespace-nowrap"><button title="Editar" onClick={() => editRow(row)} className="link-action mr-2"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action mr-2 text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 mr-1"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 mr-1"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
                   </tr>;
                 })}
               </tbody>
