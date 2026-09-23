@@ -14,6 +14,7 @@ import {
   ClipboardList,
   UserCog,
   ListOrdered,
+  CircleDollarSign,
   Menu,
   X,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ const links = [
   { to: '/admin/planteles', label: 'Planteles', icon: School, roles: ['admin'] },
   { to: '/admin/alumnos', label: 'Alumnos', icon: Users, roles: ['admin'] },
   { to: '/admin/formar-ruta', label: 'Formar lista de ruta', icon: ListOrdered, roles: ['admin'] },
+  { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: ['admin'] },
   { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
   { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
