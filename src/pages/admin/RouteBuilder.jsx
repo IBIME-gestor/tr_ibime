@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Students, Routes, Schools, Drivers, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
+import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 
 const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
@@ -206,6 +206,7 @@ export default function RouteBuilder() {
   const [allStudents, setAllStudents] = useState([]);
   const [schools, setSchools] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [units, setUnits] = useState([]);
   const [concepts, setConcepts] = useState([]);
   const [routeId, setRouteId] = useState('');
   const [matricula, setMatricula] = useState('');
@@ -231,6 +232,7 @@ export default function RouteBuilder() {
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
   useEffect(() => Drivers.subscribe(setDrivers), []);
+  useEffect(() => Units.subscribe(setUnits), []);
   useEffect(() => {
     let active = true;
     Promise.all([Students.list(), PricingConcepts.list(), RouteLists.list()])
@@ -246,6 +248,8 @@ export default function RouteBuilder() {
 
   const route = routes.find((r) => r.id === routeId) || null;
   const school = schools.find((s) => s.id === route?.schoolId) || null;
+  const unit = units.find((u) => u.id === route?.unitId) || null;
+  const unitCapacity = Number(unit?.capacity || 0);
   const dates = useMemo(() => dateRange(startDate, endDate), [startDate, endDate]);
 
   const list = useMemo(() => {
@@ -272,6 +276,63 @@ export default function RouteBuilder() {
   }, [matricula, allStudents]);
 
   function schoolName(id) { return schools.find((s) => s.id === id)?.name || '—'; }
+
+  function getRowUsage(row, date) {
+    const day = row?.days?.[date] || {};
+    return { entrada: !!day.entrada, salida: !!day.salida };
+  }
+
+  function capacitySnapshot(rows, dateList = dates, ignoreStudentId = '') {
+    const result = {};
+    (dateList || []).forEach((date) => {
+      let entrada = 0;
+      let salida = 0;
+      (rows || []).forEach((row) => {
+        if (row.studentId === ignoreStudentId) return;
+        const usage = getRowUsage(row, date);
+        if (usage.entrada) entrada += 1;
+        if (usage.salida) salida += 1;
+      });
+      result[date] = { entrada, salida };
+    });
+    return result;
+  }
+
+  function capacityIssues(rows, dateList = dates, ignoreStudentId = '') {
+    if (!(unitCapacity > 0)) return [];
+    const snapshot = capacitySnapshot(rows, dateList, ignoreStudentId);
+    return Object.entries(snapshot)
+      .filter(([, v]) => v.entrada > unitCapacity || v.salida > unitCapacity)
+      .map(([date, v]) => ({
+        date,
+        entrada: v.entrada,
+        salida: v.salida,
+        entradaOver: v.entrada > unitCapacity,
+        salidaOver: v.salida > unitCapacity,
+      }));
+  }
+
+  function capacityForPreview(rows, previewRow, dateList = dates, ignoreStudentId = '') {
+    const combined = [...(rows || []).filter((r) => r.studentId !== ignoreStudentId), previewRow].filter(Boolean);
+    return capacityIssues(combined, dateList);
+  }
+
+  function capacityLabel(date, snapshot) {
+    const v = snapshot?.[date] || { entrada: 0, salida: 0 };
+    if (!(unitCapacity > 0)) return `${date}: E ${v.entrada} · S ${v.salida}`;
+    return `${dayHeader(date)}: E ${v.entrada}/${unitCapacity} · S ${v.salida}/${unitCapacity}`;
+  }
+
+  function capacityMessage(issues) {
+    if (!issues.length) return '';
+    const lines = issues.slice(0, 8).map((x) => {
+      const parts = [];
+      if (x.entradaOver) parts.push(`entrada ${x.entrada}/${unitCapacity}`);
+      if (x.salidaOver) parts.push(`salida ${x.salida}/${unitCapacity}`);
+      return `${dayHeader(x.date)}: ${parts.join(' y ')}`;
+    });
+    return `La unidad ${unit?.plate || ''} tiene capacidad de ${unitCapacity} lugares. La operación excede la capacidad en:\n${lines.join('\n')}${issues.length > 8 ? '\n…' : ''}`;
+  }
 
   function toggleServiceFilter(key) {
     if (key === 'todos') {
@@ -342,6 +403,13 @@ export default function RouteBuilder() {
     };
 
     const preview = buildStudentRow({ ...lookupStudent, ...data }, dates, concepts, route);
+    if (currentList) {
+      const issues = capacityForPreview(currentList.rows || [], preview, currentList.dates || dates, editingStudentId || '');
+      if (issues.length) {
+        window.alert(`No se puede guardar el alumno.\n\n${capacityMessage(issues)}\n\nRevisa los días o el tipo de servicio.`);
+        return;
+      }
+    }
     if (!preview.pricingConceptId || !(preview.baseAmount > 0)) {
       const key = addForm.tipoServicio === 'completo' ? 'completo' : addForm.tipoServicio === 'medio' ? `medio_${addForm.medioServicio}` : 'por_dia';
       window.alert(`La ruta no tiene un concepto válido para: ${key}. Ve a Rutas y revisa la configuración de conceptos de esta ruta.`);
@@ -399,6 +467,11 @@ export default function RouteBuilder() {
     try {
       const source = allStudents.filter((s) => s.routeId === route.id);
       const rows = source.map((s) => buildStudentRow(s, dates, concepts, route)).sort(priorityCompare);
+      const issues = capacityIssues(rows, dates);
+      if (issues.length) {
+        window.alert(`No se puede generar la lista porque la unidad está sobre su capacidad.\n\n${capacityMessage(issues)}`);
+        return;
+      }
       const data = {
         routeId: route.id,
         startDate,
@@ -481,6 +554,11 @@ export default function RouteBuilder() {
       const day = row.days?.[date] || { entrada: false, salida: false, confirmado: false };
       return { ...row, days: { ...row.days, [date]: { ...day, [key]: !day[key] } } };
     });
+    const issues = capacityIssues(rows, currentList.dates || dates);
+    if (issues.length) {
+      window.alert(`No se puede marcar este servicio porque se excede la capacidad de la unidad.\n\n${capacityMessage(issues)}`);
+      return;
+    }
     await updateRows(rows);
   }
 
@@ -513,6 +591,24 @@ export default function RouteBuilder() {
       const movedStudent = { ...student, routeId: moveRouteId };
       await Students.update(row.studentId, { routeId: moveRouteId });
       const targetRow = buildStudentRow({ ...movedStudent, tipoServicio: row.tipoServicio, medioServicio: row.medioServicio, diasSemana: row.diasSemana, fechasDiarias: row.fechasDiarias }, targetList.dates || dates, concepts, targetRoute);
+      const targetUnit = units.find((u) => u.id === targetRoute.unitId) || null;
+      const targetCapacity = Number(targetUnit?.capacity || 0);
+      const targetIssues = (() => {
+        if (!(targetCapacity > 0)) return [];
+        const targetRowsPreview = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow];
+        const snap = {};
+        (targetList.dates || dates).forEach((date) => {
+          let entrada = 0; let salida = 0;
+          targetRowsPreview.forEach((r) => { const d = r.days?.[date] || {}; if (d.entrada) entrada += 1; if (d.salida) salida += 1; });
+          if (entrada > targetCapacity || salida > targetCapacity) snap[date] = { entrada, salida };
+        });
+        return Object.entries(snap);
+      })();
+      if (targetIssues.length) {
+        const detail = targetIssues.map(([date, v]) => `${dayHeader(date)}: E ${v.entrada}/${targetCapacity} · S ${v.salida}/${targetCapacity}`).join('\n');
+        window.alert(`No se puede mover a esta ruta. La unidad ${targetUnit?.plate || ''} tiene capacidad de ${targetCapacity} lugares y se excedería en:\n${detail}`);
+        return;
+      }
       const targetRows = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow].sort(priorityCompare);
       await RouteLists.update(targetList.id, { rows: targetRows });
       const targetUpdated = { ...targetList, rows: targetRows };
@@ -614,6 +710,20 @@ export default function RouteBuilder() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div><span className="font-display font-bold">{route?.name || 'Ruta'}</span><span className="text-navy-400 ml-2">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días</span></div>
             <div className="flex gap-2 print:hidden"><button onClick={() => { const next = !showAddStudent; setShowAddStudent(next); resetAddFlow(false); }} className="btn-admin-primary"><Plus size={14}/> Agregar alumnos</button><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
+          </div>
+          <div className="mt-3 p-2.5 rounded-lg bg-navy-50 border border-navy-100 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span><b>Unidad:</b> {unit?.plate || 'Sin unidad'}{unit?.model ? ` · ${unit.model}` : ''} · <b>Capacidad:</b> {unitCapacity > 0 ? `${unitCapacity} lugares` : 'No configurada'}</span>
+              {unitCapacity > 0 && <span className="text-navy-500">La disponibilidad se calcula por día y por turno: <b>E</b> entrada / <b>S</b> salida.</span>}
+            </div>
+            {unitCapacity > 0 && (currentList.dates || []).length > 0 && (() => {
+              const snap = capacitySnapshot(currentList.rows || [], currentList.dates || dates);
+              return <div className="flex flex-wrap gap-1.5 mt-2">{(currentList.dates || []).map((date) => {
+                const v = snap[date] || { entrada: 0, salida: 0 };
+                const full = v.entrada >= unitCapacity || v.salida >= unitCapacity;
+                return <span key={date} className={`px-2 py-1 rounded border ${full ? 'border-signal-yellow/60 bg-signal-yellow/15 font-semibold' : 'border-navy-200 bg-white'}`}>{capacityLabel(date, snap)}</span>;
+              })}</div>;
+            })()}
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs font-semibold text-navy-500">MOSTRAR:</span>
