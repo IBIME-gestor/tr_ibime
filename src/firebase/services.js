@@ -270,17 +270,20 @@ export const Students = {
 
 
 /* ------------------------------------------------------------------ */
-/*  Tarifas / conceptos de cobro                                       */
-/*  Cada registro pertenece a una ruta y define cuánto cuesta un tipo  */
-/*  de servicio.                                                       */
+/*  Conceptos de cobro                                                 */
+/*  Los conceptos son independientes de las rutas. Una ruta solamente  */
+/*  selecciona qué concepto usa para cada modalidad de servicio.       */
 /* ------------------------------------------------------------------ */
-export const Pricing = {
-  list: () => listAll('pricing', [orderBy('routeId')]),
-  get: (id) => getOne('pricing', id),
-  create: (data) => createDoc('pricing', data),
-  update: (id, data) => updateDocById('pricing', id, data),
-  remove: (id) => removeDoc('pricing', id),
+export const PricingConcepts = {
+  list: () => listAll('pricingConcepts', [orderBy('name')]),
+  get: (id) => getOne('pricingConcepts', id),
+  create: (data) => createDoc('pricingConcepts', data),
+  update: (id, data) => updateDocById('pricingConcepts', id, data),
+  remove: (id) => removeDoc('pricingConcepts', id),
 };
+
+// Alias de compatibilidad para cualquier pantalla que todavía importe Pricing.
+export const Pricing = PricingConcepts;
 
 /* ------------------------------------------------------------------ */
 /*  Listas operativas por periodo                                      */
@@ -318,6 +321,12 @@ export const Routes = {
       // alimenta el ETA aproximado que ve el padre de familia.
       avgStopMinutesMorning: [],
       avgStopMinutesAfternoon: [],
+      pricingConcepts: {
+        completo: '',
+        medio_entrada: '',
+        medio_salida: '',
+        por_dia: '',
+      },
       ...data,
     }),
   update: (id, data) => updateDocById('routes', id, data),
