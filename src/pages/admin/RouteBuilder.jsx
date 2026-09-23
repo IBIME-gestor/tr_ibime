@@ -278,14 +278,14 @@ export default function RouteBuilder() {
     });
   }
 
-  function resetAddFlow() {
+  function resetAddFlow(close = true) {
     setMatricula('');
     setLookupStudent(null);
     setLookupError('');
     setAddForm(emptyAddForm);
     setEditingStudentId(null);
-    setShowAddStudent(false);
-    inputRef.current?.focus();
+    if (close) setShowAddStudent(false);
+    if (!close) setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   function selectLookupStudent(student, editing = false) {
@@ -531,7 +531,7 @@ export default function RouteBuilder() {
         <div className="admin-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div><span className="font-display font-bold">{route?.name || 'Ruta'}</span><span className="text-navy-400 ml-2">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días</span></div>
-            <div className="flex gap-2 print:hidden"><button onClick={() => { setShowAddStudent((v) => !v); resetAddFlow(); }} className="btn-admin-primary"><Plus size={14}/> Agregar alumnos</button><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
+            <div className="flex gap-2 print:hidden"><button onClick={() => { const next = !showAddStudent; setShowAddStudent(next); resetAddFlow(false); }} className="btn-admin-primary"><Plus size={14}/> Agregar alumnos</button><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs font-semibold text-navy-500">MOSTRAR:</span>
