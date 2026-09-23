@@ -5,7 +5,7 @@ import {
   CalendarDays, Save, RefreshCw, CircleDollarSign, CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Students, Routes, Drivers, Schools, Pricing, RouteLists } from '../../firebase/services';
+import { Students, Routes, Drivers, Schools, PricingConcepts, RouteLists } from '../../firebase/services';
 import { TIPOS_SERVICIO, OPCIONES_SERVICIO, WEEKDAYS } from './Students';
 
 const ORDER_FIELD = { morning: 'studentOrderMorning', afternoon: 'studentOrderAfternoon' };
@@ -31,7 +31,7 @@ function localDateString(date) {
   return d.toISOString().slice(0, 10);
 }
 
-function dateRange(start, end) {
+function dateRange(start, end, weekdays = [1, 2, 3, 4, 5]) {
   if (!start || !end || start > end) return [];
   const out = [];
   const cursor = new Date(`${start}T12:00:00`);
@@ -39,8 +39,7 @@ function dateRange(start, end) {
   while (cursor <= last) {
     const jsDay = cursor.getDay();
     const isoDay = jsDay === 0 ? 7 : jsDay;
-    // Los días hábiles se detectan automáticamente: lunes a viernes.
-    if (isoDay >= 1 && isoDay <= 5) out.push(localDateString(cursor));
+    if (weekdays.includes(isoDay)) out.push(localDateString(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
   return out;
@@ -69,17 +68,12 @@ function serviceLabel(service) {
   return OPCIONES_SERVICIO[service] || '—';
 }
 
-function pricingKey(student, serviceForDay) {
-  if (student.tipoServicio === 'completo') return 'completo';
-  if (student.tipoServicio === 'medio') return serviceForDay === 'salida' ? 'medio_salida' : 'medio_entrada';
-  return 'por_dia';
+function conceptFor(route, concepts, key) {
+  const id = route?.pricingConcepts?.[key];
+  return concepts.find((x) => x.id === id && x.active !== false) || null;
 }
 
-function applicableDates(student, dates) {
-  return dates.filter((date) => !!expectedService(student, date));
-}
-
-function buildStudentRow(student, dates, pricing) {
+function buildStudentRow(student, dates, concepts, route) {
   const days = {};
   let dailyTotal = 0;
 
@@ -92,31 +86,31 @@ function buildStudentRow(student, dates, pricing) {
     };
 
     if (service && (student.tipoServicio === 'eventual_fijo' || student.tipoServicio === 'eventual_dia')) {
-      const p = pricing.find((x) => x.routeId === student.routeId && x.serviceKey === 'por_dia' && x.active !== false);
+      const p = conceptFor(route, concepts, 'por_dia');
       dailyTotal += Number(p?.amount || 0);
     }
   });
 
   let estimatedAmount = 0;
-  let pricingId = '';
+  let conceptId = '';
   let concept = '';
 
   if (student.tipoServicio === 'completo') {
-    const p = pricing.find((x) => x.routeId === student.routeId && x.serviceKey === 'completo' && x.active !== false);
+    const p = conceptFor(route, concepts, 'completo');
     estimatedAmount = Number(p?.amount || student.billingAmount || 0);
-    pricingId = p?.id || student.pricingId || '';
-    concept = p?.concept || student.billingConcept || 'Ruta completa';
+    conceptId = p?.id || student.pricingConceptId || '';
+    concept = p?.name || student.billingConcept || 'Ruta completa';
   } else if (student.tipoServicio === 'medio') {
     const key = student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada';
-    const p = pricing.find((x) => x.routeId === student.routeId && x.serviceKey === key && x.active !== false);
+    const p = conceptFor(route, concepts, key);
     estimatedAmount = Number(p?.amount || student.billingAmount || 0);
-    pricingId = p?.id || student.pricingId || '';
-    concept = p?.concept || student.billingConcept || 'Media ruta';
+    conceptId = p?.id || student.pricingConceptId || '';
+    concept = p?.name || student.billingConcept || 'Media ruta';
   } else {
     estimatedAmount = dailyTotal || Number(student.billingAmount || 0);
-    const p = pricing.find((x) => x.routeId === student.routeId && x.serviceKey === 'por_dia' && x.active !== false);
-    pricingId = p?.id || student.pricingId || '';
-    concept = p?.concept || student.billingConcept || 'Por día';
+    const p = conceptFor(route, concepts, 'por_dia');
+    conceptId = p?.id || student.pricingConceptId || '';
+    concept = p?.name || student.billingConcept || 'Por día';
   }
 
   return {
@@ -129,7 +123,7 @@ function buildStudentRow(student, dates, pricing) {
     bloqueEntrada: student.bloqueEntrada || '',
     bloqueSalida: student.bloqueSalida || '',
     estimatedAmount,
-    pricingId,
+    pricingConceptId: conceptId,
     concept,
     paid: false,
     paymentId: '',
@@ -143,7 +137,7 @@ function priorityCompare(a, b) {
   if (bothA !== bothB) return bothA ? -1 : 1;
 
   const beA = String(a.bloqueEntrada || '').localeCompare(String(b.bloqueEntrada || ''), undefined, { numeric: true });
-  const beB = String(b.bloqueEntrada || '');
+  const beB = String(b.bloqueEntrada || '').localeCompare(String(b.bloqueEntrada || ''), undefined, { numeric: true });
   if (beA !== beB) return beA.localeCompare(beB, undefined, { numeric: true });
 
   const bsA = String(a.bloqueSalida || '').localeCompare(String(b.bloqueSalida || ''), undefined, { numeric: true });
@@ -160,7 +154,7 @@ export default function RouteBuilder() {
   const [allStudents, setAllStudents] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [schools, setSchools] = useState([]);
-  const [pricing, setPricing] = useState([]);
+  const [concepts, setConcepts] = useState([]);
   const [routeId, setRouteId] = useState('');
   const [shift, setShift] = useState('morning');
 
@@ -172,6 +166,7 @@ export default function RouteBuilder() {
 
   const [startDate, setStartDate] = useState(localDateString(new Date()));
   const [endDate, setEndDate] = useState(localDateString(new Date()));
+  const [weekdays, setWeekdays] = useState([1, 2, 3, 4, 5]);
   const [listId, setListId] = useState('');
   const [lists, setLists] = useState([]);
   const [currentList, setCurrentList] = useState(null);
@@ -181,7 +176,11 @@ export default function RouteBuilder() {
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => Schools.subscribe(setSchools), []);
-  useEffect(() => Pricing.list().then(setPricing).catch(() => setPricing([])), []);
+  useEffect(() => {
+    let active = true;
+    PricingConcepts.list().then((rows) => { if (active) setConcepts(rows); }).catch((err) => console.error('Error cargando conceptos:', err));
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     Students.list().then(setAllStudents).catch(() => setAllStudents([]));
     RouteLists.list().then(setLists).catch(() => setLists([]));
@@ -199,7 +198,7 @@ export default function RouteBuilder() {
   const orderField = ORDER_FIELD[shift];
   const order = route?.[orderField] || [];
 
-  const dates = useMemo(() => dateRange(startDate, endDate), [startDate, endDate]);
+  const dates = useMemo(() => dateRange(startDate, endDate, [1, 2, 3, 4, 5]), [startDate, endDate]);
 
   const list = useMemo(() => {
     if (!currentList) return [];
@@ -250,6 +249,7 @@ export default function RouteBuilder() {
     else setLookupError('No encontramos ese alumno en el padrón.');
   }
 
+
   function toggleDiaFijo(dia) {
     const exists = addForm.diasFijos.some((d) => Number(d.dia) === dia);
     const diasFijos = exists
@@ -269,17 +269,18 @@ export default function RouteBuilder() {
       bloqueSalida: addForm.bloqueSalida.trim(),
     };
 
-    const price = addForm.tipoServicio === 'completo'
-      ? pricing.find((p) => p.routeId === route.id && p.serviceKey === 'completo' && p.active !== false)
+    const conceptKey = addForm.tipoServicio === 'completo'
+      ? 'completo'
       : addForm.tipoServicio === 'medio'
-        ? pricing.find((p) => p.routeId === route.id && p.serviceKey === `medio_${addForm.medioServicio}` && p.active !== false)
-        : pricing.find((p) => p.routeId === route.id && p.serviceKey === 'por_dia' && p.active !== false);
+        ? `medio_${addForm.medioServicio}`
+        : 'por_dia';
+    const concept = conceptFor(route, concepts, conceptKey);
 
-    if (price) {
-      data.billingAmount = Number(price.amount || 0);
-      data.billingConcept = price.concept || '';
+    if (concept) {
+      data.billingAmount = Number(concept.amount || 0);
+      data.billingConcept = concept.name || '';
       data.billingMode = addForm.tipoServicio === 'completo' || addForm.tipoServicio === 'medio' ? 'mensual' : 'por_evento';
-      data.pricingId = price.id;
+      data.pricingConceptId = concept.id;
     }
 
     await Students.update(lookupStudent.id, data);
@@ -292,7 +293,7 @@ export default function RouteBuilder() {
 
     // Si ya existe una lista abierta para el mismo periodo, la agregamos de inmediato.
     if (currentList && currentList.routeId === route.id) {
-      const row = buildStudentRow(refreshed, currentList.dates || dates, pricing);
+      const row = buildStudentRow(refreshed, currentList.dates || dates, concepts, route);
       const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
       const updated = { ...currentList, rows };
       await RouteLists.update(currentList.id, { rows });
@@ -306,7 +307,7 @@ export default function RouteBuilder() {
     setSaving(true);
     try {
       const source = students.length ? students : allStudents.filter((s) => s.routeId === route.id);
-      const rows = source.map((s) => buildStudentRow(s, dates, pricing)).filter((row) => Object.keys(row.days).length);
+      const rows = source.map((s) => buildStudentRow(s, dates, concepts, route)).filter((row) => Object.keys(row.days).length);
       rows.sort(priorityCompare);
 
       const data = {
@@ -340,6 +341,7 @@ export default function RouteBuilder() {
     setShift(found.shift || 'morning');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
+    setWeekdays([1, 2, 3, 4, 5]);
   }
 
   async function updateRows(rows) {
@@ -409,8 +411,8 @@ export default function RouteBuilder() {
     await updateRows(list.filter((x) => x.studentId !== row.studentId));
   }
 
-  async function refreshPricing() {
-    setPricing(await Pricing.list());
+  async function refreshConcepts() {
+    try { setConcepts(await PricingConcepts.list()); } catch (err) { console.error(err); }
   }
 
   function doPrint(mode) {
@@ -435,7 +437,7 @@ export default function RouteBuilder() {
         <div>
           <h1 className="admin-h1">Formar lista de ruta</h1>
           <p className="text-sm text-navy-400 mt-1">
-            La lista se crea por periodo. Al seleccionar las fechas Desde/Hasta, el sistema detecta automáticamente todos los días hábiles de lunes a viernes y genera una casilla por cada fecha.
+            La lista se crea por periodo. Por defecto usa lunes, martes y miércoles y genera una casilla por día.
             Los alumnos con entrada + salida quedan sombreados y arriba como prioridad.
           </p>
         </div>
@@ -471,13 +473,9 @@ export default function RouteBuilder() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-navy-400 mr-1">Días hábiles detectados:</span>
-          <span className="badge">Lunes</span>
-          <span className="badge">Martes</span>
-          <span className="badge">Miércoles</span>
-          <span className="badge">Jueves</span>
-          <span className="badge">Viernes</span>
-          <span className="text-xs text-navy-400 ml-2">{dates.length} día(s) hábil(es) en el periodo</span>
+          <span className="text-xs text-navy-400 mr-1">Días hábiles detectados automáticamente:</span>
+          <span className="badge">Lun</span><span className="badge">Mar</span><span className="badge">Mié</span><span className="badge">Jue</span><span className="badge">Vie</span>
+          <span className="text-xs text-navy-400 ml-2">{dates.length} día(s) en el periodo</span>
           <button onClick={createList} disabled={!route || !dates.length || saving} className="btn-admin-primary ml-auto">
             <CalendarDays size={14} /> {saving ? 'Generando…' : 'Generar lista del periodo'}
           </button>
@@ -495,7 +493,7 @@ export default function RouteBuilder() {
                   </option>
                 ))}
               </select>
-              {currentList && <button onClick={refreshPricing} className="btn-admin-ghost" title="Actualizar tarifas"><RefreshCw size={14} /></button>}
+              {currentList && <button onClick={refreshConcepts} className="btn-admin-ghost" title="Actualizar tarifas"><RefreshCw size={14} /></button>}
             </div>
           </div>
         )}
@@ -568,7 +566,7 @@ export default function RouteBuilder() {
                   <div className="mt-3">
                     <label className="admin-label">Días fijos y servicio de cada día</label>
                     <div className="space-y-2">
-                      {WEEKDAYS.filter((d) => Number(d.value) >= 1 && Number(d.value) <= 5).map((d) => {
+                      {WEEKDAYS.slice(0, 5).map((d) => {
                         const item = addForm.diasFijos.find((x) => Number(x.dia) === d.value);
                         return (
                           <div key={d.value} className="flex items-center gap-2">
@@ -704,7 +702,7 @@ export default function RouteBuilder() {
 
       {!currentList && (
         <div className="admin-card text-sm text-navy-400">
-          Selecciona una ruta, captura el periodo y genera la lista. Las columnas se crean automáticamente para los lunes, martes y miércoles que caigan dentro del periodo.
+          Selecciona una ruta, captura el periodo y genera la lista. Las columnas se crean automáticamente para todos los lunes a viernes que caigan dentro del periodo.
         </div>
       )}
     </div>
