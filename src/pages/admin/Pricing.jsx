@@ -1,60 +1,86 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pencil, Trash2, CircleDollarSign } from 'lucide-react';
-import { Pricing, Routes } from '../../firebase/services';
-
-const SERVICE_OPTIONS = [
-  { key: 'completo', label: 'Ruta completa (entrada + salida)' },
-  { key: 'medio_entrada', label: 'Media ruta — entrada' },
-  { key: 'medio_salida', label: 'Media ruta — salida' },
-  { key: 'por_dia', label: 'Por día' },
-];
+import { PricingConcepts } from '../../firebase/services';
 
 const emptyForm = {
-  routeId: '',
-  serviceKey: 'completo',
-  concept: '',
+  name: '',
+  description: '',
+  mode: 'mensual',
   amount: '',
   active: true,
 };
 
-export default function PricingPage() {
-  const [routes, setRoutes] = useState([]);
+const MODE_OPTIONS = [
+  { key: 'mensual', label: 'Mensual' },
+  { key: 'por_dias', label: 'Por días' },
+  { key: 'por_evento', label: 'Por día / evento' },
+];
+
+function money(value) {
+  return `$${Number(value || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`;
+}
+
+export default function Pricing() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  useEffect(() => Routes.subscribe(setRoutes), []);
-  useEffect(() => Pricing.list().then(setItems).catch(() => setItems([])), []);
+  async function load() {
+    try {
+      setError('');
+      setItems(await PricingConcepts.list());
+    } catch (err) {
+      console.error('Error cargando conceptos:', err);
+      setItems([]);
+      setError('No se pudieron cargar los conceptos. Revisa que las reglas de Firestore estén desplegadas.');
+    }
+  }
 
-  const routeName = useMemo(
-    () => Object.fromEntries(routes.map((r) => [r.id, r.name])),
-    [routes]
-  );
+  useEffect(() => {
+    let active = true;
+    PricingConcepts.list()
+      .then((rows) => { if (active) setItems(rows); })
+      .catch((err) => {
+        console.error('Error cargando conceptos:', err);
+        if (active) {
+          setItems([]);
+          setError('No se pudieron cargar los conceptos. Revisa que las reglas de Firestore estén desplegadas.');
+        }
+      });
+    return () => { active = false; };
+  }, []);
 
-  const serviceLabel = (key) => SERVICE_OPTIONS.find((x) => x.key === key)?.label || key;
-
-  async function refresh() {
-    setItems(await Pricing.list());
+  function reset() {
+    setForm(emptyForm);
+    setEditingId(null);
+    setError('');
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.routeId || !form.amount || Number(form.amount) < 0) return;
+    const name = form.name.trim();
+    const amount = Number(form.amount);
+    if (!name || !Number.isFinite(amount) || amount < 0) return;
+
     setSaving(true);
-    const data = {
-      routeId: form.routeId,
-      serviceKey: form.serviceKey,
-      concept: form.concept.trim() || serviceLabel(form.serviceKey),
-      amount: Number(form.amount),
-      active: !!form.active,
-    };
+    setError('');
     try {
-      if (editingId) await Pricing.update(editingId, data);
-      else await Pricing.create(data);
-      await refresh();
-      setForm(emptyForm);
-      setEditingId(null);
+      const data = {
+        name,
+        description: form.description.trim(),
+        mode: form.mode,
+        amount,
+        active: !!form.active,
+      };
+      if (editingId) await PricingConcepts.update(editingId, data);
+      else await PricingConcepts.create(data);
+      await load();
+      reset();
+    } catch (err) {
+      console.error('Error guardando concepto:', err);
+      setError(err?.message || 'No se pudo guardar el concepto.');
     } finally {
       setSaving(false);
     }
@@ -63,77 +89,87 @@ export default function PricingPage() {
   function edit(item) {
     setEditingId(item.id);
     setForm({
-      routeId: item.routeId || '',
-      serviceKey: item.serviceKey || 'completo',
-      concept: item.concept || '',
+      name: item.name || '',
+      description: item.description || '',
+      mode: item.mode || 'mensual',
       amount: item.amount ?? '',
       active: item.active !== false,
     });
+    setError('');
   }
 
   async function remove(item) {
-    if (!window.confirm(`¿Eliminar el concepto "${item.concept || serviceLabel(item.serviceKey)}"?`)) return;
-    await Pricing.remove(item.id);
-    await refresh();
+    if (!window.confirm(`¿Eliminar el concepto "${item.name}"?`)) return;
+    try {
+      await PricingConcepts.remove(item.id);
+      await load();
+    } catch (err) {
+      console.error(err);
+      setError('No se pudo eliminar el concepto.');
+    }
   }
 
   return (
     <div>
-      <h1 className="admin-h1 mb-1">Tarifas y conceptos</h1>
-      <p className="text-sm text-navy-400 mb-5">
-        Configura cuánto cuesta cada modalidad por ruta. La tarifa se copia automáticamente al
-        alumno cuando lo agregas a una lista.
-      </p>
+      <div className="mb-5">
+        <h1 className="admin-h1 mb-1">Conceptos y costos</h1>
+        <p className="text-sm text-navy-400">
+          Aquí defines los conceptos de cobro. Los conceptos son independientes de las rutas;
+          después se asignan a cada ruta según su modalidad de servicio.
+        </p>
+      </div>
+
+      {error && <div className="admin-card mb-5 border border-stop/20 text-stop text-sm">{error}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-[380px_minmax(0,1fr)] gap-5 items-start">
         <form onSubmit={handleSubmit} className="admin-card lg:sticky lg:top-6">
           <div className="flex items-center gap-2 mb-3">
             <CircleDollarSign size={17} className="text-navy-500" />
-            <p className="font-display font-semibold text-sm">{editingId ? 'Editar tarifa' : 'Nueva tarifa'}</p>
+            <p className="font-display font-semibold text-sm">{editingId ? 'Editar concepto' : 'Nuevo concepto'}</p>
           </div>
 
           <div className="space-y-3">
             <div>
-              <label className="admin-label">Ruta</label>
-              <select value={form.routeId} onChange={(e) => setForm({ ...form, routeId: e.target.value })} className="admin-select" required>
-                <option value="">Selecciona…</option>
-                {routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
+              <label className="admin-label">Nombre del concepto</label>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="admin-input" placeholder="Ej. Ruta completa" required />
             </div>
             <div>
-              <label className="admin-label">Tipo de servicio</label>
-              <select value={form.serviceKey} onChange={(e) => setForm({ ...form, serviceKey: e.target.value })} className="admin-select">
-                {SERVICE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-              </select>
+              <label className="admin-label">Descripción</label>
+              <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="admin-input" placeholder="Ej. Servicio completo mensual" />
             </div>
             <div>
-              <label className="admin-label">Concepto que verá Caja / Finanzas</label>
-              <input value={form.concept} onChange={(e) => setForm({ ...form, concept: e.target.value })} className="admin-input" placeholder="Ej. Ruta Norte completa" />
+              <label className="admin-label">Modalidad</label>
+              <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })} className="admin-select">
+                {MODE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+              </select>
             </div>
             <div>
               <label className="admin-label">Monto</label>
-              <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} type="number" min="0" step="0.01" className="admin-input" placeholder="$0.00" required />
+              <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} type="number" min="0" step="0.01" className="admin-input" placeholder="0.00" required />
             </div>
             <label className="flex items-center gap-2 text-sm text-navy-600">
               <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
-              Tarifa activa
+              Concepto activo
             </label>
           </div>
 
           <div className="flex gap-2 mt-4">
-            <button disabled={saving} className="btn-admin-primary flex-1">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Agregar tarifa'}</button>
-            {editingId && <button type="button" onClick={() => { setEditingId(null); setForm(emptyForm); }} className="btn-admin-ghost">Cancelar</button>}
+            <button disabled={saving} className="btn-admin-primary flex-1">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear concepto'}</button>
+            {editingId && <button type="button" onClick={reset} className="btn-admin-ghost">Cancelar</button>}
           </div>
         </form>
 
         <div className="admin-card p-0 overflow-hidden">
+          <div className="px-5 py-4 border-b border-navy-100">
+            <p className="font-display font-semibold">Catálogo de conceptos</p>
+            <p className="text-xs text-navy-400 mt-1">Un mismo concepto puede ser utilizado por varias rutas.</p>
+          </div>
           <div className="overflow-x-auto">
             <table className="table-admin">
               <thead>
                 <tr>
-                  <th className="pl-5">Ruta</th>
-                  <th>Servicio</th>
-                  <th>Concepto</th>
+                  <th className="pl-5">Concepto</th>
+                  <th>Modalidad</th>
                   <th>Monto</th>
                   <th>Estado</th>
                   <th className="pr-5"></th>
@@ -142,11 +178,13 @@ export default function PricingPage() {
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
-                    <td className="pl-5 font-medium">{routeName[item.routeId] || 'Ruta eliminada'}</td>
-                    <td className="text-xs text-navy-500">{serviceLabel(item.serviceKey)}</td>
-                    <td>{item.concept || '—'}</td>
-                    <td className="font-semibold">${Number(item.amount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</td>
-                    <td><span className={item.active === false ? 'badge-stop' : 'badge-go'}>{item.active === false ? 'Inactiva' : 'Activa'}</span></td>
+                    <td className="pl-5 font-medium">
+                      {item.name}
+                      {item.description && <span className="block text-xs text-navy-400 font-normal">{item.description}</span>}
+                    </td>
+                    <td className="text-xs text-navy-500">{MODE_OPTIONS.find((x) => x.key === item.mode)?.label || item.mode}</td>
+                    <td className="font-semibold">{money(item.amount)}</td>
+                    <td><span className={item.active === false ? 'badge-stop' : 'badge-go'}>{item.active === false ? 'Inactivo' : 'Activo'}</span></td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => edit(item)} className="link-action mr-3"><Pencil size={13} /></button>
                       <button onClick={() => remove(item)} className="link-danger"><Trash2 size={13} /></button>
@@ -155,7 +193,7 @@ export default function PricingPage() {
                 ))}
               </tbody>
             </table>
-            {items.length === 0 && <p className="text-sm text-navy-400 text-center py-8">Todavía no hay tarifas.</p>}
+            {items.length === 0 && <p className="text-sm text-navy-400 text-center py-8">Todavía no hay conceptos.</p>}
           </div>
         </div>
       </div>
