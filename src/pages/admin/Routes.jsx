@@ -107,17 +107,18 @@ export default function RoutesPage() {
             </select>
           </div>
           <div>
-            <label className="admin-label">Operador</label>
+            <label className="admin-label">Operador predeterminado (opcional)</label>
             <select
               value={form.driverId}
               onChange={(e) => setForm({ ...form, driverId: e.target.value })}
               className="admin-select"
             >
-              <option value="">Selecciona…</option>
+              <option value="">Sin operador predeterminado</option>
               {drivers.filter((d) => d.role !== 'nanny').map((d) => (
                 <option key={d.id} value={d.id}>{d.name}</option>
               ))}
             </select>
+            <p className="text-[11px] text-navy-400 mt-1">Es solo un valor predeterminado. Al formar cada lista puedes elegir otro operador, incluso el mismo operador para varias rutas.</p>
           </div>
           <div>
             <label className="admin-label">Nanny (opcional)</label>
