@@ -631,6 +631,22 @@ export async function getReferenceTrip(routeId, shift) {
 /* ------------------------------------------------------------------ */
 /*  Reportes                                                           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Recorridos de un rango de fechas. La fecha se guarda como YYYY-MM-DD,
+ * por lo que el filtro puede hacerse directamente en Firestore.
+ */
+export async function listTripsBetween(startDate, endDate) {
+  const q = query(
+    collection(db, 'trips'),
+    where('date', '>=', startDate),
+    where('date', '<=', endDate),
+    orderBy('date', 'asc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 export async function listTripsByRoute(routeId) {
   const q = query(
     collection(db, 'trips'),
