@@ -102,23 +102,41 @@ export default function Finance() {
     catch(e){console.error(e);window.alert('No se pudo actualizar el estatus.');}
   }
 
-  async function markPaid(record){
+  async function markPaid(record, checked = true){
+    const amount=Number(record.montoEstimado||0);
+    if (!checked) {
+      try {
+        // No eliminamos paymentId: así, si fue un error y se vuelve a marcar,
+        // se reutiliza el mismo registro y no se genera un cobro duplicado.
+        await FinanceRecords.update(record.id,{cobrado:false,cobradoAt:'',cobradoBy:''});
+        if (record.listId && record.studentId) {
+          const activeList = await RouteLists.get(record.listId);
+          if (activeList) {
+            const updatedRows = (activeList.rows || []).map(row =>
+              row.studentId === record.studentId ? { ...row, paid:false } : row
+            );
+            await RouteLists.update(record.listId, { rows: updatedRows });
+          }
+        }
+        setRecords(prev=>prev.map(r=>r.id===record.id?{...r,cobrado:false,cobradoAt:'',cobradoBy:''}:r));
+      } catch(e) { console.error(e); window.alert('No se pudo desmarcar el pago.'); }
+      return;
+    }
     if(record.cobrado) return;
-    const amount=Number(record.montoEstimado||0); if(!(amount>0)){window.alert('El registro no tiene un monto mayor a cero.');return;}
+    if(!(amount>0)){window.alert('El registro no tiene un monto mayor a cero.');return;}
     if(!window.confirm(`Registrar pago de ${money(amount)} para ${record.studentName}?`)) return;
     try{
-      const paymentId=await Students.registerPayment(record.studentId,{amount,method:'finanzas',note:`Cargo ${record.conceptName||'Servicio'} · ${record.periodoInicio||''} al ${record.periodoFin||''}`,nextDueDate:addDays(record.periodoFin,record.paymentDays||0),byName:profile?.name,byUid:user?.uid,routeId:record.routeId,unitId:record.unitId,listId:record.listId});
-      // Finanzas y la lista usan el mismo estado de pago. Primero actualizamos
-      // Finanzas y después reflejamos el mismo pago en la lista operativa.
+      let paymentId = record.pagoId || '';
+      if (!paymentId) {
+        paymentId=await Students.registerPayment(record.studentId,{amount,method:'finanzas',note:`Cargo ${record.conceptName||'Servicio'} · ${record.periodoInicio||''} al ${record.periodoFin||''}`,nextDueDate:addDays(record.periodoFin,record.paymentDays||0),byName:profile?.name,byUid:user?.uid,routeId:record.routeId,unitId:record.unitId,listId:record.listId});
+      }
       await FinanceRecords.update(record.id,{cobrado:true,pagoId:paymentId,cobradoAt:new Date().toISOString(),cobradoBy:profile?.name||'',paymentStatus:'corriente',agreementDueDate:''});
 
       if (record.listId && record.studentId) {
         const activeList = await RouteLists.get(record.listId);
         if (activeList) {
           const updatedRows = (activeList.rows || []).map(row =>
-            row.studentId === record.studentId
-              ? { ...row, paid: true, paymentId }
-              : row
+            row.studentId === record.studentId ? { ...row, paid:true, paymentId } : row
           );
           await RouteLists.update(record.listId, { rows: updatedRows });
         }
@@ -143,6 +161,6 @@ export default function Finance() {
     <div className="admin-card mb-5"><div className="grid grid-cols-1 md:grid-cols-4 gap-3"><div><label className="admin-label">Plantel</label><select value={filters.school} onChange={e=>setFilters({school:e.target.value,nivel:'',grado:'',service:filters.service})} className="admin-select"><option value="">Todos</option>{schools.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Nivel</label><select value={filters.nivel} onChange={e=>setFilters({...filters,nivel:e.target.value,grado:''})} className="admin-select"><option value="">Todos</option>{niveles.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Grado</label><select value={filters.grado} onChange={e=>setFilters({...filters,grado:e.target.value})} className="admin-select"><option value="">Todos</option>{grados.map(x=><option key={x}>{x}</option>)}</select></div><div><label className="admin-label">Servicio</label><select value={filters.service} onChange={e=>setFilters({...filters,service:e.target.value})} className="admin-select"><option value="">Todos</option><option value="completo">Completo</option><option value="medio">Medio</option><option value="diario">Diario</option></select></div></div></div>
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-5">{Object.entries(STATUS).map(([key,v])=><button key={key} onClick={()=>setModule(key)} className={`admin-card text-left transition ${module===key?'ring-2 ring-navy-400':''}`}><p className="text-xs text-navy-400">{v.label}</p><p className="font-display font-bold text-lg mt-1">{counts[key]||0}</p></button>)}</div>
     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5"><div className="admin-card"><p className="text-xs text-navy-400">Registros en {STATUS[module].label}</p><p className="font-display font-bold text-lg mt-1">{filtered.length}</p></div><div className="admin-card"><p className="text-xs text-navy-400">Estimado</p><p className="font-display font-bold text-lg mt-1">{money(totals.amount)}</p></div><div className="admin-card"><p className="text-xs text-navy-400">Cobrado</p><p className="font-display font-bold text-lg mt-1">{money(totals.cobrado)}</p></div></div>
-    <div className="admin-card p-0 overflow-hidden"><div className="px-4 py-3 border-b border-navy-100 text-xs text-navy-400">Vencimiento: fin de periodo + plazo configurado en Tarifas y Conceptos. Si vence dentro del mes aparece en <b>Atraso</b>; si llega el siguiente mes sin pago pasa a <b>Mora</b>.</div><div className="overflow-x-auto"><table className="table-admin text-xs min-w-[1250px]"><thead><tr><th>Estatus</th><th>Plantel</th><th>Nivel</th><th>Grado</th><th>Alumno</th><th>Matrícula</th><th>Ruta</th><th>Operador</th><th>Servicio</th><th>Concepto</th><th>Monto</th><th>Vencimiento</th><th>Seguimiento</th><th>Acciones</th></tr></thead><tbody>{filtered.map(r=>{const st=STATUS[r.currentStatus]||STATUS.corriente;const due=r.agreementDueDate||r.fechaVencimiento||addDays(r.periodoFin,r.paymentDays||0);return <tr key={r.id}><td><span className={st.cls}>{st.label}</span></td><td>{r.currentSchoolName||'—'}</td><td>{r.currentNivel||'—'}</td><td>{r.currentGrado||'—'}</td><td className="font-medium">{r.studentName}</td><td>{r.matricula}</td><td>{r.routeName}</td><td>{r.operatorName||'—'}</td><td>{service(r)}</td><td>{r.conceptName}</td><td className="font-medium">{money(r.montoEstimado)}</td><td>{due||'—'}</td><td><div className="flex flex-wrap gap-2 items-center text-[10px]"><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.solicitudAtendida} onChange={e=>setChecklist(r,'solicitudAtendida',e.target.checked)}/>Atención</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.servicioConfirmado} onChange={e=>setChecklist(r,'servicioConfirmado',e.target.checked)}/>Confirmado</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.conceptoCargado} onChange={e=>setChecklist(r,'conceptoCargado',e.target.checked)}/>Concepto</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.cobrado} onChange={e=>{ if(e.target.checked) markPaid(r); }}/>Pagado</label></div></td><td className="whitespace-nowrap"><button title="Registrar pago" onClick={()=>markPaid(r)} className="w-7 h-7 rounded border border-go/40 text-go inline-flex items-center justify-center mr-1"><Check size={14}/></button>{r.currentStatus!=='acuerdo'&&<button title="Crear acuerdo" onClick={()=>markAgreement(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center mr-1"><CalendarClock size={14}/></button>}{r.currentStatus==='acuerdo'&&<button title="Quitar acuerdo" onClick={()=>markCurrent(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center"><RefreshCw size={13}/></button>}</td></tr>})}</tbody></table></div>{!loading&&!filtered.length&&<p className="p-6 text-center text-sm text-navy-400">No hay alumnos en este módulo con los filtros seleccionados.</p>}</div>
+    <div className="admin-card p-0 overflow-hidden"><div className="px-4 py-3 border-b border-navy-100 text-xs text-navy-400">Vencimiento: fin de periodo + plazo configurado en Tarifas y Conceptos. Si vence dentro del mes aparece en <b>Atraso</b>; si llega el siguiente mes sin pago pasa a <b>Mora</b>.</div><div className="overflow-x-auto"><table className="table-admin text-xs min-w-[1250px]"><thead><tr><th>Estatus</th><th>Plantel</th><th>Nivel</th><th>Grado</th><th>Alumno</th><th>Matrícula</th><th>Ruta</th><th>Operador</th><th>Servicio</th><th>Concepto</th><th>Monto</th><th>Vencimiento</th><th>Seguimiento</th><th>Acciones</th></tr></thead><tbody>{filtered.map(r=>{const st=STATUS[r.currentStatus]||STATUS.corriente;const due=r.agreementDueDate||r.fechaVencimiento||addDays(r.periodoFin,r.paymentDays||0);return <tr key={r.id}><td><span className={st.cls}>{st.label}</span></td><td>{r.currentSchoolName||'—'}</td><td>{r.currentNivel||'—'}</td><td>{r.currentGrado||'—'}</td><td className="font-medium">{r.studentName}</td><td>{r.matricula}</td><td>{r.routeName}</td><td>{r.operatorName||'—'}</td><td>{service(r)}</td><td>{r.conceptName}</td><td className="font-medium">{money(r.montoEstimado)}</td><td>{due||'—'}</td><td><div className="flex flex-wrap gap-2 items-center text-[10px]"><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.solicitudAtendida} onChange={e=>setChecklist(r,'solicitudAtendida',e.target.checked)}/>Atención</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.servicioConfirmado} onChange={e=>setChecklist(r,'servicioConfirmado',e.target.checked)}/>Confirmado</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.conceptoCargado} onChange={e=>setChecklist(r,'conceptoCargado',e.target.checked)}/>Concepto</label><label className="inline-flex items-center gap-1"><input type="checkbox" checked={!!r.cobrado} onChange={e=>markPaid(r,e.target.checked)}/>Pagado</label></div></td><td className="whitespace-nowrap"><button title="Registrar pago" onClick={()=>markPaid(r)} className="w-7 h-7 rounded border border-go/40 text-go inline-flex items-center justify-center mr-1"><Check size={14}/></button>{r.currentStatus!=='acuerdo'&&<button title="Crear acuerdo" onClick={()=>markAgreement(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center mr-1"><CalendarClock size={14}/></button>}{r.currentStatus==='acuerdo'&&<button title="Quitar acuerdo" onClick={()=>markCurrent(r)} className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center"><RefreshCw size={13}/></button>}</td></tr>})}</tbody></table></div>{!loading&&!filtered.length&&<p className="p-6 text-center text-sm text-navy-400">No hay alumnos en este módulo con los filtros seleccionados.</p>}</div>
   </div>;
 }
