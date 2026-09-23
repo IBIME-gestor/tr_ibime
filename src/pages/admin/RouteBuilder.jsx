@@ -163,7 +163,7 @@ function priorityCompare(a, b) {
   return String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' });
 }
 
-function financePayload(row, listData, route, school) {
+function financePayload(row, listData, route, school, existing = {}) {
   return {
     listId: listData.id || '',
     studentId: row.studentId,
@@ -185,11 +185,11 @@ function financePayload(row, listData, route, school) {
     conceptId: row.pricingConceptId || '',
     conceptName: row.concept || '',
     montoEstimado: Number(row.estimatedAmount || 0),
-    solicitudAtendida: false,
-    servicioConfirmado: false,
-    conceptoCargado: false,
-    cobrado: !!row.paid,
-    pagoId: row.paymentId || '',
+    solicitudAtendida: existing?.solicitudAtendida ?? false,
+    servicioConfirmado: existing?.servicioConfirmado ?? false,
+    conceptoCargado: existing?.conceptoCargado ?? false,
+    cobrado: existing?.cobrado ?? !!row.paid,
+    pagoId: existing?.pagoId || row.paymentId || '',
   };
 }
 
@@ -434,7 +434,9 @@ export default function RouteBuilder() {
         const row = buildStudentRow(refreshed, currentList.dates || dates, concepts, route);
         const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
         await RouteLists.update(currentList.id, { rows });
-        await FinanceRecords.upsert(`${currentList.id}_${row.studentId}`, financePayload(row, currentList, route, school));
+        const financeId = `${currentList.id}_${row.studentId}`;
+        const existingFinance = await FinanceRecords.get(financeId);
+        await FinanceRecords.upsert(financeId, financePayload(row, currentList, route, school, existingFinance || {}));
         const updated = { ...currentList, rows };
         setCurrentList(updated);
         setLists((prev) => prev.map((x) => x.id === currentList.id ? updated : x));
@@ -458,7 +460,11 @@ export default function RouteBuilder() {
   }
 
   async function syncListFinance(listData, listRows = listData.rows || [], listRoute = route, listSchool = school) {
-    await Promise.all(listRows.map((row) => FinanceRecords.upsert(`${listData.id}_${row.studentId}`, financePayload(row, listData, listRoute, listSchool))));
+    await Promise.all(listRows.map(async (row) => {
+      const financeId = `${listData.id}_${row.studentId}`;
+      const existingFinance = await FinanceRecords.get(financeId);
+      return FinanceRecords.upsert(financeId, financePayload(row, listData, listRoute, listSchool, existingFinance || {}));
+    }));
   }
 
   async function createList() {
@@ -612,7 +618,9 @@ export default function RouteBuilder() {
       const targetRows = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow].sort(priorityCompare);
       await RouteLists.update(targetList.id, { rows: targetRows });
       const targetUpdated = { ...targetList, rows: targetRows };
-      await FinanceRecords.upsert(`${targetList.id}_${row.studentId}`, financePayload(targetRow, targetUpdated, targetRoute, targetSchool));
+      const targetFinanceId = `${targetList.id}_${row.studentId}`;
+      const existingTargetFinance = await FinanceRecords.get(targetFinanceId);
+      await FinanceRecords.upsert(targetFinanceId, financePayload(targetRow, targetUpdated, targetRoute, targetSchool, existingTargetFinance || {}));
       await FinanceRecords.remove(`${currentList.id}_${row.studentId}`);
       const currentRows = (currentList.rows || []).filter((x) => x.studentId !== row.studentId);
       await RouteLists.update(currentList.id, { rows: currentRows });
