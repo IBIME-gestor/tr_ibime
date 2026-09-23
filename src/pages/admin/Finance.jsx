@@ -46,11 +46,22 @@ export default function Finance() {
       // Esto evita que pruebas/listas eliminadas vuelvan a aparecer en Finanzas.
       // Más adelante podremos agregar un modo Histórico que consulte también
       // los registros financieros que ya no tengan una lista activa.
+      // Finanzas no se valida solamente contra la existencia de la lista.
+      // Debe existir LA MISMA COMBINACIÓN lista + alumno dentro de las filas
+      // actuales de RouteLists. Así, si eliminaste un alumno de una lista,
+      // su registro financiero anterior tampoco vuelve a aparecer.
       const activeListIds = new Set((lists || []).map(list => list.id).filter(Boolean));
-      const activeFinanceRecords = (r || []).filter(rec => rec.listId && activeListIds.has(rec.listId));
-
       const listRows = new Map();
-      (lists || []).forEach(list => (list.rows || []).forEach(row => listRows.set(`${list.id}_${row.studentId}`, { list, row })));
+      (lists || []).forEach(list => (list.rows || []).forEach(row => {
+        if (list.id && row?.studentId) {
+          listRows.set(`${list.id}_${row.studentId}`, { list, row });
+        }
+      }));
+      const activeFinanceRecords = (r || []).filter(rec => {
+        if (!rec?.listId || !rec?.studentId) return false;
+        if (!activeListIds.has(rec.listId)) return false;
+        return listRows.has(`${rec.listId}_${rec.studentId}`);
+      });
       const repaired = [];
       for (const rec of activeFinanceRecords) {
         const source = listRows.get(rec.id || `${rec.listId}_${rec.studentId}`);
@@ -97,7 +108,22 @@ export default function Finance() {
     if(!window.confirm(`Registrar pago de ${money(amount)} para ${record.studentName}?`)) return;
     try{
       const paymentId=await Students.registerPayment(record.studentId,{amount,method:'finanzas',note:`Cargo ${record.conceptName||'Servicio'} · ${record.periodoInicio||''} al ${record.periodoFin||''}`,nextDueDate:addDays(record.periodoFin,record.paymentDays||0),byName:profile?.name,byUid:user?.uid,routeId:record.routeId,unitId:record.unitId,listId:record.listId});
+      // Finanzas y la lista usan el mismo estado de pago. Primero actualizamos
+      // Finanzas y después reflejamos el mismo pago en la lista operativa.
       await FinanceRecords.update(record.id,{cobrado:true,pagoId:paymentId,cobradoAt:new Date().toISOString(),cobradoBy:profile?.name||'',paymentStatus:'corriente',agreementDueDate:''});
+
+      if (record.listId && record.studentId) {
+        const activeList = await RouteLists.get(record.listId);
+        if (activeList) {
+          const updatedRows = (activeList.rows || []).map(row =>
+            row.studentId === record.studentId
+              ? { ...row, paid: true, paymentId }
+              : row
+          );
+          await RouteLists.update(record.listId, { rows: updatedRows });
+        }
+      }
+
       setRecords(prev=>prev.map(r=>r.id===record.id?{...r,cobrado:true,pagoId:paymentId,paymentStatus:'corriente',agreementDueDate:''}:r));
     }catch(e){console.error(e);window.alert('No se pudo registrar el pago.');}
   }
