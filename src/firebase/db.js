@@ -52,11 +52,22 @@ export async function listAll(name, constraints = []) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-export function subscribeAll(name, constraints, callback) {
-  const q = query(colRef(name), ...constraints);
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-  });
+export function subscribeAll(name, constraints, callback, onError) {
+  try {
+    const q = query(colRef(name), ...constraints);
+    return onSnapshot(
+      q,
+      (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (error) => {
+        console.error(`Error de suscripción en ${name}:`, error);
+        if (typeof onError === 'function') onError(error);
+      }
+    );
+  } catch (error) {
+    console.error(`Error creando suscripción en ${name}:`, error);
+    if (typeof onError === 'function') onError(error);
+    return () => {};
+  }
 }
 
 export async function getOne(name, id) {
