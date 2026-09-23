@@ -5,25 +5,18 @@ import {
   CalendarDays, Save, RefreshCw, CircleDollarSign, CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Students, Routes, Drivers, Schools, PricingConcepts, RouteLists } from '../../firebase/services';
+import { Students, Routes, Drivers, Schools, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 import { TIPOS_SERVICIO, OPCIONES_SERVICIO, WEEKDAYS } from './Students';
 
 const ORDER_FIELD = { morning: 'studentOrderMorning', afternoon: 'studentOrderAfternoon' };
 
 const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
-  { key: 'medio', label: 'Media ruta' },
-  { key: 'eventual_fijo', label: 'Eventual fijo — días de semana' },
-  { key: 'eventual_dia', label: 'Eventual día — fechas específicas' },
+  { key: 'medio', label: 'Medio — entrada o salida' },
+  { key: 'diario', label: 'Diario — fechas específicas' },
 ];
 
-const emptyAddForm = {
-  tipoServicio: 'completo',
-  medioServicio: 'entrada',
-  diasFijos: [],
-  bloqueEntrada: '',
-  bloqueSalida: '',
-};
+const emptyAddForm = { tipoServicio: 'completo', medioServicio: 'entrada', diasSemana: [1,2,3,4,5], fechasDiarias: [], bloqueEntrada: '', bloqueSalida: '' };
 
 function localDateString(date) {
   const d = new Date(date);
@@ -49,24 +42,13 @@ function expectedService(student, date) {
   const tipo = student.tipoServicio || 'completo';
   const d = new Date(`${date}T12:00:00`);
   const weekday = d.getDay() === 0 ? 7 : d.getDay();
-
   if (tipo === 'completo') return 'ambas';
-  if (tipo === 'medio') return student.medioServicio || 'entrada';
-
-  if (tipo === 'eventual_fijo') {
-    return student.diasFijos?.find((x) => Number(x.dia) === weekday)?.servicio || null;
-  }
-
-  if (tipo === 'eventual_dia') {
-    return student.fechasEventuales?.find((x) => x.fecha === date)?.servicio || null;
-  }
-
+  if (tipo === 'medio') return (student.diasSemana || []).map(Number).includes(weekday) ? (student.medioServicio || 'entrada') : null;
+  if (tipo === 'diario') return (student.fechasDiarias || []).includes(date) ? (student.medioServicio || 'entrada') : null;
   return null;
 }
 
-function serviceLabel(service) {
-  return OPCIONES_SERVICIO[service] || '—';
-}
+function serviceLabel(service) { return OPCIONES_SERVICIO[service] || '—'; }
 
 function conceptFor(route, concepts, key) {
   const id = route?.pricingConcepts?.[key];
@@ -74,61 +56,13 @@ function conceptFor(route, concepts, key) {
 }
 
 function buildStudentRow(student, dates, concepts, route) {
-  const days = {};
-  let dailyTotal = 0;
-
-  dates.forEach((date) => {
-    const service = expectedService(student, date);
-    days[date] = {
-      entrada: service === 'entrada' || service === 'ambas',
-      salida: service === 'salida' || service === 'ambas',
-      confirmado: false,
-    };
-
-    if (service && (student.tipoServicio === 'eventual_fijo' || student.tipoServicio === 'eventual_dia')) {
-      const p = conceptFor(route, concepts, 'por_dia');
-      dailyTotal += Number(p?.amount || 0);
-    }
-  });
-
-  let estimatedAmount = 0;
-  let conceptId = '';
-  let concept = '';
-
-  if (student.tipoServicio === 'completo') {
-    const p = conceptFor(route, concepts, 'completo');
-    estimatedAmount = Number(p?.amount || student.billingAmount || 0);
-    conceptId = p?.id || student.pricingConceptId || '';
-    concept = p?.name || student.billingConcept || 'Ruta completa';
-  } else if (student.tipoServicio === 'medio') {
-    const key = student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada';
-    const p = conceptFor(route, concepts, key);
-    estimatedAmount = Number(p?.amount || student.billingAmount || 0);
-    conceptId = p?.id || student.pricingConceptId || '';
-    concept = p?.name || student.billingConcept || 'Media ruta';
-  } else {
-    estimatedAmount = dailyTotal || Number(student.billingAmount || 0);
-    const p = conceptFor(route, concepts, 'por_dia');
-    conceptId = p?.id || student.pricingConceptId || '';
-    concept = p?.name || student.billingConcept || 'Por día';
-  }
-
-  return {
-    studentId: student.id,
-    matricula: student.matricula || '',
-    name: student.name || '',
-    routeId: student.routeId || '',
-    tipoServicio: student.tipoServicio || 'completo',
-    medioServicio: student.medioServicio || 'entrada',
-    bloqueEntrada: student.bloqueEntrada || '',
-    bloqueSalida: student.bloqueSalida || '',
-    estimatedAmount,
-    pricingConceptId: conceptId,
-    concept,
-    paid: false,
-    paymentId: '',
-    days,
-  };
+  const days = {}; let selectedCount = 0;
+  dates.forEach((date) => { const service = expectedService(student, date); days[date] = { entrada: service === 'entrada' || service === 'ambas', salida: service === 'salida' || service === 'ambas', confirmado: false }; if (service) selectedCount += 1; });
+  let estimatedAmount=0, conceptId='', concept='', billingMode='', baseAmount=0;
+  if (student.tipoServicio === 'completo') { const p=conceptFor(route, concepts, 'completo'); baseAmount=Number(p?.amount || student.billingAmount || 0); estimatedAmount=baseAmount; conceptId=p?.id || student.pricingConceptId || ''; concept=p?.name || student.billingConcept || 'Ruta completa'; billingMode=p?.mode || 'mensual'; }
+  else if (student.tipoServicio === 'medio') { const p=conceptFor(route, concepts, student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada'); baseAmount=Number(p?.amount || student.billingBaseAmount || student.billingAmount || 0); const n=(student.diasSemana || []).length; estimatedAmount=p?.mode === 'por_dias' ? baseAmount*n : baseAmount*(n/5); conceptId=p?.id || student.pricingConceptId || ''; concept=p?.name || student.billingConcept || 'Media ruta'; billingMode=p?.mode || 'por_dias'; }
+  else { const p=conceptFor(route, concepts, 'por_dia'); baseAmount=Number(p?.amount || student.billingBaseAmount || student.billingAmount || 0); estimatedAmount=baseAmount*selectedCount; conceptId=p?.id || student.pricingConceptId || ''; concept=p?.name || student.billingConcept || 'Por día'; billingMode='por_evento'; }
+  return { studentId:student.id, matricula:student.matricula||'', name:student.name||'', schoolId:student.schoolId||'', nivel:student.nivel||'', grado:student.grado||'', routeId:route?.id||student.routeId||'', tipoServicio:student.tipoServicio||'completo', medioServicio:student.medioServicio||'entrada', diasSemana:(student.diasSemana||[]).map(Number), fechasDiarias:student.fechasDiarias||[], bloqueEntrada:student.bloqueEntrada||'', bloqueSalida:student.bloqueSalida||'', estimatedAmount:Number(estimatedAmount.toFixed(2)), baseAmount, daysCount:selectedCount, pricingConceptId:conceptId, concept, billingMode, paid:!!student.paid, paymentId:student.paymentId||'', days };
 }
 
 function priorityCompare(a, b) {
@@ -147,6 +81,18 @@ function priorityCompare(a, b) {
   return String(a.name).localeCompare(String(b.name));
 }
 
+function financePayload(row, listData, route, school) {
+  return {
+    listId: listData.id || '', studentId: row.studentId, studentName: row.name || '', matricula: row.matricula || '',
+    schoolId: row.schoolId || route?.schoolId || '', schoolName: school?.name || '', nivel: row.nivel || '', grado: row.grado || '',
+    routeId: route?.id || listData.routeId || '', routeName: route?.name || '', unitId: route?.unitId || '',
+    periodoInicio: listData.startDate || '', periodoFin: listData.endDate || '', shift: listData.shift || '',
+    tipoServicio: row.tipoServicio || '', medioServicio: row.medioServicio || '', diasSemana: row.diasSemana || [], fechasDiarias: row.fechasDiarias || [],
+    conceptId: row.pricingConceptId || '', conceptName: row.concept || '', montoEstimado: Number(row.estimatedAmount || 0),
+    solicitudAtendida: false, servicioConfirmado: false, conceptoCargado: false, cobrado: !!row.paid, pagoId: row.paymentId || '',
+  };
+}
+
 export default function RouteBuilder() {
   const { profile, user } = useAuth();
   const [routes, setRoutesState] = useState([]);
@@ -157,8 +103,6 @@ export default function RouteBuilder() {
   const [concepts, setConcepts] = useState([]);
   const [routeId, setRouteId] = useState('');
   const [shift, setShift] = useState('morning');
-  const [operatorId, setOperatorId] = useState('');
-  const [unitId, setUnitId] = useState('');
 
   const [matricula, setMatricula] = useState('');
   const [lookupError, setLookupError] = useState('');
@@ -194,15 +138,8 @@ export default function RouteBuilder() {
   }, [routeId]);
 
   const route = routes.find((r) => r.id === routeId) || null;
-  const driver = drivers.find((d) => d.id === (currentList?.driverId || operatorId || route?.driverId));
+  const driver = drivers.find((d) => d.id === route?.driverId);
   const nanny = drivers.find((d) => d.id === route?.nannyId);
-
-  useEffect(() => {
-    if (!currentList) {
-      setOperatorId(route?.driverId || '');
-      setUnitId(route?.unitId || '');
-    }
-  }, [routeId, route?.driverId, route?.unitId, currentList]);
   const school = schools.find((s) => s.id === route?.schoolId);
   const orderField = ORDER_FIELD[shift];
   const order = route?.[orderField] || [];
@@ -231,13 +168,7 @@ export default function RouteBuilder() {
   function selectLookupStudent(student) {
     setLookupError('');
     setLookupStudent(student);
-    setAddForm({
-      tipoServicio: student.tipoServicio || 'completo',
-      medioServicio: student.medioServicio || 'entrada',
-      diasFijos: student.diasFijos || [],
-      bloqueEntrada: student.bloqueEntrada || '',
-      bloqueSalida: student.bloqueSalida || '',
-    });
+    setAddForm({ tipoServicio: student.tipoServicio || 'completo', medioServicio: student.medioServicio || 'entrada', diasSemana: (student.diasSemana || [1,2,3,4,5]).map(Number), fechasDiarias: student.fechasDiarias || [], bloqueEntrada: student.bloqueEntrada || '', bloqueSalida: student.bloqueSalida || '' });
   }
 
   function resetAddFlow() {
@@ -259,39 +190,18 @@ export default function RouteBuilder() {
   }
 
 
-  function toggleDiaFijo(dia) {
-    const exists = addForm.diasFijos.some((d) => Number(d.dia) === dia);
-    const diasFijos = exists
-      ? addForm.diasFijos.filter((d) => Number(d.dia) !== dia)
-      : [...addForm.diasFijos, { dia, servicio: 'ambas' }].sort((a, b) => a.dia - b.dia);
-    setAddForm({ ...addForm, diasFijos });
-  }
+  function toggleDiaSemana(dia) { const diasSemana=addForm.diasSemana.includes(dia)?addForm.diasSemana.filter(d=>d!==dia):[...addForm.diasSemana,dia].sort((a,b)=>a-b); setAddForm({...addForm,diasSemana}); }
+  function toggleFechaDiaria(fecha) { const fechasDiarias=addForm.fechasDiarias.includes(fecha)?addForm.fechasDiarias.filter(d=>d!==fecha):[...addForm.fechasDiarias,fecha].sort(); setAddForm({...addForm,fechasDiarias}); }
 
   async function addStudentToRoster() {
     if (!lookupStudent || !route) return;
-    const data = {
-      routeId: route.id,
-      tipoServicio: addForm.tipoServicio,
-      medioServicio: addForm.medioServicio,
-      diasFijos: addForm.diasFijos,
-      bloqueEntrada: addForm.bloqueEntrada.trim(),
-      bloqueSalida: addForm.bloqueSalida.trim(),
-    };
-
-    const conceptKey = addForm.tipoServicio === 'completo'
-      ? 'completo'
-      : addForm.tipoServicio === 'medio'
-        ? `medio_${addForm.medioServicio}`
-        : 'por_dia';
-    const concept = conceptFor(route, concepts, conceptKey);
-
-    if (concept) {
-      data.billingAmount = Number(concept.amount || 0);
-      data.billingConcept = concept.name || '';
-      data.billingMode = addForm.tipoServicio === 'completo' || addForm.tipoServicio === 'medio' ? 'mensual' : 'por_evento';
-      data.pricingConceptId = concept.id;
-    }
-
+    const data={ routeId:route.id, tipoServicio:addForm.tipoServicio, medioServicio:addForm.medioServicio, diasSemana:addForm.diasSemana, fechasDiarias:addForm.fechasDiarias.filter(d=>dates.includes(d)), bloqueEntrada:addForm.bloqueEntrada.trim(), bloqueSalida:addForm.bloqueSalida.trim() };
+    const conceptKey=addForm.tipoServicio==='completo'?'completo':addForm.tipoServicio==='medio'?`medio_${addForm.medioServicio}`:'por_dia';
+    const concept=conceptFor(route,concepts,conceptKey); const preview=buildStudentRow({...lookupStudent,...data},dates,concepts,route);
+    if(!concept){ window.alert('Primero asigna el concepto correspondiente a esta modalidad en la ruta.'); return; }
+    if(addForm.tipoServicio==='medio' && !addForm.diasSemana.length){ window.alert('Selecciona al menos un día de lunes a viernes.'); return; }
+    if(addForm.tipoServicio==='diario' && !addForm.fechasDiarias.length){ window.alert('Selecciona al menos una fecha del calendario.'); return; }
+    data.billingAmount=preview.estimatedAmount; data.billingBaseAmount=preview.baseAmount; data.billingConcept=preview.concept; data.billingMode=preview.billingMode; data.pricingConceptId=preview.pricingConceptId; data.billingDaysCount=preview.daysCount; data.billingUpdatedAt=new Date().toISOString();
     await Students.update(lookupStudent.id, data);
     const refreshed = { ...lookupStudent, ...data };
     setAllStudents((prev) => prev.map((s) => s.id === refreshed.id ? refreshed : s));
@@ -306,6 +216,7 @@ export default function RouteBuilder() {
       const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
       const updated = { ...currentList, rows };
       await RouteLists.update(currentList.id, { rows });
+      await FinanceRecords.upsert(`${currentList.id}_${row.studentId}`, financePayload(row, currentList, route, school));
       setCurrentList(updated);
     }
     resetAddFlow();
@@ -322,9 +233,6 @@ export default function RouteBuilder() {
       const data = {
         routeId: route.id,
         shift,
-        driverId: operatorId || route.driverId || '',
-        driverName: drivers.find((d) => d.id === (operatorId || route.driverId))?.name || '',
-        unitId: route.unitId || '',
         startDate,
         endDate,
         weekdays: [1, 2, 3, 4, 5],
@@ -336,6 +244,7 @@ export default function RouteBuilder() {
       };
       const id = await RouteLists.create(data);
       const created = { id, ...data };
+      await Promise.all(rows.map((row) => FinanceRecords.upsert(`${id}_${row.studentId}`, financePayload(row, created, route, school))));
       setLists((prev) => [created, ...prev]);
       setCurrentList(created);
       setListId(id);
@@ -351,8 +260,6 @@ export default function RouteBuilder() {
     setListId(found.id);
     setRouteId(found.routeId || '');
     setShift(found.shift || 'morning');
-    setOperatorId(found.driverId || '');
-    setUnitId(found.unitId || '');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
     setWeekdays([1, 2, 3, 4, 5]);
@@ -403,6 +310,7 @@ export default function RouteBuilder() {
       });
       const rows = (currentList.rows || []).map((x) => x.studentId === row.studentId ? { ...x, paid: true, paymentId } : x);
       await updateRows(rows);
+      await FinanceRecords.update(`${currentList.id}_${row.studentId}`, { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString() });
       if (student) {
         setAllStudents((prev) => prev.map((s) => s.id === student.id ? { ...s, paymentStatus: 'al_corriente', lastPaymentAmount: amount } : s));
       }
@@ -451,7 +359,7 @@ export default function RouteBuilder() {
         <div>
           <h1 className="admin-h1">Formar lista de ruta</h1>
           <p className="text-sm text-navy-400 mt-1">
-            La lista se crea por periodo y detecta automáticamente lunes a viernes. El operador se asigna al recorrido, no queda amarrado a una sola ruta.
+            La lista se crea por periodo. Detecta automáticamente lunes a viernes dentro del periodo y muestra los días de cada alumno en vertical para ahorrar espacio.
             Los alumnos con entrada + salida quedan sombreados y arriba como prioridad.
           </p>
         </div>
@@ -475,16 +383,6 @@ export default function RouteBuilder() {
               <option value="morning">Entrada / ida</option>
               <option value="afternoon">Salida / vuelta</option>
             </select>
-          </div>
-          <div>
-            <label className="admin-label">Operador de este recorrido</label>
-            <select value={operatorId || route?.driverId || ''} onChange={(e) => setOperatorId(e.target.value)} className="admin-select">
-              <option value="">Sin operador</option>
-              {drivers.filter((d) => d.role !== 'nanny').map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-            <p className="text-[11px] text-navy-400 mt-1">Puede ser diferente al operador predeterminado de la ruta. El mismo operador puede realizar varias rutas.</p>
           </div>
           <div>
             <label className="admin-label">Desde</label>
@@ -528,7 +426,7 @@ export default function RouteBuilder() {
           <div className="admin-card mb-5 print:hidden">
             <div className="flex flex-wrap gap-6 text-sm">
               <p><span className="text-navy-400">Plantel:</span> <span className="font-medium">{school?.name || '—'}</span></p>
-              <p className="flex items-center gap-1.5"><Truck size={14} className="text-navy-400" /><span className="text-navy-400">Operador:</span> <span className="font-medium">{drivers.find((d) => d.id === (currentList?.driverId || operatorId || route?.driverId))?.name || 'Sin asignar'}</span></p>
+              <p className="flex items-center gap-1.5"><Truck size={14} className="text-navy-400" /><span className="text-navy-400">Operador:</span> <span className="font-medium">{driver?.name || 'Sin asignar'}</span></p>
               {route.nannyId && <p className="flex items-center gap-1.5"><Baby size={14} className="text-navy-400" /><span className="text-navy-400">Nanny:</span> <span className="font-medium">{nanny?.name || '—'}</span></p>}
             </div>
           </div>
@@ -560,62 +458,15 @@ export default function RouteBuilder() {
                 <p className="font-medium text-navy-800">{lookupStudent.name}</p>
                 <p className="text-xs text-navy-400 mb-3">{lookupStudent.matricula} · {schoolName(lookupStudent.schoolId)}</p>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="admin-label">Tipo de servicio</label>
-                    <select value={addForm.tipoServicio} onChange={(e) => setAddForm({ ...addForm, tipoServicio: e.target.value })} className="admin-select">
-                      {SERVICE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-                    </select>
-                  </div>
-                  {addForm.tipoServicio === 'medio' && (
-                    <div>
-                      <label className="admin-label">Entrada o salida</label>
-                      <select value={addForm.medioServicio} onChange={(e) => setAddForm({ ...addForm, medioServicio: e.target.value })} className="admin-select">
-                        <option value="entrada">Solo entrada</option>
-                        <option value="salida">Solo salida</option>
-                      </select>
-                    </div>
-                  )}
-                  <div>
-                    <label className="admin-label">Bloque entrada</label>
-                    <input value={addForm.bloqueEntrada} onChange={(e) => setAddForm({ ...addForm, bloqueEntrada: e.target.value })} className="admin-input" placeholder="Ej. 1" />
-                  </div>
-                  <div>
-                    <label className="admin-label">Bloque salida</label>
-                    <input value={addForm.bloqueSalida} onChange={(e) => setAddForm({ ...addForm, bloqueSalida: e.target.value })} className="admin-input" placeholder="Ej. 2" />
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div><label className="admin-label">Tipo de servicio</label><select value={addForm.tipoServicio} onChange={e=>setAddForm({...addForm,tipoServicio:e.target.value})} className="admin-select">{SERVICE_OPTIONS.map(x=><option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
+                  {addForm.tipoServicio !== 'completo' && <div><label className="admin-label">Entrada o salida</label><select value={addForm.medioServicio} onChange={e=>setAddForm({...addForm,medioServicio:e.target.value})} className="admin-select"><option value="entrada">Solo entrada</option><option value="salida">Solo salida</option></select></div>}
+                  <div><label className="admin-label">Bloque entrada</label><input value={addForm.bloqueEntrada} onChange={e=>setAddForm({...addForm,bloqueEntrada:e.target.value})} className="admin-input" placeholder="Ej. 1" /></div>
+                  <div><label className="admin-label">Bloque salida</label><input value={addForm.bloqueSalida} onChange={e=>setAddForm({...addForm,bloqueSalida:e.target.value})} className="admin-input" placeholder="Ej. 2" /></div>
                 </div>
-
-                {addForm.tipoServicio === 'eventual_fijo' && (
-                  <div className="mt-3">
-                    <label className="admin-label">Días fijos y servicio de cada día</label>
-                    <div className="space-y-2">
-                      {WEEKDAYS.slice(0, 5).map((d) => {
-                        const item = addForm.diasFijos.find((x) => Number(x.dia) === d.value);
-                        return (
-                          <div key={d.value} className="flex items-center gap-2">
-                            <label className="badge cursor-pointer">
-                              <input type="checkbox" className="mr-1" checked={!!item} onChange={() => toggleDiaFijo(d.value)} /> {d.label}
-                            </label>
-                            {item && (
-                              <select value={item.servicio || 'ambas'} onChange={(e) => setAddForm({ ...addForm, diasFijos: addForm.diasFijos.map((x) => Number(x.dia) === d.value ? { ...x, servicio: e.target.value } : x) })} className="admin-select h-8 w-40 text-xs">
-                                <option value="entrada">Entrada</option>
-                                <option value="salida">Salida</option>
-                                <option value="ambas">Entrada + Salida</option>
-                              </select>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {addForm.tipoServicio === 'eventual_dia' && (
-                  <p className="text-xs text-navy-400 mt-3">
-                    Las fechas esporádicas se toman del expediente del alumno. Cada fecha conserva su tipo: Entrada, Salida o Entrada + Salida.
-                  </p>
-                )}
+                {addForm.tipoServicio==='medio' && <div className="mt-3"><label className="admin-label">¿Qué días?</label><div className="flex flex-wrap gap-2">{WEEKDAYS.slice(0,5).map(d=><label key={d.value} className={`badge cursor-pointer ${addForm.diasSemana.includes(d.value)?'ring-2 ring-signal-yellow/50':''}`}><input type="checkbox" className="mr-1" checked={addForm.diasSemana.includes(d.value)} onChange={()=>toggleDiaSemana(d.value)} /> {d.label.slice(0,3)}</label>)}</div><p className="text-xs text-navy-400 mt-2">El costo se recalcula según los días seleccionados.</p></div>}
+                {addForm.tipoServicio==='diario' && <div className="mt-3"><label className="admin-label">Fechas del calendario del periodo</label><div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-1.5 max-h-40 overflow-y-auto border border-navy-100 rounded-lg p-2 bg-white">{dates.map(date=><label key={date} className={`text-[11px] rounded px-2 py-1.5 cursor-pointer border ${addForm.fechasDiarias.includes(date)?'bg-signal-yellow/20 border-signal-yellow/50':'border-navy-100'}`}><input type="checkbox" className="mr-1" checked={addForm.fechasDiarias.includes(date)} onChange={()=>toggleFechaDiaria(date)} />{new Date(`${date}T12:00:00`).toLocaleDateString('es-MX',{weekday:'short',day:'2-digit',month:'2-digit'})}</label>)}</div><p className="text-xs text-navy-400 mt-2">Se cobrarán exactamente las fechas seleccionadas.</p></div>}
+                <div className="mt-3 rounded-lg bg-navy-100/50 px-3 py-2 text-xs text-navy-500">{(()=>{const key=addForm.tipoServicio==='completo'?'completo':addForm.tipoServicio==='medio'?`medio_${addForm.medioServicio}`:'por_dia'; const p=conceptFor(route,concepts,key); const temp=buildStudentRow({...lookupStudent,...addForm},dates,concepts,route); return <>Concepto: <strong>{p?.name||'Sin concepto configurado'}</strong> · Estimado: <strong>${Number(temp.estimatedAmount||0).toLocaleString('es-MX',{minimumFractionDigits:2})}</strong></>;})()}</div>
 
                 <div className="flex gap-2 mt-4">
                   <button type="button" onClick={addStudentToRoster} className="btn-admin-primary"><Plus size={14} /> Guardar alumno en ruta</button>
@@ -634,7 +485,6 @@ export default function RouteBuilder() {
               <div>
                 <p className="font-display font-bold text-lg">{route?.name} · {shift === 'morning' ? 'Entrada' : 'Salida'}</p>
                 <p className="text-sm text-navy-500">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días · {list.length} alumnos</p>
-                <p className="text-xs text-navy-400 mt-1">Operador del recorrido: <strong>{currentList.driverName || drivers.find((d) => d.id === currentList.driverId)?.name || 'Sin asignar'}</strong></p>
               </div>
               <div className="flex gap-2 print:hidden">
                 <button onClick={() => doPrint('admin')} className="btn-admin-ghost"><Printer size={14} /> Imprimir</button>
@@ -644,75 +494,15 @@ export default function RouteBuilder() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="table-admin min-w-[1250px]">
-              <thead>
-                <tr>
-                  <th className="pl-4 print:hidden">Orden</th>
-                  <th>#</th>
-                  <th>Alumno</th>
-                  <th>Servicio</th>
-                  <th>Bloque E</th>
-                  <th>Bloque S</th>
-                  {currentList.dates?.map((date) => (
-                    <th key={date} className="text-center min-w-[82px]">
-                      <span className="block font-semibold">{new Date(`${date}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short' })}</span>
-                      <span className="block text-[10px]">{date.split('-').reverse().join('/')}</span>
-                    </th>
-                  ))}
-                  <th className="text-center">Pago</th>
-                  <th className="pr-4 print:hidden"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((row, i) => {
-                  const both = Object.values(row.days || {}).some((d) => d.entrada && d.salida);
-                  return (
-                    <tr key={row.studentId} className={both ? 'bg-signal-yellow/15' : ''}>
-                      <td className="pl-4 print:hidden">
-                        <div className="flex flex-col">
-                          <button onClick={() => moveRow(i, -1)} disabled={i === 0} className="text-navy-400 disabled:opacity-20"><ArrowUp size={13} /></button>
-                          <button onClick={() => moveRow(i, 1)} disabled={i === list.length - 1} className="text-navy-400 disabled:opacity-20"><ArrowDown size={13} /></button>
-                        </div>
-                      </td>
-                      <td className="font-medium">{i + 1}</td>
-                      <td>
-                        <p className="font-medium">{row.name}</p>
-                        <p className="text-xs text-navy-400">{row.matricula}</p>
-                        {both && <span className="badge-amber mt-1">Entrada + salida</span>}
-                      </td>
-                      <td className="text-xs">{row.tipoServicio === 'medio' ? `Media · ${serviceLabel(row.medioServicio)}` : TIPOS_SERVICIO[row.tipoServicio] || row.tipoServicio}</td>
-                      <td className="text-xs">{row.bloqueEntrada || '—'}</td>
-                      <td className="text-xs">{row.bloqueSalida || '—'}</td>
-                      {currentList.dates?.map((date) => {
-                        const day = row.days?.[date] || {};
-                        return (
-                          <td key={date} className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <label title="Entrada" className={`text-xs ${day.entrada ? 'text-go font-bold' : 'text-navy-300'}`}>
-                                E
-                                <input type="checkbox" checked={!!day.entrada} onChange={() => toggleDay(row.studentId, date, 'entrada')} className="ml-1 w-4 h-4 align-middle" />
-                              </label>
-                              <label title="Salida" className={`text-xs ${day.salida ? 'text-navy-700 font-bold' : 'text-navy-300'}`}>
-                                S
-                                <input type="checkbox" checked={!!day.salida} onChange={() => toggleDay(row.studentId, date, 'salida')} className="ml-1 w-4 h-4 align-middle" />
-                              </label>
-                            </div>
-                          </td>
-                        );
-                      })}
-                      <td className="text-center">
-                        <label title={row.paid ? 'Pago registrado en Caja' : `Registrar $${row.estimatedAmount || 0}`}>
-                          <input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={!!row.paid || saving} className="w-5 h-5" />
-                        </label>
-                        <span className="block text-[10px] text-navy-400">${Number(row.estimatedAmount || 0).toLocaleString('es-MX')}</span>
-                      </td>
-                      <td className="pr-4 print:hidden">
-                        <button onClick={() => removeRow(row)} className="link-danger"><Trash2 size={13} /></button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+            <table className="table-admin text-xs min-w-[760px]">
+              <thead><tr><th className="pl-4 print:hidden">Orden</th><th>#</th><th>Alumno</th><th>Matrícula</th><th>Tipo de servicio</th><th>Días</th><th>Estimado</th><th>Pago</th><th className="pr-4 print:hidden"></th></tr></thead>
+              <tbody>{list.map((row,i)=>{const both=Object.values(row.days||{}).some(d=>d.entrada&&d.salida); return <tr key={row.studentId} className={both?'bg-signal-yellow/15':''}>
+                <td className="pl-4 print:hidden"><div className="flex flex-col"><button onClick={()=>moveRow(i,-1)} disabled={i===0} className="text-navy-400 disabled:opacity-20"><ArrowUp size={11}/></button><button onClick={()=>moveRow(i,1)} disabled={i===list.length-1} className="text-navy-400 disabled:opacity-20"><ArrowDown size={11}/></button></div></td>
+                <td className="font-medium">{i+1}</td><td className="whitespace-nowrap"><span className="font-medium">{row.name}</span>{both&&<span className="badge-amber ml-1">E+S</span>}</td><td className="whitespace-nowrap text-navy-500">{row.matricula}</td>
+                <td className="whitespace-nowrap">{row.tipoServicio==='completo'?'Completo':row.tipoServicio==='medio'?`Medio · ${row.medioServicio==='entrada'?'E':'S'}`:'Diario'}</td>
+                <td><div className="flex flex-col gap-0.5 min-w-[180px]">{currentList.dates?.map(date=>{const day=row.days?.[date]||{}; if(!day.entrada&&!day.salida)return null; const label=new Date(`${date}T12:00:00`).toLocaleDateString('es-MX',{weekday:'short',day:'2-digit'}); return <div key={date} className="flex items-center gap-1.5 leading-none"><span className="w-10 text-[10px] text-navy-400 uppercase">{label}</span><button type="button" onClick={()=>toggleDay(row.studentId,date,'entrada')} className={`w-5 h-5 rounded border text-[9px] font-bold ${day.entrada?'bg-signal-yellow/35 border-signal-yellow/70':'border-navy-200 text-navy-300'}`}>E</button><button type="button" onClick={()=>toggleDay(row.studentId,date,'salida')} className={`w-5 h-5 rounded border text-[9px] font-bold ${day.salida?'bg-signal-yellow/35 border-signal-yellow/70':'border-navy-200 text-navy-300'}`}>S</button></div>})}</div></td>
+                <td className="font-medium whitespace-nowrap">${Number(row.estimatedAmount||0).toLocaleString('es-MX',{minimumFractionDigits:2})}</td><td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={()=>togglePaid(row)} disabled={!!row.paid||saving} className="w-4 h-4" /></td><td className="pr-4 print:hidden"><button onClick={()=>removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
+              </tr>})}</tbody>
             </table>
           </div>
 
