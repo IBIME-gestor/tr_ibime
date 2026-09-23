@@ -305,6 +305,11 @@ export const FinanceRecords = {
   upsert: async (id, data) => { await setDoc(doc(db, 'financeRecords', id), { ...data, updatedAt: serverTimestamp() }, { merge: true }); return id; },
   update: (id, data) => updateDocById('financeRecords', id, { ...data, updatedAt: serverTimestamp() }),
   remove: (id) => removeDoc('financeRecords', id),
+  async removeByList(listId) {
+    if (!listId) return;
+    const rows = await listAll('financeRecords', [where('listId', '==', listId)]);
+    for (const row of rows) await removeDoc('financeRecords', row.id);
+  },
 };
 
 export const Routes = {
