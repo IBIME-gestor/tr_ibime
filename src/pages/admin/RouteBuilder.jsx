@@ -219,7 +219,8 @@ export default function RouteBuilder() {
   const [lists, setLists] = useState([]);
   const [currentList, setCurrentList] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [serviceFilter, setServiceFilter] = useState('todos');
+  const [serviceFilters, setServiceFilters] = useState(['todos']);
+  const [showAddStudent, setShowAddStudent] = useState(false);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -242,7 +243,16 @@ export default function RouteBuilder() {
 
   const list = useMemo(() => {
     let rows = [...(currentList?.rows || [])];
-    if (serviceFilter !== 'todos') rows = rows.filter((row) => row.tipoServicio === serviceFilter);
+    const filters = serviceFilters.includes('todos') ? ['todos'] : serviceFilters;
+    if (!filters.includes('todos') && filters.length) {
+      rows = rows.filter((row) => {
+        if (filters.includes('completo') && row.tipoServicio === 'completo') return true;
+        if (filters.includes('medio_entrada') && row.tipoServicio === 'medio' && row.medioServicio === 'entrada') return true;
+        if (filters.includes('medio_salida') && row.tipoServicio === 'medio' && row.medioServicio === 'salida') return true;
+        if (filters.includes('diario') && row.tipoServicio === 'diario') return true;
+        return false;
+      });
+    }
     return rows.sort(priorityCompare);
   }, [currentList, serviceFilter]);
 
@@ -256,12 +266,25 @@ export default function RouteBuilder() {
 
   function schoolName(id) { return schools.find((s) => s.id === id)?.name || '—'; }
 
+  function toggleServiceFilter(key) {
+    if (key === 'todos') {
+      setServiceFilters(['todos']);
+      return;
+    }
+    setServiceFilters((prev) => {
+      const current = prev.includes('todos') ? [] : prev;
+      const next = current.includes(key) ? current.filter((x) => x !== key) : [...current, key];
+      return next.length ? next : ['todos'];
+    });
+  }
+
   function resetAddFlow() {
     setMatricula('');
     setLookupStudent(null);
     setLookupError('');
     setAddForm(emptyAddForm);
     setEditingStudentId(null);
+    setShowAddStudent(false);
     inputRef.current?.focus();
   }
 
@@ -373,7 +396,7 @@ export default function RouteBuilder() {
       setLists((prev) => [created, ...prev]);
       setCurrentList(created);
       setListId(id);
-      setServiceFilter('todos');
+      setServiceFilters(['todos']);
     } catch (err) {
       console.error(err);
       window.alert(err?.message || 'No se pudo crear la lista.');
@@ -390,7 +413,7 @@ export default function RouteBuilder() {
     setRouteId(found.routeId || '');
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
-    setServiceFilter('todos');
+    setServiceFilters(['todos']);
   }
 
   async function updateRows(rows) {
@@ -508,19 +531,20 @@ export default function RouteBuilder() {
         <div className="admin-card p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div><span className="font-display font-bold">{route?.name || 'Ruta'}</span><span className="text-navy-400 ml-2">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días</span></div>
-            <div className="flex gap-2 print:hidden"><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
+            <div className="flex gap-2 print:hidden"><button onClick={() => { setShowAddStudent((v) => !v); resetAddFlow(); }} className="btn-admin-primary"><Plus size={14}/> Agregar alumnos</button><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs font-semibold text-navy-500">MOSTRAR:</span>
-            {[['todos','Todos'],['completo','Completos'],['medio_entrada','Medio entrada'],['medio_salida','Medio salida'],['diario','Diarios']].map(([key,label]) => (
-              <button key={key} onClick={() => setServiceFilter(key === 'medio_entrada' || key === 'medio_salida' ? 'medio' : key)} className={`px-2.5 py-1.5 rounded-md text-xs border ${serviceFilter === (key === 'medio_entrada' || key === 'medio_salida' ? 'medio' : key) ? 'bg-navy-800 text-white border-navy-800' : 'border-navy-200 text-navy-500'}`}>{label}</button>
-            ))}
-            {serviceFilter === 'medio' && <select className="admin-select !w-auto !py-1.5 text-xs" value="medio" onChange={() => {}}><option value="medio">Medio — usa el tipo E/S del alumno</option></select>}
+            {[['todos','Todos'],['completo','Completos'],['medio_entrada','Medio entrada'],['medio_salida','Medio salida'],['diario','Diarios']].map(([key,label]) => {
+              const active = serviceFilters.includes(key);
+              return <button key={key} onClick={() => toggleServiceFilter(key)} className={`px-2.5 py-1.5 rounded-md text-xs border ${active ? 'bg-navy-800 text-white border-navy-800' : 'border-navy-200 text-navy-500'}`}>{label}</button>;
+            })}
+            <span className="text-[11px] text-navy-400">Puedes seleccionar Medio entrada, Medio salida o ambos.</span>
           </div>
         </div>
       )}
 
-      {route && !currentList && (
+      {route && (!currentList || showAddStudent) && (
         <div className="admin-card">
           <div className="flex items-center gap-2 mb-3"><Search size={15}/><span className="font-display font-semibold">Agregar alumno a la ruta</span></div>
           <form onSubmit={(e) => { e.preventDefault(); const found = allStudents.find((s) => String(s.matricula || '').toLowerCase() === matricula.trim().toLowerCase()) || searchResults[0]; if (found) selectLookupStudent(found); else setLookupError('No encontramos ese alumno en el padrón.'); }}>
