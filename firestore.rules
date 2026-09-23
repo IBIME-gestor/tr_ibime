@@ -90,6 +90,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /financeRecords/{id} {
+      allow read, write: if isAdmin() || isCashier();
+    }
+
     match /routes/{id} {
       allow read: if isSignedIn();
       allow update: if isAdmin() ||
