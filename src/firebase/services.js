@@ -146,7 +146,7 @@ export const Students = {
    * hoy, sin que nadie tenga que ir a marcarla a mano) y deja el último
    * pago a la mano en su propio expediente.
    */
-  async registerPayment(id, { amount, method, note, nextDueDate, byName, byUid }) {
+  async registerPayment(id, { amount, method, note, nextDueDate, byName, byUid, routeId, unitId, listId }) {
     const numAmount = amount === '' || amount == null ? null : Number(amount);
     const paymentRef = await addDoc(collection(db, 'students', id, 'payments'), {
       amount: numAmount,
@@ -154,6 +154,9 @@ export const Students = {
       note: note || '',
       registeredByName: byName || '',
       registeredByUid: byUid || '',
+      routeId: routeId || '',
+      unitId: unitId || '',
+      listId: listId || '',
       cancelled: false,
       at: serverTimestamp(),
     });
@@ -263,6 +266,31 @@ export const Students = {
     }
     return ok;
   },
+};
+
+
+/* ------------------------------------------------------------------ */
+/*  Tarifas / conceptos de cobro                                       */
+/*  Cada registro pertenece a una ruta y define cuánto cuesta un tipo  */
+/*  de servicio.                                                       */
+/* ------------------------------------------------------------------ */
+export const Pricing = {
+  list: () => listAll('pricing', [orderBy('routeId')]),
+  get: (id) => getOne('pricing', id),
+  create: (data) => createDoc('pricing', data),
+  update: (id, data) => updateDocById('pricing', id, data),
+  remove: (id) => removeDoc('pricing', id),
+};
+
+/* ------------------------------------------------------------------ */
+/*  Listas operativas por periodo                                      */
+/* ------------------------------------------------------------------ */
+export const RouteLists = {
+  list: () => listAll('routeLists', [orderBy('startDate', 'desc')]),
+  get: (id) => getOne('routeLists', id),
+  create: (data) => createDoc('routeLists', data),
+  update: (id, data) => updateDocById('routeLists', id, data),
+  remove: (id) => removeDoc('routeLists', id),
 };
 
 /* ------------------------------------------------------------------ */
