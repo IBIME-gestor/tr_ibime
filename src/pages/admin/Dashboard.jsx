@@ -77,15 +77,21 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="admin-card mt-5 max-w-2xl cascade-item" style={cascadeStyle(cards.length, 70)}>
-        <p className="font-display font-semibold text-sm text-navy-800 mb-2">Primeros pasos</p>
-        <ol className="list-decimal list-inside text-sm text-navy-600 space-y-1.5">
-          <li>Da de alta los planteles (colegios).</li>
-          <li>Carga la lista de alumnos (manual o por CSV) con su matrícula, plantel y domicilio.</li>
-          <li>Registra las unidades (camionetas/camiones) disponibles.</li>
-          <li>Da de alta a los operadores y nannies, con su correo para poder iniciar sesión.</li>
-          <li>Crea las rutas: asigna plantel, operador, nanny, unidad y alumnos.</li>
-        </ol>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+        {[
+          { label: 'Esperado', to: '/admin/finanzas?modulo=esperado' },
+          { label: 'Cargado', to: '/admin/finanzas?modulo=cargado' },
+          { label: 'Pagado', to: '/admin/finanzas?modulo=pagado' },
+          { label: 'Pendiente', to: '/admin/finanzas?modulo=pendiente' },
+        ].map((item, i) => (
+          <Link key={item.label} to={item.to}
+            className="admin-card hover:border-navy-400 hover:shadow-panel transition-all cascade-item"
+            style={cascadeStyle(cards.length + i, 70)}>
+            <p className="text-xs text-navy-400">Finanzas</p>
+            <p className="font-display font-bold text-lg mt-1 text-navy-800">{item.label}</p>
+            <p className="text-navy-400 text-xs mt-0.5">Consultar módulo</p>
+          </Link>
+        ))}
       </div>
     </div>
   );
