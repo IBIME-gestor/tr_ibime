@@ -1,4 +1,4 @@
-import { where, orderBy, doc, setDoc, deleteDoc, collection, collectionGroup, writeBatch, addDoc, getDocs, query, serverTimestamp } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc, collection, collectionGroup, writeBatch, addDoc, getDocs, getDoc, query, serverTimestamp } from 'firebase/firestore';
 import { db } from './config';
 import {
   listAll,
@@ -475,7 +475,7 @@ export const Cometa = {
       return { message: `Concepto confirmado para ${row.student.name}.`, financeId, listId };
     }
 
-    if (existingFinance?.cobrado || row.routeRow?.paid) {
+    if ((existingFinance?.cobrado === true && !!existingFinance?.pagoId) || (row.routeRow?.paid === true && !!row.routeRow?.paymentId)) {
       await updateCometaRow(importId, row, { confirmed: true, confirmedType: 'already_paid', confirmedBy: byName || '' });
       return { message: `${row.student.name} ya aparece pagado en Ruta Segura; no se duplicó el cobro.`, financeId, listId };
     }
@@ -705,14 +705,23 @@ FinanceRecords.upsert = async function upsertSafe(id, data) {
 
 const _originalFinanceUpdate = FinanceRecords.update;
 
+// Un registro financiero solo puede decir "cobrado" cuando existe el pago
+// correspondiente en la bitácora real del alumno y ese pago no está cancelado.
+async function hasActivePaymentForFinance(record, paymentId) {
+  if (!record?.studentId || !paymentId) return false;
+  const paymentSnap = await getDoc(doc(db, 'students', record.studentId, 'payments', paymentId));
+  return paymentSnap.exists() && paymentSnap.data()?.cancelled !== true;
+}
+
 FinanceRecords.update = async function updateSafe(id, data) {
   const current = await getOne('financeRecords', id);
   const patch = { ...data };
 
   if (patch.cobrado === true) {
     const paymentId = patch.pagoId || current?.pagoId || '';
+    const validPayment = await hasActivePaymentForFinance(current, paymentId);
 
-    if (!paymentId) {
+    if (!validPayment) {
       patch.cobrado = false;
       patch.pagoId = '';
       patch.cobradoAt = '';
@@ -729,6 +738,35 @@ FinanceRecords.update = async function updateSafe(id, data) {
   }
 
   return _originalFinanceUpdate(id, patch);
+};
+
+// Repara registros históricos que quedaron con cobrado=true pero sin un pago
+// real. También corrige cobros cuyo pago fue cancelado posteriormente.
+FinanceRecords.reconcilePaymentIntegrity = async function reconcilePaymentIntegrity() {
+  const records = await this.list();
+  const cache = new Map();
+  const repaired = [];
+
+  for (const record of records) {
+    if (!record?.cobrado) continue;
+    const key = record.studentId || '';
+    if (!cache.has(key)) cache.set(key, await Students.listPayments(key));
+    const payments = cache.get(key) || [];
+    const payment = record.pagoId ? payments.find((p) => p.id === record.pagoId && p.cancelled !== true) : null;
+
+    if (!payment) {
+      await _originalFinanceUpdate(record.id, {
+        cobrado: false,
+        pagoId: '',
+        cobradoAt: '',
+        cobradoBy: '',
+        updatedAt: serverTimestamp(),
+      });
+      repaired.push(record.id);
+    }
+  }
+
+  return repaired;
 };
 
 
