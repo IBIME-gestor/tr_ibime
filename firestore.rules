@@ -186,6 +186,17 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Conciliación de reportes de Cometa. El admin y caja pueden
+    // consultar/importar; la confirmación se registra en los módulos
+    // financieros existentes y queda además auditada aquí.
+    match /cometaImports/{id} {
+      allow read, write: if isAdmin() || isCashier();
+    }
+
+    match /cometaRecords/{id} {
+      allow read, write: if isAdmin() || isCashier();
+    }
+
     // ------------------------------------------------------------------
     // Colecciones públicas (SIN login) para el seguimiento del padre de
     // familia. Contienen deliberadamente lo mínimo: matrícula -> ruta, y
