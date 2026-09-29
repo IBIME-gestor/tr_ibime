@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import {
   Users, FileText, CheckCircle2, Clock, AlertTriangle, Search, X, ChevronDown,
   Download, MessageCircle, Mail as MailIcon, Ticket as TicketIcon, History, Ban,
-  TrendingUp, Printer,
+  TrendingUp, Printer, Pencil,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Students, Routes, Mail, FinanceRecords, Schools, Drivers } from '../../firebase/services';
@@ -160,6 +160,30 @@ export default function Cashier() {
     if (billingMode === 'mensual') d.setMonth(d.getMonth() + 1);
     else d.setDate(d.getDate() + 7);
     return d.toISOString().slice(0, 10);
+  }
+
+  async function handleDueDateChange(student) {
+    const current = student.nextDueDate || student._finance?.agreementDueDate || student._finance?.fechaVencimiento || '';
+    const value = window.prompt(
+      `Fecha límite de pago para ${student.name} (AAAA-MM-DD):`,
+      current
+    );
+    if (value == null) return;
+    const nextDueDate = value.trim();
+    if (nextDueDate && !/^\d{4}-\d{2}-\d{2}$/.test(nextDueDate)) {
+      window.alert('La fecha debe tener el formato AAAA-MM-DD.');
+      return;
+    }
+    try {
+      await Students.update(student.id, { nextDueDate: nextDueDate || null });
+      if (student._finance?.id) {
+        await FinanceRecords.update(student._finance.id, { agreementDueDate: nextDueDate || '' });
+      }
+      window.alert(nextDueDate ? `Fecha límite actualizada a ${fmtDateOnly(nextDueDate)}.` : 'Fecha límite eliminada.');
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo actualizar la fecha límite de pago.');
+    }
   }
 
   async function handleStatusSelect(student, value) {
@@ -549,6 +573,14 @@ export default function Cashier() {
                     </div>
                     <button onClick={() => toggleHistory(s.id)} className="link-action flex items-center gap-1 shrink-0">
                       <History size={12} /> Historial
+                    </button>
+                    <button
+                      type="button"
+                      title="Modificar fecha límite de pago"
+                      onClick={() => handleDueDateChange(s)}
+                      className="w-7 h-7 rounded border border-navy-200 text-navy-500 inline-flex items-center justify-center hover:border-navy-400 hover:text-navy-700 shrink-0"
+                    >
+                      <Pencil size={12} />
                     </button>
                     <div className="relative">
                       <select
