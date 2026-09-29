@@ -6,13 +6,13 @@ import {
   TrendingUp, Printer,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Students, Routes, Mail } from '../../firebase/services';
+import { Students, Routes, Mail, FinanceRecords, Schools, Drivers } from '../../firebase/services';
 import { listTripsByDate, getTripStopsOnce, todayString } from '../../firebase/trips';
 import { PAYMENT_STATUSES, BILLING_MODES } from './Students';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 import { routeColorClasses } from '../../utils/routeColor';
-import { fmtDateTime24, fmtTimestamp24, fmtDateOnly, daysOverdue } from '../../utils/dates';
+import { fmtDateTime24, fmtTimestamp24, fmtDateOnly, daysOverdue, monthBounds } from '../../utils/dates';
 
 const METHODS = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', lista: 'Pago desde lista' };
 
@@ -22,8 +22,25 @@ const METHODS = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta:
  * vencimiento y nadie registró un pago, cae en mora solo, sin que el
  * cajero tenga que acordarse de marcarlo.
  */
-function effectiveStatus(s, now) {
-  if (!(Number(s.billingAmount) > 0)) return null; // sin concepto de cobro
+function effectiveStatus(s, now, finance) {
+  if (!(Number(s.billingAmount) > 0) && !(Number(finance?.montoEstimado) > 0)) return null;
+
+  // Finanzas/Listas son la fuente de verdad cuando existe un registro
+  // financiero vigente para el alumno. Así, si alguien desmarca
+  // "Pagado" en Finanzas o en la lista, Caja lo refleja sin depender del
+  // paymentStatus que quedó en el expediente del alumno.
+  if (finance) {
+    if (finance.cobrado) return 'al_corriente';
+    const due = finance.agreementDueDate || finance.fechaVencimiento ||
+      (finance.periodoFin ? (() => {
+        const d = new Date(`${finance.periodoFin}T12:00:00`);
+        d.setDate(d.getDate() + Number(finance.paymentDays || 0));
+        return d.toISOString().slice(0, 10);
+      })() : '');
+    if (due && daysOverdue(due, now) > 0) return 'sin_pago';
+    return finance.paymentStatus === 'sin_pago' ? 'sin_pago' : 'desfase';
+  }
+
   if (s.paymentStatus === 'al_corriente') return 'al_corriente';
   if (s.nextDueDate && daysOverdue(s.nextDueDate, now) > 0) return 'sin_pago';
   return s.paymentStatus === 'sin_pago' ? 'sin_pago' : 'desfase';
@@ -48,9 +65,11 @@ export default function Cashier() {
   // ---- dashboard en vivo de estatus de pago --------------------------
   const [students, setStudents] = useState([]);
   const [routes, setRoutesState] = useState([]);
+  const [schools, setSchools] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [financeRecords, setFinanceRecords] = useState([]);
   const [activeBucket, setActiveBucket] = useState(null);
-  const [cutMonth, setCutMonth] = useState(new Date().toISOString().slice(0,7));
-  const [consultedCut, setConsultedCut] = useState(false);
+  const [filters, setFilters] = useState({ school: '', operator: '', route: '', concept: '' });
   const [search, setSearch] = useState('');
   const [payingId, setPayingId] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'efectivo', note: '', nextDueDate: '' });
@@ -58,36 +77,67 @@ export default function Cashier() {
   const [historyList, setHistoryList] = useState([]);
   const [ticket, setTicket] = useState(null); // { student, payment }
 
-  async function consultCut() {
-    setLoading(true);
-    try {
-      const [s, r] = await Promise.all([Students.list(), Routes.list()]);
-      setStudents(s || []); setRoutesState(r || []);
-      const [y,m] = cutMonth.split('-').map(Number);
-      const since = new Date(y, m-1, 1); const until = new Date(y, m, 0, 23,59,59,999);
-      const payments = await Students.listPaymentsBetween(since, until);
-      setCollectedThisMonth(payments.filter(p=>!p.cancelled).reduce((sum,p)=>sum+Number(p.amount||0),0));
-      setConsultedCut(true);
-    } catch(e) { console.error(e); } finally { setLoading(false); }
-  }
+  useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => Routes.subscribe(setRoutesState), []);
+  useEffect(() => Schools.subscribe(setSchools), []);
+  useEffect(() => Drivers.subscribe(setDrivers), []);
+  useEffect(() => FinanceRecords.subscribe(setFinanceRecords), []);
 
   const routeNameById = Object.fromEntries(routes.map((r) => [r.id, r.name]));
-  const conConcepto = students.filter((s) => Number(s.billingAmount) > 0);
-  const sinConcepto = students.length - conConcepto.length;
-  const withEffective = conConcepto.map((s) => ({ ...s, _status: effectiveStatus(s, now) }));
+  const schoolNameById = Object.fromEntries(schools.map((s) => [s.id, s.name]));
+  const driverNameById = Object.fromEntries(drivers.map((d) => [d.id, d.name]));
+
+  function currentFinanceForStudent(studentId) {
+    const rows = financeRecords.filter((r) => r.studentId === studentId);
+    if (!rows.length) return null;
+    const todayKey = now.toISOString().slice(0, 10);
+    const monthStart = `${todayKey.slice(0, 7)}-01`;
+    const open = rows.filter((r) => !r.cobrado);
+    const inPeriod = open.find((r) => r.periodoInicio && r.periodoFin && r.periodoInicio <= todayKey && todayKey <= r.periodoFin);
+    const currentMonth = open.find((r) => (r.periodoFin || '') >= monthStart && (r.periodoInicio || '') <= todayKey);
+    const sorted = [...rows].sort((a, b) => String(b.periodoFin || '').localeCompare(String(a.periodoFin || '')));
+    return inPeriod || currentMonth || open[0] || sorted[0];
+  }
+
+  const enrichedStudents = students.map((s) => {
+    const finance = currentFinanceForStudent(s.id);
+    const route = routes.find((r) => r.id === s.routeId);
+    const operatorName = finance?.operatorName || route?.operatorName || driverNameById[route?.driverId] || '';
+    const schoolName = finance?.schoolName || schoolNameById[s.schoolId] || s.schoolName || '';
+    const routeName = finance?.routeName || routeNameById[s.routeId] || '';
+    const conceptName = finance?.conceptName || s.billingConcept || '';
+    return { ...s, _finance: finance, _schoolName: schoolName, _operatorName: operatorName, _routeName: routeName, _conceptName: conceptName };
+  });
+
+  const filterOptions = {
+    schools: [...new Set(enrichedStudents.map((s) => s._schoolName).filter(Boolean))].sort(),
+    operators: [...new Set(enrichedStudents.map((s) => s._operatorName).filter(Boolean))].sort(),
+    routes: [...new Set(enrichedStudents.map((s) => s._routeName).filter(Boolean))].sort(),
+    concepts: [...new Set(enrichedStudents.map((s) => s._conceptName).filter(Boolean))].sort(),
+  };
+
+  const filteredStudents = enrichedStudents.filter((s) =>
+    (!filters.school || s._schoolName === filters.school) &&
+    (!filters.operator || s._operatorName === filters.operator) &&
+    (!filters.route || s._routeName === filters.route) &&
+    (!filters.concept || s._conceptName === filters.concept)
+  );
+  const conConcepto = filteredStudents.filter((s) => Number(s.billingAmount) > 0 || Number(s._finance?.montoEstimado) > 0);
+  const sinConcepto = filteredStudents.length - conConcepto.length;
+  const withEffective = conConcepto.map((s) => ({ ...s, _status: effectiveStatus(s, now, s._finance) }));
   const pagados = withEffective.filter((s) => s._status === 'al_corriente');
   const pendientes = withEffective.filter((s) => s._status === 'desfase');
   const enMora = withEffective.filter((s) => s._status === 'sin_pago');
 
   const CARDS = [
-    { key: 'total', label: 'Alumnos totales', icon: Users, value: students.length, tone: 'navy' },
+    { key: 'total', label: 'Alumnos totales', icon: Users, value: filteredStudents.length, tone: 'navy' },
     { key: 'con_concepto', label: 'Con concepto de cobro', icon: FileText, value: conConcepto.length, tone: 'navy' },
     { key: 'pagado', label: 'Pagados', icon: CheckCircle2, value: pagados.length, tone: 'go' },
     { key: 'pendiente', label: 'Pendientes de pago', icon: Clock, value: pendientes.length, tone: 'amber' },
     { key: 'mora', label: 'En mora', icon: AlertTriangle, value: enMora.length, tone: 'stop' },
   ];
 
-  const bucketStudents = { total: students, con_concepto: conConcepto, pagado: pagados, pendiente: pendientes, mora: enMora };
+  const bucketStudents = { total: filteredStudents, con_concepto: conConcepto, pagado: pagados, pendiente: pendientes, mora: enMora };
 
   const visible = (bucketStudents[activeBucket] || [])
     .filter((s) => !search || s.name?.toLowerCase().includes(search.toLowerCase()) || s.matricula?.includes(search))
@@ -117,6 +167,9 @@ export default function Cashier() {
       return;
     }
     await Students.setPaymentStatus(student.id, value, profile?.name);
+    if (value !== 'al_corriente') {
+      await FinanceRecords.syncStudentPayment(student.id, { paid: false, byName: profile?.name, financeId: student._finance?.id || '' });
+    }
   }
 
   async function handleRegisterPayment(e, student) {
@@ -129,7 +182,9 @@ export default function Cashier() {
       byName: profile?.name,
       byUid: user?.uid,
       routeId: student.routeId,
+      listId: student._finance?.listId || '',
     });
+    await FinanceRecords.syncStudentPayment(student.id, { paid: true, paymentId, byName: profile?.name, financeId: student._finance?.id || '' });
     setPayingId(null);
     setTicket({
       student: { ...student, nextDueDate: payForm.nextDueDate },
@@ -148,6 +203,7 @@ export default function Cashier() {
     const reason = window.prompt(`¿Por qué se cancela/reembolsa este pago de $${payment.amount || 0}?`, '');
     if (reason == null) return;
     await Students.cancelPayment(student.id, payment.id, reason, profile?.name);
+    await FinanceRecords.syncStudentPayment(student.id, { paid: false, byName: profile?.name, financeId: student._finance?.id || '' });
     setHistoryList(await Students.listPayments(student.id));
     refreshRevenue();
   }
@@ -164,7 +220,7 @@ export default function Cashier() {
     const total = payments.filter((p) => !p.cancelled).reduce((sum, p) => sum + Number(p.amount || 0), 0);
     setCollectedThisMonth(total);
   }
-
+  useEffect(() => { refreshRevenue(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- antigüedad de saldos / aging (#4) -------------------------------
   const agingTiers = [
@@ -201,7 +257,7 @@ export default function Cashier() {
       Matrícula: s.matricula,
       Nombre: s.name,
       Ruta: routeNameById[s.routeId] || '',
-      Estatus: PAYMENT_STATUSES[effectiveStatus(s, now) || 'al_corriente']?.label || '',
+      Estatus: PAYMENT_STATUSES[effectiveStatus(s, now, s._finance) || 'al_corriente']?.label || '',
       Monto: s.billingAmount || '',
       Cobro: BILLING_MODES[s.billingMode || 'mensual'],
       Vencimiento: s.nextDueDate ? fmtDateOnly(s.nextDueDate) : '',
@@ -298,17 +354,27 @@ export default function Cashier() {
         <p className="font-display text-sm text-navy-500 tabular-nums">{fmtDateTime24(now)}</p>
       </div>
       <p className="text-sm text-navy-400 mb-5">
-        Corte mensual de caja y control de estatus de pago. Da clic en una tarjeta para ver a
+        Control de estatus de pago de transporte, en vivo. Da clic en una tarjeta para ver a
         esos alumnos y cambiarles el estatus — se actualiza al instante en toda la app.
       </p>
 
-      <div className="admin-card mb-4 flex flex-wrap items-end gap-3">
-        <div><label className="admin-label">Mes del corte</label><input type="month" value={cutMonth} onChange={e=>setCutMonth(e.target.value)} className="admin-input" /></div>
-        <button onClick={consultCut} disabled={loading} className="btn-admin-primary">{loading ? 'Consultando…' : 'Consultar corte'}</button>
-        <span className="text-xs text-navy-400">La caja permanece sin datos hasta que consultes un mes.</span>
+      <div className="admin-card mb-5">
+        <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+          <div>
+            <p className="font-display font-semibold text-navy-800">Filtros de Caja</p>
+            <p className="text-xs text-navy-400 mt-1">Los filtros consultan el estado financiero actual del alumno.</p>
+          </div>
+          <button onClick={() => setFilters({ school: '', operator: '', route: '', concept: '' })} className="btn-admin-ghost h-8 text-xs">Limpiar filtros</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div><label className="admin-label">Plantel</label><select value={filters.school} onChange={(e) => setFilters((f) => ({ ...f, school: e.target.value }))} className="admin-select"><option value="">Todos</option>{filterOptions.schools.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+          <div><label className="admin-label">Operador</label><select value={filters.operator} onChange={(e) => setFilters((f) => ({ ...f, operator: e.target.value }))} className="admin-select"><option value="">Todos</option>{filterOptions.operators.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+          <div><label className="admin-label">Ruta</label><select value={filters.route} onChange={(e) => setFilters((f) => ({ ...f, route: e.target.value }))} className="admin-select"><option value="">Todas</option>{filterOptions.routes.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+          <div><label className="admin-label">Concepto</label><select value={filters.concept} onChange={(e) => setFilters((f) => ({ ...f, concept: e.target.value }))} className="admin-select"><option value="">Todos</option>{filterOptions.concepts.map((x) => <option key={x} value={x}>{x}</option>)}</select></div>
+        </div>
       </div>
 
-      <div className={`grid grid-cols-2 md:grid-cols-5 gap-3 mb-2 ${consultedCut ? '' : 'hidden'}`}>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
         {CARDS.map((c, i) => {
           const Icon = c.icon;
           const active = activeBucket === c.key;
@@ -337,7 +403,7 @@ export default function Cashier() {
       )}
 
       {/* ---------------- proyección de ingresos (#8) ---------------- */}
-      <div className={`admin-card mb-5 cascade-item ${consultedCut ? "" : "hidden"}`}>
+      <div className="admin-card mb-5 cascade-item">
         <p className="font-display font-semibold text-navy-800 mb-3 flex items-center gap-2">
           <TrendingUp size={15} className="text-navy-400" /> Proyección de ingresos de este mes
         </p>
@@ -433,7 +499,7 @@ export default function Cashier() {
         </div>
       )}
 
-      {consultedCut && activeBucket && (
+      {activeBucket && (
         <div className="admin-card mb-8 cascade-item">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <p className="font-display font-semibold text-navy-800">
