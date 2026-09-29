@@ -12,7 +12,7 @@ import { PAYMENT_STATUSES, BILLING_MODES } from './Students';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 import { routeColorClasses } from '../../utils/routeColor';
-import { fmtDateTime24, fmtTimestamp24, fmtDateOnly, daysOverdue, monthBounds } from '../../utils/dates';
+import { fmtDateTime24, fmtTimestamp24, fmtDateOnly, daysOverdue } from '../../utils/dates';
 
 const METHODS = { efectivo: 'Efectivo', transferencia: 'Transferencia', tarjeta: 'Tarjeta', lista: 'Pago desde lista' };
 
@@ -49,6 +49,8 @@ export default function Cashier() {
   const [students, setStudents] = useState([]);
   const [routes, setRoutesState] = useState([]);
   const [activeBucket, setActiveBucket] = useState(null);
+  const [cutMonth, setCutMonth] = useState(new Date().toISOString().slice(0,7));
+  const [consultedCut, setConsultedCut] = useState(false);
   const [search, setSearch] = useState('');
   const [payingId, setPayingId] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'efectivo', note: '', nextDueDate: '' });
@@ -56,8 +58,18 @@ export default function Cashier() {
   const [historyList, setHistoryList] = useState([]);
   const [ticket, setTicket] = useState(null); // { student, payment }
 
-  useEffect(() => Students.subscribe(setStudents), []);
-  useEffect(() => Routes.subscribe(setRoutesState), []);
+  async function consultCut() {
+    setLoading(true);
+    try {
+      const [s, r] = await Promise.all([Students.list(), Routes.list()]);
+      setStudents(s || []); setRoutesState(r || []);
+      const [y,m] = cutMonth.split('-').map(Number);
+      const since = new Date(y, m-1, 1); const until = new Date(y, m, 0, 23,59,59,999);
+      const payments = await Students.listPaymentsBetween(since, until);
+      setCollectedThisMonth(payments.filter(p=>!p.cancelled).reduce((sum,p)=>sum+Number(p.amount||0),0));
+      setConsultedCut(true);
+    } catch(e) { console.error(e); } finally { setLoading(false); }
+  }
 
   const routeNameById = Object.fromEntries(routes.map((r) => [r.id, r.name]));
   const conConcepto = students.filter((s) => Number(s.billingAmount) > 0);
@@ -152,7 +164,7 @@ export default function Cashier() {
     const total = payments.filter((p) => !p.cancelled).reduce((sum, p) => sum + Number(p.amount || 0), 0);
     setCollectedThisMonth(total);
   }
-  useEffect(() => { refreshRevenue(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // ---- antigüedad de saldos / aging (#4) -------------------------------
   const agingTiers = [
@@ -286,11 +298,17 @@ export default function Cashier() {
         <p className="font-display text-sm text-navy-500 tabular-nums">{fmtDateTime24(now)}</p>
       </div>
       <p className="text-sm text-navy-400 mb-5">
-        Control de estatus de pago de transporte, en vivo. Da clic en una tarjeta para ver a
+        Corte mensual de caja y control de estatus de pago. Da clic en una tarjeta para ver a
         esos alumnos y cambiarles el estatus — se actualiza al instante en toda la app.
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
+      <div className="admin-card mb-4 flex flex-wrap items-end gap-3">
+        <div><label className="admin-label">Mes del corte</label><input type="month" value={cutMonth} onChange={e=>setCutMonth(e.target.value)} className="admin-input" /></div>
+        <button onClick={consultCut} disabled={loading} className="btn-admin-primary">{loading ? 'Consultando…' : 'Consultar corte'}</button>
+        <span className="text-xs text-navy-400">La caja permanece sin datos hasta que consultes un mes.</span>
+      </div>
+
+      <div className={`grid grid-cols-2 md:grid-cols-5 gap-3 mb-2 ${consultedCut ? '' : 'hidden'}`}>
         {CARDS.map((c, i) => {
           const Icon = c.icon;
           const active = activeBucket === c.key;
@@ -319,7 +337,7 @@ export default function Cashier() {
       )}
 
       {/* ---------------- proyección de ingresos (#8) ---------------- */}
-      <div className="admin-card mb-5 cascade-item">
+      <div className={`admin-card mb-5 cascade-item ${consultedCut ? "" : "hidden"}`}>
         <p className="font-display font-semibold text-navy-800 mb-3 flex items-center gap-2">
           <TrendingUp size={15} className="text-navy-400" /> Proyección de ingresos de este mes
         </p>
@@ -415,7 +433,7 @@ export default function Cashier() {
         </div>
       )}
 
-      {activeBucket && (
+      {consultedCut && activeBucket && (
         <div className="admin-card mb-8 cascade-item">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <p className="font-display font-semibold text-navy-800">
