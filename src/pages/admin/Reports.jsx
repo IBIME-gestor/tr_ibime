@@ -40,7 +40,7 @@ export default function Reports() {
   useEffect(() => {
     let active = true;
     RouteLists.list().then((rows) => { if (active) setLists(rows); }).catch((err) => { console.error('Error cargando listas:', err); if (active) setLists([]); });
-    FinanceRecords.list().then((rows) => { if (active) setFinanceRecords(rows); }).catch((err) => { console.error('Error cargando finanzas:', err); if (active) setFinanceRecords([]); });
+    FinanceRecords.reconcilePaymentIntegrity().then(() => FinanceRecords.list()).then((rows) => { if (active) setFinanceRecords(rows); }).catch((err) => { console.error('Error cargando finanzas:', err); if (active) setFinanceRecords([]); });
     return () => { active = false; };
   }, []);
 
@@ -161,7 +161,7 @@ export default function Reports() {
   const financeEstimated = financeInPeriod.reduce((a,r)=>a+Number(r.montoEstimado||0),0);
   const financeCharged = financeInPeriod.filter(r=>r.conceptoCargado).length;
   const financeConfirmed = financeInPeriod.filter(r=>r.servicioConfirmado).length;
-  const financeCollected = financeInPeriod.filter(r=>r.cobrado).reduce((a,r)=>a+Number(r.montoEstimado||0),0);
+  const financeCollected = financeInPeriod.filter(r=>r.cobrado === true && !!r.pagoId).reduce((a,r)=>a+Number(r.montoEstimado||0),0);
 
   function exportExcel() {
     const data = rows.map((r) => ({
