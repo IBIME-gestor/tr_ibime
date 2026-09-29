@@ -599,3 +599,187 @@ export const Notifications = {
   },
   update: (id, data) => updateDocById('notificationCampaigns', id, { ...data, updatedAt: serverTimestamp() }),
 };
+
+
+/* ------------------------------------------------------------------ */
+/*  Correcciones de integridad de cobros — añadido sin eliminar código */
+/* ------------------------------------------------------------------ */
+/*
+ * IMPORTANTE:
+ * - Se conserva íntegramente la implementación original de arriba.
+ * - Estas funciones sustituyen únicamente los métodos sensibles después
+ *   de que los objetos ya fueron definidos.
+ * - Un "paid" o "al_corriente" administrativo NO crea un cobro.
+ * - Un cobro real siempre necesita pagoId.
+ */
+
+const _originalStudentsSetPaymentStatus = Students.setPaymentStatus;
+
+Students.setPaymentStatus = async function setPaymentStatusSafe(id, paymentStatus, byName) {
+  await _originalStudentsSetPaymentStatus(id, paymentStatus, byName);
+
+  // Reflejar el estatus en Finanzas sin convertirlo en un pago.
+  const financeRecords = await FinanceRecords.listByStudent(id);
+  const localDate = new Date();
+  localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+  const today = localDate.toISOString().slice(0, 10);
+
+  for (const finance of financeRecords) {
+    const hasRealPayment = finance.cobrado === true && !!finance.pagoId;
+
+    // Un cambio manual a pendiente/mora afecta el registro vigente,
+    // pero no borra pagos históricos ya conciliados de periodos pasados.
+    const isCurrentFinance =
+      !finance.periodoFin ||
+      String(finance.periodoFin) >= today;
+
+    const shouldClearCurrentPayment =
+      paymentStatus !== 'al_corriente' &&
+      isCurrentFinance;
+
+    const patch = {
+      paymentStatus,
+      paymentStatusUpdatedAt: serverTimestamp(),
+      paymentStatusUpdatedBy: byName || '',
+    };
+
+    // Sin folio nunca hay cobro. Si el usuario cambia el estatus del
+    // periodo vigente a pendiente/mora, también se desmarca ese cobro.
+    if (!hasRealPayment || shouldClearCurrentPayment) {
+      patch.cobrado = false;
+      patch.pagoId = '';
+      patch.cobradoAt = '';
+      patch.cobradoBy = '';
+    }
+
+    await updateDocById('financeRecords', finance.id, {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
+
+    // La Lista solo se desmarca para el registro vigente que dejó de estar
+    // pagado; los históricos reales permanecen intactos.
+    if ((!hasRealPayment || shouldClearCurrentPayment) && finance.listId) {
+      const list = await getOne('routeLists', finance.listId);
+      if (list) {
+        const rows = (list.rows || []).map((row) =>
+          row.studentId === id
+            ? { ...row, paid: false, paymentId: '' }
+            : row
+        );
+
+        await updateDocById('routeLists', finance.listId, {
+          rows,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+};
+
+
+const _originalFinanceUpsert = FinanceRecords.upsert;
+
+FinanceRecords.upsert = async function upsertSafe(id, data) {
+  const patch = { ...data };
+
+  // Nunca guardar cobrado=true si no existe folio.
+  if (patch.cobrado === true && !(patch.pagoId || '')) {
+    patch.cobrado = false;
+    patch.pagoId = '';
+    patch.cobradoAt = '';
+    patch.cobradoBy = '';
+  }
+
+  // Al desmarcar cobrado también se limpian los datos que lo harían
+  // parecer un pago real en Caja.
+  if (patch.cobrado === false) {
+    patch.pagoId = '';
+    patch.cobradoAt = '';
+    patch.cobradoBy = '';
+  }
+
+  return _originalFinanceUpsert(id, patch);
+};
+
+
+const _originalFinanceUpdate = FinanceRecords.update;
+
+FinanceRecords.update = async function updateSafe(id, data) {
+  const current = await getOne('financeRecords', id);
+  const patch = { ...data };
+
+  if (patch.cobrado === true) {
+    const paymentId = patch.pagoId || current?.pagoId || '';
+
+    if (!paymentId) {
+      patch.cobrado = false;
+      patch.pagoId = '';
+      patch.cobradoAt = '';
+      patch.cobradoBy = '';
+    } else {
+      patch.pagoId = paymentId;
+    }
+  }
+
+  if (patch.cobrado === false) {
+    patch.pagoId = '';
+    patch.cobradoAt = '';
+    patch.cobradoBy = '';
+  }
+
+  return _originalFinanceUpdate(id, patch);
+};
+
+
+const _originalSyncStudentPayment = FinanceRecords.syncStudentPayment;
+
+FinanceRecords.syncStudentPayment = async function syncStudentPaymentSafe(
+  studentId,
+  { paid, paymentId = '', byName = '', financeId = '' } = {}
+) {
+  /*
+   * El método original se conserva. Antes de llamarlo, si Caja intenta
+   * mandar paid=true sin folio, lo convertimos en NO pagado.
+   */
+  const realPaid = !!paid && !!paymentId;
+
+  const result = await _originalSyncStudentPayment(studentId, {
+    paid: realPaid,
+    paymentId: realPaid ? paymentId : '',
+    byName,
+    financeId,
+  });
+
+  /*
+   * Cuando se desmarca, limpiamos explícitamente el folio de Finanzas y
+   * de la Lista para que no quede un "cobrado" fantasma.
+   */
+  if (!realPaid && result?.found && result.financeId) {
+    await updateDocById('financeRecords', result.financeId, {
+      cobrado: false,
+      pagoId: '',
+      cobradoAt: '',
+      cobradoBy: '',
+      updatedAt: serverTimestamp(),
+    });
+
+    if (result.listId) {
+      const list = await getOne('routeLists', result.listId);
+      if (list) {
+        const rows = (list.rows || []).map((row) =>
+          row.studentId === studentId
+            ? { ...row, paid: false, paymentId: '' }
+            : row
+        );
+
+        await updateDocById('routeLists', result.listId, {
+          rows,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+
+  return result;
+};
