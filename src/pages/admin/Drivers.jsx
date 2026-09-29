@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Drivers, Schools } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 
-const emptyForm = { name: '', phone: '', role: 'driver', schoolId: '', email: '' };
+const emptyForm = { name: '', phone: '', role: 'driver', schoolId: '', email: '', licencia: '', equipoCelularEscolar: false, salario: '' };
 
 export default function DriversPage() {
   const [drivers, setDrivers] = useState([]);
@@ -99,6 +99,23 @@ export default function DriversPage() {
                 </select>
               </div>
               <div>
+                <label className="admin-label">Licencia</label>
+                <input value={form.licencia} onChange={(e) => setForm({ ...form, licencia: e.target.value })} className="admin-input" />
+              </div>
+              <div>
+                <label className="admin-label">Cuenta con equipo celular escolar</label>
+                <label className="flex items-center gap-2 text-sm text-navy-600">
+                  <input type="checkbox" checked={!!form.equipoCelularEscolar}
+                    onChange={(e) => setForm({ ...form, equipoCelularEscolar: e.target.checked })} />
+                  Sí
+                </label>
+              </div>
+              <div>
+                <label className="admin-label">Salario</label>
+                <input type="number" min="0" step="0.01" value={form.salario}
+                  onChange={(e) => setForm({ ...form, salario: e.target.value })} className="admin-input" />
+              </div>
+              <div>
                 <label className="admin-label">Correo de Google institucional</label>
                 <input
                   value={form.email}
@@ -134,7 +151,7 @@ export default function DriversPage() {
                   <th className="pl-5">Nombre</th>
                   <th>Rol</th>
                   <th>Plantel</th>
-                  <th>Correo</th>
+                  <th>Licencia</th><th>Celular escolar</th><th>Salario</th><th>Correo</th>
                   <th className="pr-5"></th>
                 </tr>
               </thead>
@@ -148,7 +165,7 @@ export default function DriversPage() {
                       </span>
                     </td>
                     <td className="text-navy-500">{schoolName(d.schoolId)}</td>
-                    <td className="text-navy-500">{d.email}</td>
+                    <td className="text-navy-500">{d.licencia || '—'}</td><td className="text-navy-500">{d.equipoCelularEscolar ? 'Sí' : 'No'}</td><td className="text-navy-500">{d.salario !== '' && d.salario != null ? `$${Number(d.salario).toLocaleString('es-MX',{minimumFractionDigits:2})}` : '—'}</td><td className="text-navy-500">{d.email}</td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => handleEdit(d)} className="link-action mr-3">Editar</button>
                       <button onClick={() => handleDelete(d.id)} className="link-danger">Eliminar</button>
