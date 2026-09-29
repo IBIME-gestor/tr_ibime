@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bell, Code2, Eye, RefreshCw, Send, Settings, Upload, Users, CheckCircle2, XCircle, Clock3 } from 'lucide-react';
-import { FinanceRecords, Notifications, Schools, Students } from '../../firebase/services';
+import { Cometa, FinanceRecords, Notifications, Schools, Students } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
 
 const EMPTY_TEMPLATE = `<!doctype html>\n<html><body>\n<p>Hola {{nombreResponsable}},</p>\n<p>Información de {{nombreAlumno}}:</p>\n<p>Periodo: {{periodo}}</p>\n<p>Concepto: {{concepto}}</p>\n<p>Monto: {{monto}}</p>\n<p>Saldo: {{saldo}}</p>\n<p>Vencimiento: {{fechaVencimiento}}</p>\n<p>Ruta Segura · IBIME Transporte Escolar</p>\n</body></html>`;
@@ -12,6 +12,7 @@ const FIELDS = [
   ['tipoServicio','Tipo de servicio'], ['medioServicio','Entrada/Salida'], ['concepto','Concepto'], ['monto','Monto'],
   ['montoPagado','Monto pagado'], ['saldo','Saldo'], ['estatusPago','Estatus de pago'], ['fechaVencimiento','Fecha de vencimiento'],
   ['periodoInicio','Inicio del periodo'], ['periodoFin','Fin del periodo'], ['diasAtraso','Días de atraso'], ['telefono','Teléfono'],
+  ['conceptoCometa','Concepto reportado por Cometa'], ['estatusCometa','Estatus en Cometa'], ['fechaPagoCometa','Fecha de pago en Cometa'],
 ];
 
 function money(n) { return `$${Number(n || 0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})}`; }
@@ -25,14 +26,15 @@ function effectiveStatus(r, student) {
   return 'pendiente';
 }
 
-function buildRecipient(student, finance, school, route) {
+function buildRecipient(student, finance, school, route, cometa) {
   const to = String(student.parentEmail || student.studentEmail || '').trim().toLowerCase();
   const status = effectiveStatus(finance, student);
+  const cometaStatus = cometa ? 'concepto_asignado' : ''; 
   const due = finance?.agreementDueDate || finance?.fechaVencimiento || '';
   const amount = Number(finance?.montoEstimado || student?.billingAmount || 0);
   const paid = finance?.cobrado ? amount : Number(student?.lastPaymentAmount || 0);
   return {
-    id: student.id, to, status,
+    id: student.id, to, status, cometaStatus,
     data: {
       nombreAlumno: student.name || '', matricula: student.matricula || '', nombreResponsable: student.familiarResponsable || '',
       correo: to, correoAlumno: student.studentEmail || '', correoResponsable: student.parentEmail || '', plantel: school?.name || '',
@@ -41,13 +43,14 @@ function buildRecipient(student, finance, school, route) {
       concepto: finance?.conceptName || '', monto: money(amount), montoPagado: money(paid), saldo: money(Math.max(0, amount-paid)),
       estatusPago: status, fechaVencimiento: due, periodoInicio: finance?.periodoInicio || '', periodoFin: finance?.periodoFin || '',
       diasAtraso: String(daysOverdue(due)), telefono: student.telefono || '',
+      conceptoCometa: cometa?.concepto || '', estatusCometa: cometa ? 'Concepto asignado en Cometa, sin pago reportado' : '', fechaPagoCometa: cometa?.fechaPago || '',
     }
   };
 }
 
 export default function NotificationsPage() {
   const { profile } = useAuth();
-  const [students,setStudents]=useState([]); const [records,setRecords]=useState([]); const [schools,setSchools]=useState([]); const [routes,setRoutes]=useState([]);
+  const [students,setStudents]=useState([]); const [records,setRecords]=useState([]); const [schools,setSchools]=useState([]); const [routes,setRoutes]=useState([]); const [cometaPending,setCometaPending]=useState([]);
   const [loading,setLoading]=useState(true); const [campaigns,setCampaigns]=useState([]); const [tab,setTab]=useState('crear');
   const [name,setName]=useState(''); const [subject,setSubject]=useState(''); const [html,setHtml]=useState(EMPTY_TEMPLATE); const [audience,setAudience]=useState('todos');
   const [schoolId,setSchoolId]=useState(''); const [scriptUrl,setScriptUrl]=useState(localStorage.getItem('rutaSeguraAppsScriptUrl') || '');
@@ -55,7 +58,7 @@ export default function NotificationsPage() {
 
   async function load(){
     setLoading(true);
-    try { const [s,r,sch,rt,c]=await Promise.all([Students.list(),FinanceRecords.list(),Schools.list(),(await import('../../firebase/services')).Routes.list(),Notifications.list()]); setStudents(s);setRecords(r);setSchools(sch);setRoutes(rt);setCampaigns(c); }
+    try { const [s,r,sch,rt,c,cp]=await Promise.all([Students.list(),FinanceRecords.list(),Schools.list(),(await import('../../firebase/services')).Routes.list(),Notifications.list(),Cometa.latestPending()]); setStudents(s);setRecords(r);setSchools(sch);setRoutes(rt);setCampaigns(c);setCometaPending(cp?.rows||[]); }
     catch(e){console.error(e);setNotice('No se pudieron cargar los datos de Notificaciones.');}
     finally{setLoading(false);}
   }
@@ -63,8 +66,9 @@ export default function NotificationsPage() {
 
   const schoolMap=useMemo(()=>new Map(schools.map(x=>[x.id,x])),[schools]); const routeMap=useMemo(()=>new Map(routes.map(x=>[x.id,x])),[routes]);
   const financeMap=useMemo(()=>{ const m=new Map(); records.forEach(r=>{ if(r.studentId && !m.has(r.studentId)) m.set(r.studentId,r); }); return m; },[records]);
-  const recipients=useMemo(()=>students.map(s=>buildRecipient(s,financeMap.get(s.id),schoolMap.get(s.schoolId),routeMap.get(s.routeId))).filter(x=>x.to && (!schoolId || students.find(s=>s.id===x.id)?.schoolId===schoolId)),[students,financeMap,schoolMap,routeMap,schoolId]);
-  const selected=useMemo(()=>recipients.filter(r=>audience==='todos'||r.status===audience|| (audience==='pueden_pagar' && financeMap.get(r.id)?.conceptoCargado && !financeMap.get(r.id)?.cobrado)),[recipients,audience,financeMap]);
+  const cometaMap=useMemo(()=>{ const m=new Map(); cometaPending.forEach(r=>{ if(r.matricula) m.set(String(r.matricula).trim(),r); }); return m; },[cometaPending]);
+  const recipients=useMemo(()=>students.map(s=>buildRecipient(s,financeMap.get(s.id),schoolMap.get(s.schoolId),routeMap.get(s.routeId),cometaMap.get(String(s.matricula||'').trim()))).filter(x=>x.to && (!schoolId || students.find(s=>s.id===x.id)?.schoolId===schoolId)),[students,financeMap,schoolMap,routeMap,schoolId,cometaMap]);
+  const selected=useMemo(()=>recipients.filter(r=>audience==='todos'||r.status===audience|| (audience==='pueden_pagar' && financeMap.get(r.id)?.conceptoCargado && !financeMap.get(r.id)?.cobrado) || (audience==='cometa_concepto' && r.cometaStatus==='concepto_asignado')), [recipients,audience,financeMap]);
   const previewRecipient=selected[0] || recipients[0];
 
   useEffect(()=>{ setPreview(previewRecipient || null); },[previewRecipient]);
@@ -112,7 +116,7 @@ export default function NotificationsPage() {
     <div className="flex gap-2 border-b border-navy-100 mb-5"><button className={`px-3 py-2 text-sm ${tab==='crear'?'font-semibold text-navy-900 border-b-2 border-navy-800':'text-navy-400'}`} onClick={()=>setTab('crear')}><Bell size={14} className="inline mr-1"/>Crear envío</button><button className={`px-3 py-2 text-sm ${tab==='historial'?'font-semibold text-navy-900 border-b-2 border-navy-800':'text-navy-400'}`} onClick={()=>setTab('historial')}><Clock3 size={14} className="inline mr-1"/>Historial</button><button className={`px-3 py-2 text-sm ${tab==='config'?'font-semibold text-navy-900 border-b-2 border-navy-800':'text-navy-400'}`} onClick={()=>setTab('config')}><Settings size={14} className="inline mr-1"/>Configuración</button></div>
     {notice && <div className="admin-card mb-4 text-sm">{notice}</div>}
     {tab==='config' && <div className="admin-card max-w-3xl"><h2 className="font-semibold text-navy-900 mb-2">Google Apps Script</h2><p className="text-sm text-navy-500 mb-4">Pega la URL de la Web App de Apps Script. La aplicación no guarda contraseñas ni credenciales de Google.</p><label className="admin-label">URL de Web App</label><input value={scriptUrl} onChange={e=>setScriptUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" className="admin-input"/><button onClick={saveSettings} className="btn-admin-primary mt-3">Guardar configuración</button><div className="mt-5 p-3 bg-navy-50 rounded-lg text-xs text-navy-500">La plantilla, destinatarios y resultados se gestionan por campaña. Apps Script usa tu cuenta de Workspace para Gmail y una hoja de Google para el registro.</div></div>}
-    {tab==='crear' && <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_.8fr] gap-5"><div className="space-y-5"><div className="admin-card"><div className="grid md:grid-cols-2 gap-3"><div><label className="admin-label">Nombre interno</label><input value={name} onChange={e=>setName(e.target.value)} className="admin-input" placeholder="Aviso de pago septiembre"/></div><div><label className="admin-label">Asunto</label><input value={subject} onChange={e=>setSubject(e.target.value)} className="admin-input" placeholder="Información de pago {{nombreAlumno}}"/></div><div><label className="admin-label">Destinatarios</label><select value={audience} onChange={e=>setAudience(e.target.value)} className="admin-select"><option value="todos">Todos</option><option value="pagado">Ya pagaron</option><option value="mora">Morosos</option><option value="atraso">En atraso</option><option value="pueden_pagar">Tienen concepto y pueden pagar</option></select></div><div><label className="admin-label">Plantel</label><select value={schoolId} onChange={e=>setSchoolId(e.target.value)} className="admin-select"><option value="">Todos</option>{schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div></div></div>
+    {tab==='crear' && <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_.8fr] gap-5"><div className="space-y-5"><div className="admin-card"><div className="grid md:grid-cols-2 gap-3"><div><label className="admin-label">Nombre interno</label><input value={name} onChange={e=>setName(e.target.value)} className="admin-input" placeholder="Aviso de pago septiembre"/></div><div><label className="admin-label">Asunto</label><input value={subject} onChange={e=>setSubject(e.target.value)} className="admin-input" placeholder="Información de pago {{nombreAlumno}}"/></div><div><label className="admin-label">Destinatarios</label><select value={audience} onChange={e=>setAudience(e.target.value)} className="admin-select"><option value="todos">Todos</option><option value="pagado">Ya pagaron</option><option value="mora">Morosos</option><option value="atraso">En atraso</option><option value="pueden_pagar">Tienen concepto y pueden pagar</option><option value="cometa_concepto">Concepto asignado en Cometa · sin pago</option></select></div><div><label className="admin-label">Plantel</label><select value={schoolId} onChange={e=>setSchoolId(e.target.value)} className="admin-select"><option value="">Todos</option>{schools.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div></div></div>
     <div className="admin-card"><div className="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h2 className="font-semibold">Plantilla HTML</h2><p className="text-xs text-navy-400">Sube/pega tu HTML y usa los campos de la derecha.</p></div><label className="btn-admin-ghost cursor-pointer"><Upload size={14}/> Subir HTML<input type="file" accept=".html,.htm,text/html" className="hidden" onChange={e=>{const f=e.target.files?.[0];if(f)f.text().then(setHtml)}}/></label></div><textarea value={html} onChange={e=>setHtml(e.target.value)} className="admin-input font-mono text-xs min-h-[330px]"/></div>
     <div className="admin-card"><div className="flex items-center justify-between mb-3"><div><h2 className="font-semibold">Destinatarios</h2><p className="text-xs text-navy-400">Solo se incluyen alumnos con correo.</p></div><div className="flex items-center gap-2 text-sm"><Users size={15}/><b>{selected.length}</b> seleccionados</div></div><div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs"><div className="p-3 rounded bg-navy-50"><b>{recipients.length}</b><br/>con correo</div><div className="p-3 rounded bg-navy-50"><b>{selected.filter(x=>x.status==='pagado').length}</b><br/>pagados</div><div className="p-3 rounded bg-navy-50"><b>{selected.filter(x=>x.status==='atraso').length}</b><br/>atraso</div><div className="p-3 rounded bg-navy-50"><b>{selected.filter(x=>x.status==='mora').length}</b><br/>mora</div></div></div>
     <button disabled={sending||!selected.length} onClick={sendCampaign} className="btn-admin-primary w-full justify-center"><Send size={15}/>{sending?'Preparando…':`Enviar ${selected.length} correos`}</button></div>
