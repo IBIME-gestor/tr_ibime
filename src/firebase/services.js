@@ -301,6 +301,8 @@ export const RouteLists = {
 /* ------------------------------------------------------------------ */
 export const FinanceRecords = {
   list: () => listAll('financeRecords', [orderBy('studentName')]),
+  subscribe: (cb) => subscribeAll('financeRecords', [orderBy('studentName')], cb),
+  listByStudent: (studentId) => listAll('financeRecords', [where('studentId', '==', studentId)]),
   get: (id) => getOne('financeRecords', id),
   upsert: async (id, data) => { await setDoc(doc(db, 'financeRecords', id), { ...data, updatedAt: serverTimestamp() }, { merge: true }); return id; },
   update: (id, data) => updateDocById('financeRecords', id, { ...data, updatedAt: serverTimestamp() }),
@@ -309,6 +311,77 @@ export const FinanceRecords = {
     if (!listId) return;
     const rows = await listAll('financeRecords', [where('listId', '==', listId)]);
     for (const row of rows) await removeDoc('financeRecords', row.id);
+  },
+
+  /**
+   * Sincroniza un pago originado en Caja con el registro financiero y la
+   * fila de la lista operativa que corresponden al alumno. No toca
+   * registros históricos: primero busca el registro abierto del periodo
+   * actual y, si no existe, usa el registro abierto más reciente.
+   */
+  async syncStudentPayment(studentId, { paid, paymentId = '', byName = '', financeId = '' } = {}) {
+    if (!studentId) return { financeId: '', listId: '', found: false };
+
+    const records = await this.listByStudent(studentId);
+    if (!records.length) return { financeId: '', listId: '', found: false };
+
+    const localDate = new Date();
+    localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+    const today = localDate.toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 7)}-01`;
+
+    const exact = financeId ? records.find((r) => r.id === financeId) : null;
+    if (exact) {
+      // Si Caja ya conoce el registro financiero visible en pantalla, usa
+      // exactamente ese registro y no otro periodo del mismo alumno.
+      const financePatch = paid
+        ? { cobrado: true, pagoId: paymentId || exact.pagoId || '', cobradoAt: new Date().toISOString(), cobradoBy: byName || '' }
+        : { cobrado: false, cobradoAt: '', cobradoBy: '' };
+      await updateDocById('financeRecords', exact.id, financePatch);
+      if (exact.listId) {
+        const list = await getOne('routeLists', exact.listId);
+        if (list) {
+          const rows = (list.rows || []).map((row) =>
+            row.studentId === studentId
+              ? { ...row, paid: !!paid, ...(paid && paymentId ? { paymentId } : {}) }
+              : row
+          );
+          await updateDocById('routeLists', exact.listId, { rows });
+        }
+      }
+      return { financeId: exact.id, listId: exact.listId || '', found: true };
+    }
+
+    const open = records.filter((r) => !r.cobrado);
+    const inCurrentPeriod = open.find((r) =>
+      r.periodoInicio && r.periodoFin && r.periodoInicio <= today && today <= r.periodoFin
+    );
+    const currentMonth = open.find((r) =>
+      (r.periodoFin || '') >= monthStart && (r.periodoInicio || '') <= today
+    );
+    const sorted = [...records].sort((a, b) => String(b.periodoFin || '').localeCompare(String(a.periodoFin || '')));
+    const target = inCurrentPeriod || currentMonth || open[0] || sorted[0];
+    if (!target) return { financeId: '', listId: '', found: false };
+
+    const financePatch = paid
+      ? { cobrado: true, pagoId: paymentId || target.pagoId || '', cobradoAt: new Date().toISOString(), cobradoBy: byName || '' }
+      : { cobrado: false, cobradoAt: '', cobradoBy: '' };
+
+    await updateDocById('financeRecords', target.id, financePatch);
+
+    if (target.listId) {
+      const list = await getOne('routeLists', target.listId);
+      if (list) {
+        const rows = (list.rows || []).map((row) =>
+          row.studentId === studentId
+            ? { ...row, paid: !!paid, ...(paid && paymentId ? { paymentId } : {}) }
+            : row
+        );
+        await updateDocById('routeLists', target.listId, { rows });
+      }
+    }
+
+    return { financeId: target.id, listId: target.listId || '', found: true };
   },
 };
 
@@ -367,21 +440,4 @@ export const Routes = {
 export const Mail = {
   queue: ({ to, subject, html }) =>
     createDoc('mail', { to: [to], message: { subject, html } }),
-};
-
-/* ------------------------------------------------------------------ */
-/*  Notificaciones masivas                                             */
-/*  La app solo registra la campaña. El envío real lo hace Google       */
-/*  Apps Script + Gmail Workspace, para evitar servicios pagados.      */
-/* ------------------------------------------------------------------ */
-export const Notifications = {
-  list: () => listAll('notificationCampaigns', [orderBy('createdAt', 'desc')]),
-  get: (id) => getOne('notificationCampaigns', id),
-  create: async (data) => {
-    const id = data.id || null;
-    if (!id) return createDoc('notificationCampaigns', data);
-    await setDoc(doc(db, 'notificationCampaigns', id), data, { merge: true });
-    return id;
-  },
-  update: (id, data) => updateDocById('notificationCampaigns', id, { ...data, updatedAt: serverTimestamp() }),
 };
