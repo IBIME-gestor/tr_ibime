@@ -40,7 +40,7 @@ export default function Reports() {
   useEffect(() => {
     let active = true;
     RouteLists.list().then((rows) => { if (active) setLists(rows); }).catch((err) => { console.error('Error cargando listas:', err); if (active) setLists([]); });
-    FinanceRecords.reconcilePaymentIntegrity().then(() => FinanceRecords.list()).then((rows) => { if (active) setFinanceRecords(rows); }).catch((err) => { console.error('Error cargando finanzas:', err); if (active) setFinanceRecords([]); });
+    FinanceRecords.list().then((rows) => { if (active) setFinanceRecords(rows); }).catch((err) => { console.error('Error cargando finanzas:', err); if (active) setFinanceRecords([]); });
     return () => { active = false; };
   }, []);
 
