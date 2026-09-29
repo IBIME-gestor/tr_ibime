@@ -54,6 +54,14 @@ function waLink(phone, text) {
   return `https://wa.me/52${digits.slice(-10)}?text=${encodeURIComponent(text)}`;
 }
 
+// Importe único de cobro: Finanzas/Reportes usan montoEstimado de la lista
+// vigente; Caja solo debe usar billingAmount como respaldo cuando no existe
+// un registro financiero vigente.
+function chargeAmount(s) {
+  const financeAmount = Number(s?._finance?.montoEstimado || 0);
+  return financeAmount > 0 ? financeAmount : Number(s?.billingAmount || 0);
+}
+
 export default function Cashier() {
   const { profile, user } = useAuth();
 
@@ -189,7 +197,7 @@ export default function Cashier() {
   async function handleStatusSelect(student, value) {
     if (value === 'al_corriente') {
       setPayingId(student.id);
-      setPayForm({ amount: student.billingAmount || '', method: 'efectivo', note: '', nextDueDate: suggestedNextDue(student.billingMode) });
+      setPayForm({ amount: chargeAmount(student) || '', method: 'efectivo', note: '', nextDueDate: suggestedNextDue(student.billingMode) });
       return;
     }
     await Students.setPaymentStatus(student.id, value, profile?.name);
@@ -238,8 +246,7 @@ export default function Cashier() {
 
   // ---- proyección de ingresos (#8) ------------------------------------
   const projectedMonthly = conConcepto
-    .filter((s) => (s.billingMode || 'mensual') === 'mensual')
-    .reduce((sum, s) => sum + Number(s.billingAmount || 0), 0);
+    .reduce((sum, s) => sum + chargeAmount(s), 0);
   const [collectedThisMonth, setCollectedThisMonth] = useState(null);
 
   async function refreshRevenue() {
@@ -259,7 +266,7 @@ export default function Cashier() {
   ];
   const agingRows = agingTiers.map((tier) => {
     const inTier = enMora.filter((s) => s.nextDueDate && tier.test(daysOverdue(s.nextDueDate, now)));
-    return { ...tier, count: inTier.length, amount: inTier.reduce((sum, s) => sum + Number(s.billingAmount || 0), 0) };
+    return { ...tier, count: inTier.length, amount: inTier.reduce((sum, s) => sum + chargeAmount(s), 0) };
   });
   const moraSinFecha = enMora.filter((s) => !s.nextDueDate);
 
@@ -274,7 +281,7 @@ export default function Cashier() {
     await Mail.queue({
       to: s.parentEmail,
       subject: `Aviso de pago pendiente — transporte escolar de ${s.name}`,
-      html: `<p>Hola,</p><p>El pago del servicio de transporte escolar de <b>${s.name}</b> (matrícula ${s.matricula}) venció el ${fmtDateOnly(s.nextDueDate)} — lleva ${dias} día(s) de atraso.</p><p>Monto: $${s.billingAmount}.</p><p>Por favor regulariza tu pago a la brevedad. Gracias.</p><p>Ruta Segura · IBIME Transporte Escolar</p>`,
+      html: `<p>Hola,</p><p>El pago del servicio de transporte escolar de <b>${s.name}</b> (matrícula ${s.matricula}) venció el ${fmtDateOnly(s.nextDueDate)} — lleva ${dias} día(s) de atraso.</p><p>Monto: $${chargeAmount(s)}.</p><p>Por favor regulariza tu pago a la brevedad. Gracias.</p><p>Ruta Segura · IBIME Transporte Escolar</p>`,
     });
     setQueuedEmails((q) => ({ ...q, [s.id]: true }));
   }
@@ -286,7 +293,7 @@ export default function Cashier() {
       Nombre: s.name,
       Ruta: routeNameById[s.routeId] || '',
       Estatus: PAYMENT_STATUSES[effectiveStatus(s, now, s._finance) || 'al_corriente']?.label || '',
-      Monto: s.billingAmount || '',
+      Monto: chargeAmount(s) || '',
       Cobro: BILLING_MODES[s.billingMode || 'mensual'],
       Vencimiento: s.nextDueDate ? fmtDateOnly(s.nextDueDate) : '',
       'Días de atraso': s.nextDueDate ? Math.max(0, daysOverdue(s.nextDueDate, now)) : '',
@@ -437,7 +444,7 @@ export default function Cashier() {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <p className="text-xs text-navy-400">Configurado (cuotas mensuales)</p>
+            <p className="text-xs text-navy-400">Ingreso estimado vigente</p>
             <p className="text-xl font-display font-bold text-navy-800">${projectedMonthly.toLocaleString('es-MX')}</p>
           </div>
           <div>
@@ -495,7 +502,7 @@ export default function Cashier() {
           <div className="divide-y divide-navy-50">
             {overdue3.map((s) => {
               const dias = daysOverdue(s.nextDueDate, now);
-              const msg = `Hola, te escribimos de Ruta Segura (transporte escolar). El pago de ${s.name} venció el ${fmtDateOnly(s.nextDueDate)} (${dias} días de atraso). Monto: $${s.billingAmount}. Por favor regulariza tu pago, gracias.`;
+              const msg = `Hola, te escribimos de Ruta Segura (transporte escolar). El pago de ${s.name} venció el ${fmtDateOnly(s.nextDueDate)} (${dias} días de atraso). Monto: $${chargeAmount(s)}. Por favor regulariza tu pago, gracias.`;
               const wa = waLink(s.parentContact, msg);
               return (
                 <div key={s.id} className="py-2 flex flex-wrap items-center gap-2">
@@ -562,7 +569,7 @@ export default function Cashier() {
                         {s.routeId && rc && (
                           <span className={`badge ml-2 ${rc.bg} ${rc.text} ${rc.border}`}>{routeNameById[s.routeId] || 'Ruta'}</span>
                         )}
-                        {Number(s.billingAmount) > 0 && <span className="ml-2">${s.billingAmount} · {BILLING_MODES[s.billingMode || 'mensual']}</span>}
+                        {chargeAmount(s) > 0 && <span className="ml-2">${chargeAmount(s)} · {BILLING_MODES[s.billingMode || 'mensual']}</span>}
                         {s.nextDueDate && (
                           <span className="ml-2">
                             Vence {fmtDateOnly(s.nextDueDate)}
