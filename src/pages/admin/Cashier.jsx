@@ -30,7 +30,9 @@ function effectiveStatus(s, now, finance) {
   // "Pagado" en Finanzas o en la lista, Caja lo refleja sin depender del
   // paymentStatus que quedó en el expediente del alumno.
   if (finance) {
-    if (finance.cobrado) return 'al_corriente';
+    // Un registro financiero solo cuenta como cobrado si tiene folio de pago.
+    // Los registros viejos con cobrado=true pero sin pagoId no se consideran reales.
+    if (finance.cobrado && finance.pagoId) return 'al_corriente';
     const due = finance.agreementDueDate || finance.fechaVencimiento ||
       (finance.periodoFin ? (() => {
         const d = new Date(`${finance.periodoFin}T12:00:00`);
