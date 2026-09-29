@@ -118,13 +118,15 @@ function buildStudentRow(student, dates, concepts, route) {
   if (student.tipoServicio === 'completo') {
     estimatedAmount = baseAmount;
   } else if (student.tipoServicio === 'medio') {
-    // Para medio, el concepto representa el precio de cada día seleccionado.
-    // Si el concepto es mensual, prorrateamos según los días elegidos.
-    estimatedAmount = concept?.mode === 'mensual'
-      ? baseAmount * ((student.diasSemana || []).length / 5)
-      : baseAmount * (student.diasSemana || []).length;
+    // Medio conserva siempre la cuota configurada para el servicio medio,
+    // aunque se utilice solo un día de la semana o todos.
+    estimatedAmount = baseAmount;
   } else {
-    estimatedAmount = baseAmount * selectedCount;
+    // Diario cobra la tarifa diaria de la ruta por cada tramo marcado:
+    // Entrada = 1, Salida = 1, Entrada + Salida = 2.
+    estimatedAmount = Object.values(days).reduce(
+      (sum, day) => sum + (day.entrada ? 1 : 0) + (day.salida ? 1 : 0), 0
+    ) * baseAmount;
   }
 
   return {
@@ -175,6 +177,9 @@ function financePayload(row, listData, route, school, existing = {}) {
     grado: row.grado || '',
     routeId: route?.id || listData.routeId || '',
     routeName: route?.name || '',
+    operatorId: listData.operatorId || '',
+    operatorName: listData.operatorName || '',
+    listName: listData.listName || '',
     unitId: route?.unitId || '',
     periodoInicio: listData.startDate || '',
     periodoFin: listData.endDate || '',
@@ -228,6 +233,9 @@ export default function RouteBuilder() {
   const [movingRowId, setMovingRowId] = useState(null);
   const [moveRouteId, setMoveRouteId] = useState('');
   const [moveOperatorId, setMoveOperatorId] = useState('');
+  const [listMonth, setListMonth] = useState(localDateString(new Date()).slice(0, 7));
+  const [listName, setListName] = useState('');
+  const [selectedDay, setSelectedDay] = useState(null);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -431,7 +439,13 @@ export default function RouteBuilder() {
       setAllStudents((prev) => prev.map((s) => s.id === refreshed.id ? refreshed : s));
 
       if (currentList && currentList.routeId === route.id) {
-        const row = buildStudentRow(refreshed, currentList.dates || dates, concepts, route);
+        const rebuiltRow = buildStudentRow(refreshed, currentList.dates || dates, concepts, route);
+        const previousRow = (currentList.rows || []).find((x) => x.studentId === rebuiltRow.studentId);
+        const row = {
+          ...rebuiltRow,
+          paid: editingStudentId ? !!previousRow?.paid : false,
+          paymentId: editingStudentId ? (previousRow?.paymentId || '') : '',
+        };
         const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
         await RouteLists.update(currentList.id, { rows });
         const financeId = `${currentList.id}_${row.studentId}`;
@@ -451,6 +465,21 @@ export default function RouteBuilder() {
   }
 
   function operatorName(id) { return drivers.find((d) => d.id === id)?.name || ''; }
+  function routeNomenclature(r) {
+    const raw = String(r?.name || 'RUTA').trim().toUpperCase().replace(/[^A-Z0-9ÁÉÍÓÚÑ ]/g, ' ');
+    return raw.split(/\s+/).filter(Boolean).map(x => x[0]).join('').slice(0, 8) || 'RUTA';
+  }
+  function defaultListName(r, operator) {
+    return `${startDate} ${endDate} | R-${routeNomenclature(r)}-${String(operator || '').trim() || 'SIN-OPERADOR'}`;
+  }
+  function monthKey(date) { return String(date || '').slice(0, 7); }
+  function nextMonthRange(dateString) {
+    const d = new Date(`${dateString}T12:00:00`);
+    d.setMonth(d.getMonth() + 1, 1);
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0');
+    const last = new Date(y, d.getMonth() + 1, 0);
+    return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(last.getDate()).padStart(2,'0')}` };
+  }
 
   function addDays(dateString, days) {
     if (!dateString) return '';
@@ -472,7 +501,7 @@ export default function RouteBuilder() {
     setSaving(true);
     try {
       const source = allStudents.filter((s) => s.routeId === route.id);
-      const rows = source.map((s) => buildStudentRow(s, dates, concepts, route)).sort(priorityCompare);
+      const rows = source.map((s) => ({ ...buildStudentRow(s, dates, concepts, route), paid: false, paymentId: '' })).sort(priorityCompare);
       const issues = capacityIssues(rows, dates);
       if (issues.length) {
         window.alert(`No se puede generar la lista porque la unidad está sobre su capacidad.\n\n${capacityMessage(issues)}`);
@@ -490,6 +519,7 @@ export default function RouteBuilder() {
         createdByName: profile?.name || '',
         operatorId: operatorId || '',
         operatorName: operatorName(operatorId),
+        listName: (listName.trim() || defaultListName(route, operatorName(operatorId))),
       };
       const id = await RouteLists.create(data);
       const created = { id, ...data };
@@ -515,7 +545,63 @@ export default function RouteBuilder() {
     setStartDate(found.startDate || startDate);
     setEndDate(found.endDate || endDate);
     setOperatorId(found.operatorId || '');
+    setListName(found.listName || '');
+    setListMonth(monthKey(found.startDate));
     setServiceFilters(['todos']);
+    setSelectedDay(null);
+  }
+
+  async function createNextMonthList() {
+    if (!currentList || !route) return;
+    const range = nextMonthRange(currentList.startDate || startDate);
+    const nextDates = dateRange(range.start, range.end);
+    const nextRows = (currentList.rows || []).map((row) => {
+      const clone = { ...row };
+      if (clone.tipoServicio === 'diario') {
+        // No trasladamos fechas diarias automáticamente para evitar cargos accidentales.
+        clone.fechasDiarias = [];
+        clone.days = {};
+        nextDates.forEach(d => { clone.days[d] = { entrada: false, salida: false, confirmado: false }; });
+        clone.daysCount = 0;
+        clone.estimatedAmount = 0;
+      } else {
+        const rebuilt = buildStudentRow(clone, nextDates, concepts, route);
+        return { ...rebuilt, paid: false, paymentId: '' };
+      }
+      return { ...clone, paid: false, paymentId: '' };
+    });
+    const operator = currentList.operatorName || operatorName(currentList.operatorId);
+    const data = {
+      routeId: currentList.routeId,
+      startDate: range.start,
+      endDate: range.end,
+      weekdays: [1,2,3,4,5],
+      dates: nextDates,
+      rows: nextRows,
+      status: 'abierta',
+      createdByUid: user?.uid || '',
+      createdByName: profile?.name || '',
+      operatorId: currentList.operatorId || '',
+      operatorName: operator,
+      listName: `${range.start} ${range.end} | R-${routeNomenclature(route)}-${operator || 'SIN-OPERADOR'}`,
+    };
+    setSaving(true);
+    try {
+      const id = await RouteLists.create(data);
+      const created = { id, ...data };
+      await Promise.all(nextRows.map(row => FinanceRecords.upsert(`${id}_${row.studentId}`, financePayload(row, created, route, school))));
+      setLists(prev => [created, ...prev]);
+      openList(id);
+      setCurrentList(created);
+      setListName(created.listName);
+      setListMonth(monthKey(created.startDate));
+      window.alert(`Se creó la lista de ${range.start.slice(0,7)}. Los alumnos diarios quedaron sin fechas para revisión manual.`);
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo crear la lista del siguiente mes.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteCurrentList() {
@@ -535,10 +621,10 @@ export default function RouteBuilder() {
   async function saveListOperator(nextId) {
     if (!currentList) return;
     setOperatorId(nextId);
-    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId) };
+    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId), listName: listName.trim() || defaultListName(route, operatorName(nextId)) };
     setSaving(true);
     try {
-      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName });
+      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName, listName: listName.trim() || defaultListName(route, updated.operatorName) });
       await syncListFinance(updated, updated.rows || [], route, school);
       setCurrentList(updated); setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
     } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo actualizar el operador.'); }
@@ -558,7 +644,15 @@ export default function RouteBuilder() {
     const rows = (currentList.rows || []).map((row) => {
       if (row.studentId !== studentId) return row;
       const day = row.days?.[date] || { entrada: false, salida: false, confirmado: false };
-      return { ...row, days: { ...row.days, [date]: { ...day, [key]: !day[key] } } };
+      const nextDays = { ...row.days, [date]: { ...day, [key]: !day[key] } };
+      let estimatedAmount = Number(row.estimatedAmount || 0);
+      if (row.tipoServicio === 'diario') {
+        const perDay = Number(row.baseAmount || 0);
+        estimatedAmount = Object.values(nextDays).reduce(
+          (sum, d) => sum + (d.entrada ? 1 : 0) + (d.salida ? 1 : 0), 0
+        ) * perDay;
+      }
+      return { ...row, days: nextDays, estimatedAmount: Number(estimatedAmount.toFixed(2)), daysCount: Object.values(nextDays).filter(d => d.entrada || d.salida).length };
     });
     const issues = capacityIssues(rows, currentList.dates || dates);
     if (issues.length) {
@@ -566,6 +660,13 @@ export default function RouteBuilder() {
       return;
     }
     await updateRows(rows);
+    const changed = rows.find(r => r.studentId === studentId);
+    if (changed) {
+      const financeId = `${currentList.id}_${studentId}`;
+      const existing = await FinanceRecords.get(financeId);
+      await FinanceRecords.upsert(financeId, financePayload(changed, currentList, route, school, existing || {}));
+      // Si el diario cambia días, el importe financiero queda inmediatamente sincronizado.
+    }
   }
 
   async function editRow(row) {
@@ -724,15 +825,17 @@ export default function RouteBuilder() {
       </div>
 
       <div className="admin-card">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
           <div><label className="admin-label">Ruta</label><select value={routeId} onChange={(e) => { setRouteId(e.target.value); setCurrentList(null); setListId(''); resetAddFlow(); }} className="admin-select"><option value="">Selecciona una ruta…</option>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
           <div><label className="admin-label">Desde</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="admin-input" /></div>
           <div><label className="admin-label">Hasta</label><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="admin-input" /></div>
+          <div><label className="admin-label">Nombre / nomenclatura</label><input value={listName} onChange={(e) => setListName(e.target.value)} placeholder={defaultListName(route, operatorName(operatorId))} className="admin-input" /></div>
           <div><label className="admin-label">Días hábiles detectados</label><div className="admin-input bg-navy-50">{dates.length} días · Lunes a viernes</div></div>
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
-          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-sm"><option value="">Abrir lista existente…</option>{lists.filter((l) => !routeId || l.routeId === routeId).map((l) => <option key={l.id} value={l.id}>{l.startDate} → {l.endDate}</option>)}</select>{currentList && <><select value={operatorId} onChange={(e) => saveListOperator(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
+          <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l.startDate)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
+          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-lg"><option value="">Abrir lista existente…</option>{lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => <option key={l.id} value={l.id}>{l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`}</option>)}</select><select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
         </div>
       </div>
 
@@ -752,10 +855,32 @@ export default function RouteBuilder() {
               return <div className="flex flex-wrap gap-1.5 mt-2">{(currentList.dates || []).map((date) => {
                 const v = snap[date] || { entrada: 0, salida: 0 };
                 const full = v.entrada >= unitCapacity || v.salida >= unitCapacity;
-                return <span key={date} className={`px-2 py-1 rounded border ${full ? 'border-signal-yellow/60 bg-signal-yellow/15 font-semibold' : 'border-navy-200 bg-white'}`}>{capacityLabel(date, snap)}</span>;
+                return <button type="button" key={date} onClick={() => setSelectedDay(date)} className={`px-2 py-1 rounded border ${selectedDay === date ? 'ring-2 ring-navy-400 ' : ''}${full ? 'border-signal-yellow/60 bg-signal-yellow/15 font-semibold' : 'border-navy-200 bg-white'}`}>{capacityLabel(date, snap)}</button>;
               })}</div>;
             })()}
           </div>
+          {selectedDay && (
+            <div className="mt-3 p-3 rounded-lg border border-navy-100 bg-white">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <b>Lista del día {dayHeader(selectedDay)}</b>
+                <button type="button" onClick={() => setSelectedDay(null)} className="btn-admin-ghost"><X size={13}/> Cerrar</button>
+              </div>
+              <div className="space-y-1">
+                {(currentList.rows || []).filter(row => {
+                  const d = row.days?.[selectedDay] || {};
+                  return d.entrada || d.salida;
+                }).map(row => {
+                  const d = row.days?.[selectedDay] || {};
+                  return <div key={row.studentId} className="flex items-center justify-between gap-2 py-1.5 border-b border-navy-50 text-xs">
+                    <span><b>{row.name}</b> · {row.matricula} · {d.entrada && d.salida ? 'Entrada + salida' : d.entrada ? 'Entrada' : 'Salida'}</span>
+                    <button type="button" onClick={() => editRow(row)} className="link-action">Editar alumno</button>
+                  </div>;
+                })}
+                {(currentList.rows || []).filter(row => { const d=row.days?.[selectedDay]||{}; return d.entrada||d.salida; }).length === 0 &&
+                  <p className="text-navy-400 py-2">No hay alumnos marcados para este día.</p>}
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs font-semibold text-navy-500">MOSTRAR:</span>
             {[['todos','Todos'],['completo','Completos'],['medio_entrada','Medio entrada'],['medio_salida','Medio salida'],['diario','Diarios']].map(([key,label]) => {
@@ -782,7 +907,7 @@ export default function RouteBuilder() {
           <div className="flex justify-between items-center mb-3"><div><p className="font-display font-semibold">{editingStudentId ? 'Editar alumno en la lista' : 'Agregar alumno a la ruta'}</p><p className="text-xs text-navy-400">{lookupStudent?.name} · {lookupStudent?.matricula}</p></div><button onClick={resetAddFlow} className="btn-admin-ghost"><X size={14}/></button></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="admin-label">Tipo de servicio</label><select value={addForm.tipoServicio} onChange={(e) => setAddForm({ ...addForm, tipoServicio: e.target.value })} className="admin-select">{SERVICE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
-            {addForm.tipoServicio !== 'completo' && <div><label className="admin-label">Entrada o salida</label><select value={addForm.medioServicio} onChange={(e) => setAddForm({ ...addForm, medioServicio: e.target.value })} className="admin-select"><option value="entrada">Solo entrada</option><option value="salida">Solo salida</option></select></div>}
+            {addForm.tipoServicio !== 'completo' && <div><label className="admin-label">{addForm.tipoServicio === 'diario' ? 'Servicio del día' : 'Entrada o salida'}</label><select value={addForm.medioServicio} onChange={(e) => setAddForm({ ...addForm, medioServicio: e.target.value })} className="admin-select"><option value="entrada">Solo entrada</option><option value="salida">Solo salida</option>{addForm.tipoServicio === 'diario' && <option value="ambas">Entrada + salida</option>}</select></div>}
           </div>
           {addForm.tipoServicio === 'medio' && <div className="mt-3"><label className="admin-label">¿Qué días?</label><div className="flex gap-2">{DAY_META.map((d) => <label key={d.value} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.diasSemana.includes(d.value) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.diasSemana.includes(d.value)} onChange={() => toggleDiaSemana(d.value)}/>{d.short}</label>)}</div></div>}
           {addForm.tipoServicio === 'diario' && <div className="mt-3"><label className="admin-label">¿Qué fechas?</label><div className="flex flex-wrap gap-1.5">{dates.map((date) => <label key={date} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.fechasDiarias.includes(date) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.fechasDiarias.includes(date)} onChange={() => toggleFechaDiaria(date)}/>{dayHeader(date)}</label>)}</div></div>}
