@@ -766,6 +766,44 @@ FinanceRecords.reconcilePaymentIntegrity = async function reconcilePaymentIntegr
     }
   }
 
+  // Segunda fase: enlaza pagos reales que existen en Caja con el registro
+  // financiero correspondiente cuando comparten lista + alumno.
+  // Se consulta la colección de pagos una sola vez para no hacer miles de
+  // lecturas individuales cuando la plataforma tiene muchos alumnos.
+  const paymentsSnap = await getDocs(collectionGroup(db, 'payments'));
+  for (const paymentDoc of paymentsSnap.docs) {
+    const payment = { id: paymentDoc.id, studentId: paymentDoc.ref.parent.parent.id, ...paymentDoc.data() };
+    if (payment.cancelled === true || !payment.listId || !payment.studentId) continue;
+
+    const candidates = records.filter((r) =>
+      r.studentId === payment.studentId &&
+      r.listId === payment.listId &&
+      (!r.pagoId || r.pagoId === payment.id)
+    );
+    if (candidates.length !== 1) continue;
+
+    const target = candidates[0];
+    if (target.pagoId === payment.id && target.cobrado === true) continue;
+
+    await _originalFinanceUpdate(target.id, {
+      cobrado: true,
+      pagoId: payment.id,
+      cobradoAt: payment.at || new Date().toISOString(),
+      cobradoBy: payment.registeredByName || '',
+      updatedAt: serverTimestamp(),
+    });
+
+    if (target.listId) {
+      const list = await getOne('routeLists', target.listId);
+      if (list) {
+        const rows = (list.rows || []).map((row) =>
+          row.studentId === payment.studentId ? { ...row, paid: true, paymentId: payment.id } : row
+        );
+        await updateDocById('routeLists', target.listId, { rows, updatedAt: serverTimestamp() });
+      }
+    }
+  }
+
   return repaired;
 };
 
