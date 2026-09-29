@@ -117,7 +117,8 @@ const emptyForm = {
 export default function StudentsPage() {
   const { profile } = useAuth();
   const [students, setStudents] = useState([]);
-  const [studentsLoading, setStudentsLoading] = useState(true);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsLoaded, setStudentsLoaded] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 100;
   const [schools, setSchools] = useState([]);
@@ -141,14 +142,32 @@ export default function StudentsPage() {
   const [eventualError, setEventualError] = useState('');
 
   useEffect(() => {
-    setStudentsLoading(true);
-    return Students.subscribe((data) => {
-      setStudents(data);
-      setStudentsLoading(false);
-    });
-  }, []);
+    if (searchParams.get('editar')) return;
+    setStudents([]);
+    setStudentsLoaded(false);
+    setStudentsLoading(false);
+  }, [searchParams]);
   useEffect(() => Schools.subscribe(setSchools), []);
   useEffect(() => Routes.subscribe(setRoutesState), []);
+
+  async function loadStudentsForSelection() {
+    setStudentsLoading(true);
+    try {
+      const data = filterSchool === '__ALL__'
+        ? await Students.list()
+        : filterSchool
+          ? await Students.listBySchool(filterSchool)
+          : [];
+      setStudents(data || []);
+      setStudentsLoaded(true);
+    } catch (err) {
+      console.error(err);
+      setStudents([]);
+      setStudentsLoaded(false);
+    } finally {
+      setStudentsLoading(false);
+    }
+  }
 
   useEffect(() => {
     const editId = searchParams.get('editar');
@@ -304,7 +323,7 @@ export default function StudentsPage() {
 
   const filtered = useMemo(() => students.filter((s) => {
     const q = search.trim().toLowerCase();
-    const matchSchool = !filterSchool || s.schoolId === filterSchool;
+    const matchSchool = filterSchool === '__ALL__' || (!!filterSchool && s.schoolId === filterSchool);
     const matchPayment = !filterPayment || (s.paymentStatus || 'al_corriente') === filterPayment;
     const matchSearch = !q || s.name?.toLowerCase().includes(q) || String(s.matricula || '').toLowerCase().includes(q);
     return matchSchool && matchPayment && matchSearch;
@@ -359,7 +378,7 @@ export default function StudentsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
           <h1 className="admin-h1">Alumnos</h1>
-          <p className="text-sm text-navy-400 mt-0.5">{studentsLoading ? 'Cargando alumnos…' : `${students.length} alumnos dados de alta`}</p>
+          <p className="text-sm text-navy-400 mt-0.5">{studentsLoading ? 'Cargando alumnos…' : studentsLoaded ? `${students.length} alumnos consultados` : 'Selecciona un plantel o Todos y consulta el padrón'}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/admin/alumnos/importar" className="btn-admin-ghost">
@@ -417,14 +436,18 @@ export default function StudentsPage() {
             </div>
             <select
               value={filterSchool}
-              onChange={(e) => setFilterSchool(e.target.value)}
+              onChange={(e) => { setFilterSchool(e.target.value); setStudentsLoaded(false); setStudents([]); setSelectedId(null); }}
               className="admin-select w-auto"
             >
-              <option value="">Todos los planteles</option>
+              <option value="">Selecciona un plantel…</option><option value="__ALL__">Todos</option>
               {schools.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+            <button type="button" onClick={loadStudentsForSelection} disabled={!filterSchool || studentsLoading}
+              className="btn-admin-primary">
+              {studentsLoading ? 'Consultando…' : 'Consultar alumnos'}
+            </button>
           </div>
 
           <div className="admin-card p-0 overflow-hidden">
