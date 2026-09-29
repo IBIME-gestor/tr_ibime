@@ -1,4 +1,4 @@
-import { where, orderBy, doc, setDoc, deleteDoc, collection, collectionGroup, writeBatch, addDoc, getDocs, getDoc, query, serverTimestamp } from 'firebase/firestore';
+import { where, orderBy, doc, setDoc, deleteDoc, collection, collectionGroup, writeBatch, addDoc, getDocs, query, serverTimestamp } from 'firebase/firestore';
 import { db } from './config';
 import {
   listAll,
@@ -189,6 +189,26 @@ export const Students = {
       paymentStatusUpdatedAt: serverTimestamp(),
       paymentStatusUpdatedBy: byName || '',
     });
+
+    // Si el pago cancelado estaba conciliado con Finanzas, revertir también
+    // ese registro y la fila de la lista, sin borrar la bitácora del pago.
+    const linkedFinance = await listFinanceRecordsByStudent(studentId);
+    for (const finance of linkedFinance) {
+      if (finance.pagoId !== paymentId) continue;
+      await updateDocById('financeRecords', finance.id, {
+        cobrado: false, pagoId: '', cobradoAt: '', cobradoBy: '',
+        updatedAt: serverTimestamp(),
+      });
+      if (finance.listId) {
+        const list = await getOne('routeLists', finance.listId);
+        if (list) {
+          const rows = (list.rows || []).map((row) =>
+            row.studentId === studentId ? { ...row, paid: false, paymentId: '' } : row
+          );
+          await updateDocById('routeLists', finance.listId, { rows, updatedAt: serverTimestamp() });
+        }
+      }
+    }
   },
 
   /** Bitácora completa de pagos de un alumno (folio, monto, método, fecha). */
@@ -200,21 +220,14 @@ export const Students = {
    * son objetos Date.
    */
   async listPaymentsBetween(since, until) {
-    // Evitamos el índice compuesto de Firestore para collectionGroup(payments).
-    // Filtramos por fecha en Firestore y ordenamos en memoria.
     const q = query(
       collectionGroup(db, 'payments'),
       where('at', '>=', since),
-      where('at', '<=', until)
+      where('at', '<=', until),
+      orderBy('at', 'desc')
     );
     const snap = await getDocs(q);
-    return snap.docs
-      .map((d) => ({ id: d.id, studentId: d.ref.parent.parent.id, ...d.data() }))
-      .sort((a, b) => {
-        const ta = a.at?.toDate ? a.at.toDate().getTime() : new Date(a.at || 0).getTime();
-        const tb = b.at?.toDate ? b.at.toDate().getTime() : new Date(b.at || 0).getTime();
-        return tb - ta;
-      });
+    return snap.docs.map((d) => ({ id: d.id, studentId: d.ref.parent.parent.id, ...d.data() }));
   },
 
   /**
@@ -306,10 +319,16 @@ export const RouteLists = {
 /* ------------------------------------------------------------------ */
 /*  Rutas (routes) — asigna chofer + nanny + unidad + plantel + turno   */
 /* ------------------------------------------------------------------ */
+// Consulta directa de los registros financieros de un alumno.
+// Se define fuera de FinanceRecords para evitar referencias circulares/TDZ
+// cuando el método syncStudentPayment es llamado desde Caja.
+const listFinanceRecordsByStudent = (studentId) =>
+  listAll('financeRecords', [where('studentId', '==', studentId)]);
+
 export const FinanceRecords = {
   list: () => listAll('financeRecords', [orderBy('studentName')]),
   subscribe: (cb) => subscribeAll('financeRecords', [orderBy('studentName')], cb),
-  listByStudent: (studentId) => listAll('financeRecords', [where('studentId', '==', studentId)]),
+  listByStudent: listFinanceRecordsByStudent,
   get: (id) => getOne('financeRecords', id),
   upsert: async (id, data) => { await setDoc(doc(db, 'financeRecords', id), { ...data, updatedAt: serverTimestamp() }, { merge: true }); return id; },
   update: (id, data) => updateDocById('financeRecords', id, { ...data, updatedAt: serverTimestamp() }),
@@ -329,7 +348,7 @@ export const FinanceRecords = {
   async syncStudentPayment(studentId, { paid, paymentId = '', byName = '', financeId = '' } = {}) {
     if (!studentId) return { financeId: '', listId: '', found: false };
 
-    const records = await this.listByStudent(studentId);
+    const records = await listFinanceRecordsByStudent(studentId);
     if (!records.length) return { financeId: '', listId: '', found: false };
 
     const localDate = new Date();
@@ -482,7 +501,7 @@ export const Cometa = {
       return { message: `Concepto confirmado para ${row.student.name}.`, financeId, listId };
     }
 
-    if ((existingFinance?.cobrado === true && !!existingFinance?.pagoId) || (row.routeRow?.paid === true && !!row.routeRow?.paymentId)) {
+    if (existingFinance?.cobrado || row.routeRow?.paid) {
       await updateCometaRow(importId, row, { confirmed: true, confirmedType: 'already_paid', confirmedBy: byName || '' });
       return { message: `${row.student.name} ya aparece pagado en Ruta Segura; no se duplicó el cobro.`, financeId, listId };
     }
@@ -626,7 +645,7 @@ Students.setPaymentStatus = async function setPaymentStatusSafe(id, paymentStatu
   await _originalStudentsSetPaymentStatus(id, paymentStatus, byName);
 
   // Reflejar el estatus en Finanzas sin convertirlo en un pago.
-  const financeRecords = await FinanceRecords.listByStudent(id);
+  const financeRecords = await listFinanceRecordsByStudent(id);
   const localDate = new Date();
   localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
   const today = localDate.toISOString().slice(0, 10);
@@ -712,23 +731,14 @@ FinanceRecords.upsert = async function upsertSafe(id, data) {
 
 const _originalFinanceUpdate = FinanceRecords.update;
 
-// Un registro financiero solo puede decir "cobrado" cuando existe el pago
-// correspondiente en la bitácora real del alumno y ese pago no está cancelado.
-async function hasActivePaymentForFinance(record, paymentId) {
-  if (!record?.studentId || !paymentId) return false;
-  const paymentSnap = await getDoc(doc(db, 'students', record.studentId, 'payments', paymentId));
-  return paymentSnap.exists() && paymentSnap.data()?.cancelled !== true;
-}
-
 FinanceRecords.update = async function updateSafe(id, data) {
   const current = await getOne('financeRecords', id);
   const patch = { ...data };
 
   if (patch.cobrado === true) {
     const paymentId = patch.pagoId || current?.pagoId || '';
-    const validPayment = await hasActivePaymentForFinance(current, paymentId);
 
-    if (!validPayment) {
+    if (!paymentId) {
       patch.cobrado = false;
       patch.pagoId = '';
       patch.cobradoAt = '';
@@ -745,73 +755,6 @@ FinanceRecords.update = async function updateSafe(id, data) {
   }
 
   return _originalFinanceUpdate(id, patch);
-};
-
-// Repara registros históricos que quedaron con cobrado=true pero sin un pago
-// real. También corrige cobros cuyo pago fue cancelado posteriormente.
-FinanceRecords.reconcilePaymentIntegrity = async function reconcilePaymentIntegrity() {
-  const records = await this.list();
-  const cache = new Map();
-  const repaired = [];
-
-  for (const record of records) {
-    if (!record?.cobrado) continue;
-    const key = record.studentId || '';
-    if (!cache.has(key)) cache.set(key, await Students.listPayments(key));
-    const payments = cache.get(key) || [];
-    const payment = record.pagoId ? payments.find((p) => p.id === record.pagoId && p.cancelled !== true) : null;
-
-    if (!payment) {
-      await _originalFinanceUpdate(record.id, {
-        cobrado: false,
-        pagoId: '',
-        cobradoAt: '',
-        cobradoBy: '',
-        updatedAt: serverTimestamp(),
-      });
-      repaired.push(record.id);
-    }
-  }
-
-  // Segunda fase: enlaza pagos reales que existen en Caja con el registro
-  // financiero correspondiente cuando comparten lista + alumno.
-  // Se consulta la colección de pagos una sola vez para no hacer miles de
-  // lecturas individuales cuando la plataforma tiene muchos alumnos.
-  const paymentsSnap = await getDocs(collectionGroup(db, 'payments'));
-  for (const paymentDoc of paymentsSnap.docs) {
-    const payment = { id: paymentDoc.id, studentId: paymentDoc.ref.parent.parent.id, ...paymentDoc.data() };
-    if (payment.cancelled === true || !payment.listId || !payment.studentId) continue;
-
-    const candidates = records.filter((r) =>
-      r.studentId === payment.studentId &&
-      r.listId === payment.listId &&
-      (!r.pagoId || r.pagoId === payment.id)
-    );
-    if (candidates.length !== 1) continue;
-
-    const target = candidates[0];
-    if (target.pagoId === payment.id && target.cobrado === true) continue;
-
-    await _originalFinanceUpdate(target.id, {
-      cobrado: true,
-      pagoId: payment.id,
-      cobradoAt: payment.at || new Date().toISOString(),
-      cobradoBy: payment.registeredByName || '',
-      updatedAt: serverTimestamp(),
-    });
-
-    if (target.listId) {
-      const list = await getOne('routeLists', target.listId);
-      if (list) {
-        const rows = (list.rows || []).map((row) =>
-          row.studentId === payment.studentId ? { ...row, paid: true, paymentId: payment.id } : row
-        );
-        await updateDocById('routeLists', target.listId, { rows, updatedAt: serverTimestamp() });
-      }
-    }
-  }
-
-  return repaired;
 };
 
 
