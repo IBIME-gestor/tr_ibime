@@ -385,6 +385,147 @@ export const FinanceRecords = {
   },
 };
 
+
+/* ------------------------------------------------------------------ */
+/*  Conciliación con reportes de Cometa                                */
+/* ------------------------------------------------------------------ */
+export const Cometa = {
+  createImport: (data) => createDoc('cometaImports', {
+    ...data,
+    createdAt: data.createdAt || new Date().toISOString(),
+    status: 'procesado',
+  }),
+  listImports: () => listAll('cometaImports', [orderBy('createdAt', 'desc')]),
+  getImport: (id) => getOne('cometaImports', id),
+  async bulkCreateRecords(importId, rows) {
+    for (const group of chunk(rows, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach((row, i) => {
+        const id = `${importId}_${row.sheetType}_${row.rowNumber}_${i}`;
+        batch.set(doc(db, 'cometaRecords', id), {
+          importId,
+          ...row,
+          createdAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
+  },
+  listByImport: (importId) => listAll('cometaRecords', [where('importId', '==', importId)]),
+  async latestPending() {
+    const imports = await listAll('cometaImports', [orderBy('createdAt', 'desc')]);
+    if (!imports.length) return { importInfo: null, rows: [] };
+    const rows = await this.listByImport(imports[0].id);
+    return { importInfo: imports[0], rows: rows.filter((r) => r.sheetType === 'pending') };
+  },
+
+  /**
+   * Confirma un registro de Cometa sin borrar el origen. Para un pago,
+   * crea la bitácora del alumno, marca Finanzas y la fila de Lista.
+   * Para un concepto pendiente, solo marca el concepto como cargado.
+   */
+  async confirmRecord({ importId, row, byName = '' }) {
+    if (!row?.student?.id) throw new Error('El registro no tiene un alumno de Ruta Segura asociado.');
+    const studentId = row.student.id;
+    const existingFinance = row.financeRecord || (await FinanceRecords.listByStudent(studentId)).find((f) =>
+      !row.concepto || !f.conceptName || normText(f.conceptName).includes(normText(row.concepto)) || normText(row.concepto).includes(normText(f.conceptName))
+    );
+
+    let financeId = existingFinance?.id || '';
+    let listId = existingFinance?.listId || row.routeRow?.listId || '';
+    if (!listId) {
+      const lists = await RouteLists.list();
+      const found = lists.find((list) => (list.rows || []).some((r) => r.studentId === studentId));
+      if (found) listId = found.id;
+    }
+
+    if (!financeId) {
+      financeId = `cometa_${studentId}_${String(row.ciclo || 'actual').replace(/[^a-zA-Z0-9]+/g, '_')}_${normText(row.concepto).slice(0, 30) || 'concepto'}`;
+      await FinanceRecords.upsert(financeId, {
+        listId,
+        studentId,
+        studentName: row.student?.name || row.alumno || '',
+        matricula: row.student?.matricula || row.matricula || '',
+        schoolId: row.student?.schoolId || '',
+        schoolName: row.school?.name || row.plantel || '',
+        concepto: row.concepto || '',
+        conceptName: row.concepto || '',
+        conceptoCargado: false,
+        cobrado: false,
+        montoEstimado: Number(row.monto || row.student?.billingAmount || 0),
+        periodoInicio: '',
+        periodoFin: '',
+        tipoServicio: row.student?.tipoServicio || '',
+        medioServicio: row.student?.medioServicio || '',
+        origen: 'cometa',
+      });
+    }
+
+    if (row.sheetType === 'pending') {
+      await FinanceRecords.update(financeId, {
+        conceptoCargado: true,
+        conceptName: row.concepto || existingFinance?.conceptName || '',
+        concepto: row.concepto || existingFinance?.concepto || '',
+        origen: 'cometa',
+        cometaImportId: importId,
+        cometaConfirmedAt: new Date().toISOString(),
+        cometaConfirmedBy: byName || '',
+      });
+      await updateCometaRow(importId, row, { confirmed: true, confirmedType: 'concepto', confirmedBy: byName || '' });
+      return { message: `Concepto confirmado para ${row.student.name}.`, financeId, listId };
+    }
+
+    if (existingFinance?.cobrado || row.routeRow?.paid) {
+      await updateCometaRow(importId, row, { confirmed: true, confirmedType: 'already_paid', confirmedBy: byName || '' });
+      return { message: `${row.student.name} ya aparece pagado en Ruta Segura; no se duplicó el cobro.`, financeId, listId };
+    }
+
+    const paymentId = await Students.registerPayment(studentId, {
+      amount: Number(row.monto || 0),
+      method: 'cometa',
+      note: `Pago conciliado desde Cometa · ${row.concepto || ''} · ${row.fechaPago || ''}`,
+      nextDueDate: existingFinance?.agreementDueDate || existingFinance?.fechaVencimiento || null,
+      byName,
+      byUid: '',
+      routeId: row.student?.routeId || '',
+      unitId: '',
+      listId,
+    });
+
+    await FinanceRecords.update(financeId, {
+      cobrado: true,
+      conceptoCargado: true,
+      pagoId: paymentId,
+      montoEstimado: Number(row.monto || existingFinance?.montoEstimado || row.student?.billingAmount || 0),
+      cobradoAt: row.fechaPago || new Date().toISOString(),
+      cobradoBy: byName || '',
+      origen: 'cometa',
+      cometaImportId: importId,
+      cometaRowNumber: row.rowNumber,
+      cometaConfirmedAt: new Date().toISOString(),
+      cometaConfirmedBy: byName || '',
+    });
+
+    if (listId) {
+      const list = await RouteLists.get(listId);
+      if (list) {
+        const nextRows = (list.rows || []).map((x) => x.studentId === studentId ? { ...x, paid: true, paymentId } : x);
+        await RouteLists.update(listId, { rows: nextRows });
+      }
+    }
+    await updateCometaRow(importId, row, { confirmed: true, confirmedType: 'paid', confirmedBy: byName || '', paymentId });
+    return { message: `Pago confirmado para ${row.student.name}. Caja, Finanzas y Lista quedaron actualizados.`, financeId, listId, paymentId };
+  },
+};
+
+function normText(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+async function updateCometaRow(importId, row, patch) {
+  if (!importId || !row?._key) return;
+  await updateDocById('cometaRecords', `${importId}_${row._key}`, patch);
+}
+
 export const Routes = {
   list: () => listAll('routes', [orderBy('name')]),
   listBySchool: (schoolId) =>
@@ -440,4 +581,21 @@ export const Routes = {
 export const Mail = {
   queue: ({ to, subject, html }) =>
     createDoc('mail', { to: [to], message: { subject, html } }),
+};
+
+/* ------------------------------------------------------------------ */
+/*  Notificaciones masivas                                             */
+/*  La app solo registra la campaña. El envío real lo hace Google       */
+/*  Apps Script + Gmail Workspace, para evitar servicios pagados.      */
+/* ------------------------------------------------------------------ */
+export const Notifications = {
+  list: () => listAll('notificationCampaigns', [orderBy('createdAt', 'desc')]),
+  get: (id) => getOne('notificationCampaigns', id),
+  create: async (data) => {
+    const id = data.id || null;
+    if (!id) return createDoc('notificationCampaigns', data);
+    await setDoc(doc(db, 'notificationCampaigns', id), data, { merge: true });
+    return id;
+  },
+  update: (id, data) => updateDocById('notificationCampaigns', id, { ...data, updatedAt: serverTimestamp() }),
 };
