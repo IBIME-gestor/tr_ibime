@@ -38,7 +38,7 @@ export default function Finance() {
   const [records,setRecords]=useState([]); const [students,setStudents]=useState([]); const [schoolRows,setSchoolRows]=useState([]); const [paymentMap,setPaymentMap]=useState(new Map());
   const [filters,setFilters]=useState(EMPTY); const [loading,setLoading]=useState(false); const [queried,setQueried]=useState(false); const [module,setModule]=useState(new URLSearchParams(window.location.search).get('modulo') || 'esperado');
 
-  async function load(){ setLoading(true); try { await FinanceRecords.reconcilePaymentIntegrity(); const [r,s,sch,lists]=await Promise.all([FinanceRecords.list(),Students.list(),Schools.list(),RouteLists.list()]);
+  async function load(){ setLoading(true); try { const [r,s,sch,lists]=await Promise.all([FinanceRecords.list(),Students.list(),Schools.list(),RouteLists.list()]);
       const selectedMonth = filters.month || today().slice(0,7);
       const monthStart = new Date(`${selectedMonth}-01T00:00:00`);
       const monthEnd = new Date(monthStart); monthEnd.setMonth(monthEnd.getMonth()+1); monthEnd.setMilliseconds(-1);
