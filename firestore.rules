@@ -182,6 +182,10 @@ service cloud.firestore {
       allow read: if isAdmin() || isCashier();
     }
 
+    match /notificationCampaigns/{id} {
+      allow read, write: if isAdmin();
+    }
+
     // ------------------------------------------------------------------
     // Colecciones públicas (SIN login) para el seguimiento del padre de
     // familia. Contienen deliberadamente lo mínimo: matrícula -> ruta, y
