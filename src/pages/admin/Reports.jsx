@@ -96,12 +96,16 @@ export default function Reports() {
         const kmCost = km * Number(unit.costPerKm || 0);
         const estimatedCost = fixed + kmCost;
 
-        const unitPayments = payments.filter((p) => {
-          if (p.unitId) return p.unitId === unit.id;
-          const student = studentById[p.studentId];
+        const unitFinancePayments = financePaidRecords.filter((r) => {
+          if (r.unitId) return r.unitId === unit.id;
+          const payment = paymentById.get(r.pagoId);
+          if (payment?.unitId) return payment.unitId === unit.id;
+          const student = studentById[r.studentId];
           return student && routeIds.has(student.routeId);
         });
-        const collected = unitPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        const collected = unitFinancePayments.reduce((sum, r) =>
+          sum + Number(paymentById.get(r.pagoId)?.amount ?? r.montoEstimado ?? 0), 0
+        );
 
         const unitLists = lists.filter((l) => {
           if (!routeIds.has(l.routeId)) return false;
@@ -161,7 +165,9 @@ export default function Reports() {
   const financeEstimated = financeInPeriod.reduce((a,r)=>a+Number(r.montoEstimado||0),0);
   const financeCharged = financeInPeriod.filter(r=>r.conceptoCargado).length;
   const financeConfirmed = financeInPeriod.filter(r=>r.servicioConfirmado).length;
-  const financeCollected = financeInPeriod.filter(r=>r.cobrado === true && !!r.pagoId).reduce((a,r)=>a+Number(r.montoEstimado||0),0);
+  const financePaidRecords = financeInPeriod.filter(r => r.cobrado === true && !!r.pagoId);
+  const paymentById = new Map(payments.map((p) => [p.id, p]));
+  const financeCollected = financePaidRecords.reduce((a,r)=>a+Number(paymentById.get(r.pagoId)?.amount ?? r.montoEstimado ?? 0),0);
 
   function exportExcel() {
     const data = rows.map((r) => ({
