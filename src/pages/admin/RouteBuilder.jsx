@@ -193,8 +193,10 @@ function financePayload(row, listData, route, school, existing = {}) {
     solicitudAtendida: existing?.solicitudAtendida ?? false,
     servicioConfirmado: existing?.servicioConfirmado ?? false,
     conceptoCargado: existing?.conceptoCargado ?? false,
-    cobrado: existing?.cobrado ?? !!row.paid,
-    pagoId: existing?.pagoId || row.paymentId || '',
+    // Cobrado solo puede venir de un registro financiero previamente pagado
+    // con folio; no se hereda de row.paid ni del expediente del alumno.
+    cobrado: existing?.cobrado === true && !!existing?.pagoId,
+    pagoId: existing?.pagoId || '',
   };
 }
 
