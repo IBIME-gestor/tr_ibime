@@ -200,14 +200,21 @@ export const Students = {
    * son objetos Date.
    */
   async listPaymentsBetween(since, until) {
+    // Evitamos el índice compuesto de Firestore para collectionGroup(payments).
+    // Filtramos por fecha en Firestore y ordenamos en memoria.
     const q = query(
       collectionGroup(db, 'payments'),
       where('at', '>=', since),
-      where('at', '<=', until),
-      orderBy('at', 'desc')
+      where('at', '<=', until)
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, studentId: d.ref.parent.parent.id, ...d.data() }));
+    return snap.docs
+      .map((d) => ({ id: d.id, studentId: d.ref.parent.parent.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.at?.toDate ? a.at.toDate().getTime() : new Date(a.at || 0).getTime();
+        const tb = b.at?.toDate ? b.at.toDate().getTime() : new Date(b.at || 0).getTime();
+        return tb - ta;
+      });
   },
 
   /**
