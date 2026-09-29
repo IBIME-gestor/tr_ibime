@@ -8,6 +8,12 @@ const emptyForm = {
   capacity: '',
   costPerKm: '',
   fixedTripCost: '',
+  maintenanceDate: '',
+  nextMaintenanceDate: '',
+  insuranceFolio: '',
+  verificationMonth: '',
+  stickerColor: '',
+  conditions: '',
 };
 
 export default function UnitsPage() {
@@ -99,6 +105,30 @@ export default function UnitsPage() {
                 placeholder="Ej. 250"
               />
             </div>
+            <div>
+              <label className="admin-label">Fecha de mantenimiento</label>
+              <input type="date" value={form.maintenanceDate} onChange={(e) => setForm({ ...form, maintenanceDate: e.target.value })} className="admin-input" />
+            </div>
+            <div>
+              <label className="admin-label">Próxima cita de mantenimiento</label>
+              <input type="date" value={form.nextMaintenanceDate} onChange={(e) => setForm({ ...form, nextMaintenanceDate: e.target.value })} className="admin-input" />
+            </div>
+            <div>
+              <label className="admin-label">Folio de seguro</label>
+              <input value={form.insuranceFolio} onChange={(e) => setForm({ ...form, insuranceFolio: e.target.value })} className="admin-input" />
+            </div>
+            <div>
+              <label className="admin-label">Mes de verificación</label>
+              <input type="month" value={form.verificationMonth} onChange={(e) => setForm({ ...form, verificationMonth: e.target.value })} className="admin-input" />
+            </div>
+            <div>
+              <label className="admin-label">Engomado color</label>
+              <input value={form.stickerColor} onChange={(e) => setForm({ ...form, stickerColor: e.target.value })} className="admin-input" />
+            </div>
+            <div>
+              <label className="admin-label">Condiciones u otros</label>
+              <textarea value={form.conditions} onChange={(e) => setForm({ ...form, conditions: e.target.value })} className="admin-input min-h-20" />
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
             <button type="submit" className="btn-admin-primary flex-1">
@@ -125,7 +155,7 @@ export default function UnitsPage() {
                   <th>Modelo</th>
                   <th>Capacidad</th>
                   <th>Costo/km</th>
-                  <th>Costo fijo/recorrido</th>
+                  <th>Mantenimiento</th><th>Próxima cita</th><th>Seguro</th><th>Verificación</th><th>Engomado</th><th>Condiciones</th><th>Costo fijo/recorrido</th>
                   <th className="pr-5"></th>
                 </tr>
               </thead>
@@ -136,6 +166,12 @@ export default function UnitsPage() {
                     <td className="text-navy-500">{u.model || '—'}</td>
                     <td className="text-navy-500">{u.capacity ? `${u.capacity} lugares` : '—'}</td>
                     <td className="text-navy-500">${Number(u.costPerKm || 0).toFixed(2)}</td>
+                    <td className="text-navy-500">{u.maintenanceDate || '—'}</td>
+                    <td className="text-navy-500">{u.nextMaintenanceDate || '—'}</td>
+                    <td className="text-navy-500">{u.insuranceFolio || '—'}</td>
+                    <td className="text-navy-500">{u.verificationMonth || '—'}</td>
+                    <td className="text-navy-500">{u.stickerColor || '—'}</td>
+                    <td className="text-navy-500 max-w-40 truncate" title={u.conditions || ''}>{u.conditions || '—'}</td>
                     <td className="text-navy-500">${Number(u.fixedTripCost || 0).toFixed(2)}</td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => handleEdit(u)} className="link-action mr-3">Editar</button>
