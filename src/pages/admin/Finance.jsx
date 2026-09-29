@@ -35,10 +35,16 @@ const STATUS = {
 
 export default function Finance() {
   const { profile, user } = useAuth();
-  const [records,setRecords]=useState([]); const [students,setStudents]=useState([]); const [schoolRows,setSchoolRows]=useState([]);
+  const [records,setRecords]=useState([]); const [students,setStudents]=useState([]); const [schoolRows,setSchoolRows]=useState([]); const [paymentMap,setPaymentMap]=useState(new Map());
   const [filters,setFilters]=useState(EMPTY); const [loading,setLoading]=useState(false); const [queried,setQueried]=useState(false); const [module,setModule]=useState(new URLSearchParams(window.location.search).get('modulo') || 'esperado');
 
   async function load(){ setLoading(true); try { await FinanceRecords.reconcilePaymentIntegrity(); const [r,s,sch,lists]=await Promise.all([FinanceRecords.list(),Students.list(),Schools.list(),RouteLists.list()]);
+      const selectedMonth = filters.month || today().slice(0,7);
+      const monthStart = new Date(`${selectedMonth}-01T00:00:00`);
+      const monthEnd = new Date(monthStart); monthEnd.setMonth(monthEnd.getMonth()+1); monthEnd.setMilliseconds(-1);
+      const payments = await Students.listPaymentsBetween(monthStart, monthEnd);
+      const activePayments = new Map((payments || []).filter(p => p && !p.cancelled).map(p => [p.id, p]));
+      setPaymentMap(activePayments);
       // Reparación segura: solo reconstruye registros de Finanzas que están en $0, usando el monto que ya existe en las listas.
       // No modifica listas, alumnos, pagos ni registros que ya tengan un monto.
       // Modo actual de Finanzas: solo muestra registros cuyo listId
@@ -88,7 +94,11 @@ export default function Finance() {
   const moduleMatch=(r,key)=> key==='esperado' ? Number(r.montoEstimado||0)>0 : key==='cargado' ? !!r.conceptoCargado : key==='pagado' ? isPaid(r) : key==='pendiente' ? Number(r.montoEstimado||0)>0&&!isPaid(r) : true;
   const filtered=useMemo(()=>baseFiltered.filter(r=>moduleMatch(r,module)),[baseFiltered,module]);
   const counts=useMemo(()=>({esperado:baseFiltered.filter(r=>moduleMatch(r,'esperado')).length,cargado:baseFiltered.filter(r=>moduleMatch(r,'cargado')).length,pagado:baseFiltered.filter(r=>moduleMatch(r,'pagado')).length,pendiente:baseFiltered.filter(r=>moduleMatch(r,'pendiente')).length}),[baseFiltered]);
-  const totals=useMemo(()=>filtered.reduce((a,r)=>({amount:a.amount+Number(r.montoEstimado||0),cobrado:a.cobrado+(isPaid(r)?Number(r.montoEstimado||0):0)}),{amount:0,cobrado:0}),[filtered]);
+  const paidAmount = (r) => {
+    if (!isPaid(r)) return 0;
+    return Number(paymentMap.get(r.pagoId)?.amount ?? r.montoEstimado ?? 0);
+  };
+  const totals=useMemo(()=>filtered.reduce((a,r)=>({amount:a.amount+Number(r.montoEstimado||0),cobrado:a.cobrado+paidAmount(r)}),{amount:0,cobrado:0}),[filtered,paymentMap]);
 
   async function markAgreement(record) {
     const current = record.agreementDueDate || record.fechaVencimiento || addDays(record.periodoFin,record.paymentDays||0);
