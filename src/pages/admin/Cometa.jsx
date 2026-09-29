@@ -122,7 +122,7 @@ export default function CometaPage() {
       const routeRow = student ? routeByStudent.get(student.id) : null;
       const school = student ? sch.find((x) => x.id === student.schoolId) : null;
       const blankInRuta = !student || (!financeRecord && !Number(student.billingAmount) && !routeRow);
-      const alreadyPaid = !!(financeRecord?.cobrado || routeRow?.paid || (student?.paymentStatus === 'al_corriente' && financeRecord));
+      const alreadyPaid = !!(financeRecord?.cobrado === true && financeRecord?.pagoId || routeRow?.paid === true && routeRow?.paymentId || (student?.paymentStatus === 'al_corriente' && financeRecord?.cobrado === true && financeRecord?.pagoId));
       return { ...r, _key: `${r.sheetType}_${r.rowNumber}_${index}`, student, school, financeRecord, routeRow, blankInRuta, alreadyPaid, match: { type } };
     });
   }
