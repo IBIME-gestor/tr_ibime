@@ -78,6 +78,22 @@ export default function Reports() {
   const unitById = useMemo(() => Object.fromEntries(units.map((u) => [u.id, u])), [units]);
   const studentById = useMemo(() => Object.fromEntries(students.map((s) => [s.id, s])), [students]);
 
+  // Estas variables deben existir antes de construir `rows`.
+  // Antes estaban declaradas después del useMemo de rows y el bundle de producción
+  // las convertía en una referencia temporal (ReferenceError: Cannot access 'Ne' before initialization).
+  const financeInPeriod = useMemo(
+    () => financeRecords.filter((r) => r.periodoInicio <= endDate && r.periodoFin >= startDate),
+    [financeRecords, startDate, endDate]
+  );
+  const financePaidRecords = useMemo(
+    () => financeInPeriod.filter((r) => r.cobrado === true && !!r.pagoId),
+    [financeInPeriod]
+  );
+  const paymentById = useMemo(
+    () => new Map(payments.map((p) => [p.id, p])),
+    [payments]
+  );
+
   const rows = useMemo(() => {
     return units
       .filter((u) => !unitFilter || u.id === unitFilter)
@@ -144,7 +160,7 @@ export default function Reports() {
           margin,
         };
       });
-  }, [units, routes, trips, payments, lists, studentById, unitFilter, startDate, endDate]);
+  }, [units, routes, trips, payments, lists, studentById, unitFilter, startDate, endDate, financePaidRecords, paymentById]);
 
   const totals = useMemo(() => rows.reduce((a, r) => ({
     units: a.units + 1,
@@ -161,12 +177,9 @@ export default function Reports() {
 
   const collectionRate = totals.estimatedRevenue ? (totals.collected / totals.estimatedRevenue) * 100 : 0;
   const overallMargin = totals.collected ? (totals.balance / totals.collected) * 100 : 0;
-  const financeInPeriod = financeRecords.filter(r => r.periodoInicio <= endDate && r.periodoFin >= startDate);
   const financeEstimated = financeInPeriod.reduce((a,r)=>a+Number(r.montoEstimado||0),0);
   const financeCharged = financeInPeriod.filter(r=>r.conceptoCargado).length;
   const financeConfirmed = financeInPeriod.filter(r=>r.servicioConfirmado).length;
-  const financePaidRecords = financeInPeriod.filter(r => r.cobrado === true && !!r.pagoId);
-  const paymentById = new Map(payments.map((p) => [p.id, p]));
   const financeCollected = financePaidRecords.reduce((a,r)=>a+Number(paymentById.get(r.pagoId)?.amount ?? r.montoEstimado ?? 0),0);
 
   function exportExcel() {
