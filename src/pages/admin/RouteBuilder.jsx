@@ -252,6 +252,7 @@ export default function RouteBuilder() {
   const [listName, setListName] = useState('');
   const [selectedDay, setSelectedDay] = useState(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [showExistingLists, setShowExistingLists] = useState(false);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -885,25 +886,54 @@ export default function RouteBuilder() {
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
           <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l.startDate)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
-          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-lg"><option value="">Abrir lista existente…</option>{lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => <option key={l.id} value={l.id}>{isListReviewed(l) ? '✓ ' : ''}{l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`}</option>)}</select>
-          <div className="w-full flex flex-wrap gap-1.5">
-            {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => (
-              <button
-                key={`list-review-${l.id}`}
-                type="button"
-                onClick={() => openList(l.id)}
-                className={`px-2 py-1 rounded border text-[11px] transition ${
-                  isListReviewed(l)
-                    ? 'bg-green-100 border-green-300 text-green-800'
-                    : 'bg-white border-navy-200 text-navy-500'
-                }`}
-                title={isListReviewed(l)
-                  ? `Revisada por ${l.reviewedByName || 'usuario'}${l.reviewedAt ? ` · ${new Date(l.reviewedAt).toLocaleString('es-MX')}` : ''}`
-                  : 'Pendiente de revisión'}
-              >
-                {isListReviewed(l) ? '✓ ' : ''}{l.listName || `${l.startDate} ${l.endDate}`}
-              </button>
-            ))}
+          <div className="relative w-full max-w-lg">
+            <button
+              type="button"
+              onClick={() => setShowExistingLists((v) => !v)}
+              className="admin-select w-full text-left flex items-center justify-between"
+            >
+              <span className={listId ? 'text-navy-700' : 'text-navy-500'}>
+                {listId
+                  ? (() => {
+                      const selected = lists.find((l) => l.id === listId);
+                      return selected?.listName || (selected ? `${selected.startDate} ${selected.endDate} | R-${routeNomenclature(routes.find(r=>r.id===selected.routeId))}-${selected.operatorName || 'SIN-OPERADOR'}` : 'Abrir lista existente…');
+                    })()
+                  : 'Abrir lista existente…'}
+              </span>
+              <ChevronDown size={15} />
+            </button>
+            {showExistingLists && (
+              <div className="absolute z-30 mt-1 w-full max-h-72 overflow-auto rounded border border-navy-200 bg-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setListId(''); setCurrentList(null); setShowExistingLists(false); }}
+                  className="w-full px-3 py-2 text-left text-xs border-b border-navy-100 hover:bg-navy-50 text-navy-600"
+                >
+                  Abrir lista existente…
+                </button>
+                {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => {
+                  const reviewed = isListReviewed(l);
+                  const label = l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`;
+                  return (
+                    <button
+                      key={`existing-list-${l.id}`}
+                      type="button"
+                      onClick={() => { openList(l.id); setShowExistingLists(false); }}
+                      title={reviewed
+                        ? `Revisada por ${l.reviewedByName || 'usuario'}${l.reviewedAt ? ` · ${new Date(l.reviewedAt).toLocaleString('es-MX')}` : ''}`
+                        : 'Pendiente de revisión'}
+                      className={`w-full px-3 py-2 text-left text-xs border-b border-navy-100 last:border-b-0 transition ${
+                        reviewed
+                          ? 'bg-green-100 text-green-900 hover:bg-green-200'
+                          : 'bg-white text-navy-700 hover:bg-navy-50'
+                      }`}
+                    >
+                      {reviewed ? '✓ ' : ''}{label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
         </div>
