@@ -4,7 +4,7 @@ import { cascadeStyle } from '../../utils/cascade';
 
 export default function SchoolsPage() {
   const [schools, setSchools] = useState([]);
-  const [form, setForm] = useState({ name: '', address: '' });
+  const [form, setForm] = useState({ name: '', address: '', latitude: '', longitude: '' });
   const [editingId, setEditingId] = useState(null);
 
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -17,12 +17,12 @@ export default function SchoolsPage() {
     } else {
       await Schools.create(form);
     }
-    setForm({ name: '', address: '' });
+    setForm({ name: '', address: '', latitude: '', longitude: '' });
     setEditingId(null);
   }
 
   function handleEdit(school) {
-    setForm({ name: school.name, address: school.address || '' });
+    setForm({ name: school.name, address: school.address || '', latitude: school.latitude ?? '', longitude: school.longitude ?? '' });
     setEditingId(school.id);
   }
 
@@ -59,6 +59,19 @@ export default function SchoolsPage() {
                 className="admin-input"
               />
             </div>
+            <div>
+              <label className="admin-label">Latitud</label>
+              <input type="number" step="any" value={form.latitude}
+                onChange={(e) => setForm({ ...form, latitude: e.target.value })} className="admin-input"
+                placeholder="Ej. 19.640000" />
+            </div>
+            <div>
+              <label className="admin-label">Longitud</label>
+              <input type="number" step="any" value={form.longitude}
+                onChange={(e) => setForm({ ...form, longitude: e.target.value })} className="admin-input"
+                placeholder="Ej. -99.220000" />
+              <p className="text-[11px] text-navy-400 mt-1">Estas coordenadas pertenecen al plantel. No indican el origen de cada transporte.</p>
+            </div>
           </div>
           <div className="flex gap-2 mt-4">
             <button type="submit" className="btn-admin-primary flex-1">
@@ -67,7 +80,7 @@ export default function SchoolsPage() {
             {editingId && (
               <button
                 type="button"
-                onClick={() => { setEditingId(null); setForm({ name: '', address: '' }); }}
+                onClick={() => { setEditingId(null); setForm({ name: '', address: '', latitude: '', longitude: '' }); }}
                 className="btn-admin-ghost"
               >
                 Cancelar
@@ -82,7 +95,7 @@ export default function SchoolsPage() {
               <thead className="sticky top-0 z-10 bg-white shadow-sm">
                 <tr>
                   <th className="pl-5">Nombre</th>
-                  <th>Dirección</th>
+                  <th>Dirección</th><th>Coordenadas</th>
                   <th className="pr-5"></th>
                 </tr>
               </thead>
@@ -90,7 +103,7 @@ export default function SchoolsPage() {
                 {schools.map((s, i) => (
                   <tr key={s.id} className="cascade-item" style={cascadeStyle(i, 25)}>
                     <td className="pl-5 font-medium text-navy-700">{s.name}</td>
-                    <td className="text-navy-500">{s.address || '—'}</td>
+                    <td className="text-navy-500">{s.address || '—'}</td><td className="text-navy-500">{s.latitude != null && s.longitude != null && s.latitude !== '' && s.longitude !== '' ? `${s.latitude}, ${s.longitude}` : '—'}</td>
                     <td className="pr-5 text-right whitespace-nowrap">
                       <button onClick={() => handleEdit(s)} className="link-action mr-3">Editar</button>
                       <button onClick={() => handleDelete(s.id)} className="link-danger">Eliminar</button>
