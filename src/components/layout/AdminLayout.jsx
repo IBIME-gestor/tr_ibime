@@ -16,8 +16,6 @@ import {
   ListOrdered,
   CircleDollarSign,
   Landmark,
-  Bell,
-  FileSpreadsheet,
   Menu,
   X,
 } from 'lucide-react';
@@ -30,8 +28,6 @@ const links = [
   { to: '/admin/formar-ruta', label: 'Formar lista de ruta', icon: ListOrdered, roles: ['admin'] },
   { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: ['admin'] },
   { to: '/admin/finanzas', label: 'Finanzas', icon: Landmark, roles: ['admin'] },
-  { to: '/admin/notificaciones', label: 'Notificaciones', icon: Bell, roles: ['admin'] },
-  { to: '/admin/cometa', label: 'Cometa · Conciliación', icon: FileSpreadsheet, roles: ['admin', 'cashier'] },
   { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
   { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
@@ -55,7 +51,7 @@ export default function AdminLayout() {
   // ruta admin por URL (o queda en /admin, que es solo para admin),
   // lo mandamos derechito a lo único que le corresponde.
   useEffect(() => {
-    if (profile?.role === 'cashier' && !['/admin/caja', '/admin/cometa'].includes(location.pathname)) {
+    if (profile?.role === 'cashier' && location.pathname !== '/admin/caja') {
       navigate('/admin/caja', { replace: true });
     }
   }, [profile?.role, location.pathname, navigate]);
@@ -74,7 +70,7 @@ export default function AdminLayout() {
       </div>
 
       <aside
-        className={`bg-navy-800 text-white w-full md:w-60 md:min-h-screen px-4 py-5 flex-col gap-6 ${
+        className={`bg-navy-800 text-white w-full md:w-60 md:h-screen md:fixed md:left-0 md:top-0 md:bottom-0 md:overflow-y-auto md:z-30 px-4 py-5 flex-col gap-6 ${
           open ? 'flex' : 'hidden'
         } md:flex`}
       >
@@ -136,7 +132,7 @@ export default function AdminLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 min-w-0 p-4 md:p-8 min-h-screen ibime-watermark">
+      <main className="flex-1 min-w-0 md:ml-60 h-screen overflow-y-auto p-4 md:p-8 ibime-watermark">
         <Outlet />
       </main>
     </div>
