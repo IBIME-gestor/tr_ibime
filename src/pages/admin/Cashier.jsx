@@ -83,10 +83,7 @@ export default function Cashier() {
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
   useEffect(() => Drivers.subscribe(setDrivers), []);
-  useEffect(() => {
-    FinanceRecords.reconcilePaymentIntegrity().catch((err) => console.error('Error conciliando pagos:', err));
-    return FinanceRecords.subscribe(setFinanceRecords);
-  }, []);
+  useEffect(() => FinanceRecords.subscribe(setFinanceRecords), []);
 
   const routeNameById = Object.fromEntries(routes.map((r) => [r.id, r.name]));
   const schoolNameById = Object.fromEntries(schools.map((s) => [s.id, s.name]));
@@ -97,14 +94,11 @@ export default function Cashier() {
     if (!rows.length) return null;
     const todayKey = now.toISOString().slice(0, 10);
     const monthStart = `${todayKey.slice(0, 7)}-01`;
-    const paid = rows.filter((r) => r.cobrado === true && !!r.pagoId);
-    const open = rows.filter((r) => !(r.cobrado === true && !!r.pagoId));
-    const paidCurrent = paid.find((r) => r.periodoInicio && r.periodoFin && r.periodoInicio <= todayKey && todayKey <= r.periodoFin);
-    const paidMonth = paid.find((r) => (r.periodoFin || '') >= monthStart && (r.periodoInicio || '') <= todayKey);
+    const open = rows.filter((r) => !r.cobrado);
     const inPeriod = open.find((r) => r.periodoInicio && r.periodoFin && r.periodoInicio <= todayKey && todayKey <= r.periodoFin);
     const currentMonth = open.find((r) => (r.periodoFin || '') >= monthStart && (r.periodoInicio || '') <= todayKey);
     const sorted = [...rows].sort((a, b) => String(b.periodoFin || '').localeCompare(String(a.periodoFin || '')));
-    return paidCurrent || paidMonth || inPeriod || currentMonth || open[0] || paid[0] || sorted[0];
+    return inPeriod || currentMonth || open[0] || sorted[0];
   }
 
   const enrichedStudents = students.map((s) => {
@@ -176,7 +170,9 @@ export default function Cashier() {
     }
     await Students.setPaymentStatus(student.id, value, profile?.name);
     if (value !== 'al_corriente') {
-      await FinanceRecords.syncStudentPayment(student.id, { paid: false, byName: profile?.name, financeId: student._finance?.id || '' });
+      if (student._finance?.id) {
+      await FinanceRecords.syncStudentPayment(student.id, { paid: false, byName: profile?.name, financeId: student._finance.id });
+    }
     }
   }
 
