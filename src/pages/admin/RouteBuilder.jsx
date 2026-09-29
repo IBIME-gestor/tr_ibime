@@ -198,6 +198,21 @@ function financePayload(row, listData, route, school, existing = {}) {
   };
 }
 
+function isListReviewed(list) {
+  return !!(list?.reviewedStudents && list?.reviewedPayments);
+}
+
+function invalidateListReviewPatch() {
+  return {
+    reviewedStudents: false,
+    reviewedPayments: false,
+    reviewed: false,
+    reviewedAt: '',
+    reviewedByUid: '',
+    reviewedByName: '',
+  };
+}
+
 function dayHeader(date) {
   const d = new Date(`${date}T12:00:00`);
   const day = d.getDay();
@@ -236,6 +251,7 @@ export default function RouteBuilder() {
   const [listMonth, setListMonth] = useState(localDateString(new Date()).slice(0, 7));
   const [listName, setListName] = useState('');
   const [selectedDay, setSelectedDay] = useState(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -447,11 +463,12 @@ export default function RouteBuilder() {
           paymentId: editingStudentId ? (previousRow?.paymentId || '') : '',
         };
         const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
-        await RouteLists.update(currentList.id, { rows });
+        const reviewReset = invalidateListReviewPatch();
+        await RouteLists.update(currentList.id, { rows, ...reviewReset });
         const financeId = `${currentList.id}_${row.studentId}`;
         const existingFinance = await FinanceRecords.get(financeId);
         await FinanceRecords.upsert(financeId, financePayload(row, currentList, route, school, existingFinance || {}));
-        const updated = { ...currentList, rows };
+        const updated = { ...currentList, rows, ...reviewReset };
         setCurrentList(updated);
         setLists((prev) => prev.map((x) => x.id === currentList.id ? updated : x));
       }
@@ -494,6 +511,35 @@ export default function RouteBuilder() {
       const existingFinance = await FinanceRecords.get(financeId);
       return FinanceRecords.upsert(financeId, financePayload(row, listData, listRoute, listSchool, existingFinance || {}));
     }));
+  }
+
+  async function saveListReview(field, checked) {
+    if (!currentList) return;
+    const next = {
+      reviewedStudents: field === 'students' ? checked : !!currentList.reviewedStudents,
+      reviewedPayments: field === 'payments' ? checked : !!currentList.reviewedPayments,
+    };
+    const fullyReviewed = next.reviewedStudents && next.reviewedPayments;
+    const patch = {
+      ...next,
+      reviewed: fullyReviewed,
+      reviewedAt: fullyReviewed ? new Date().toISOString() : '',
+      reviewedByUid: fullyReviewed ? (user?.uid || '') : '',
+      reviewedByName: fullyReviewed ? (profile?.name || user?.email || '') : '',
+    };
+
+    setReviewSaving(true);
+    try {
+      await RouteLists.update(currentList.id, patch);
+      const updated = { ...currentList, ...patch };
+      setCurrentList(updated);
+      setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo guardar la revisión de la lista.');
+    } finally {
+      setReviewSaving(false);
+    }
   }
 
   async function createList() {
@@ -621,10 +667,11 @@ export default function RouteBuilder() {
   async function saveListOperator(nextId) {
     if (!currentList) return;
     setOperatorId(nextId);
-    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId), listName: listName.trim() || defaultListName(route, operatorName(nextId)) };
+    const reviewReset = invalidateListReviewPatch();
+    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId), listName: listName.trim() || defaultListName(route, operatorName(nextId)), ...reviewReset };
     setSaving(true);
     try {
-      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName, listName: listName.trim() || defaultListName(route, updated.operatorName) });
+      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName, listName: listName.trim() || defaultListName(route, updated.operatorName), ...reviewReset });
       await syncListFinance(updated, updated.rows || [], route, school);
       setCurrentList(updated); setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
     } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo actualizar el operador.'); }
@@ -633,8 +680,9 @@ export default function RouteBuilder() {
 
   async function updateRows(rows) {
     const sorted = [...rows].sort(priorityCompare);
-    const updated = { ...currentList, rows: sorted };
-    await RouteLists.update(currentList.id, { rows: sorted });
+    const reviewReset = invalidateListReviewPatch();
+    const updated = { ...currentList, rows: sorted, ...reviewReset };
+    await RouteLists.update(currentList.id, { rows: sorted, ...reviewReset });
     setCurrentList(updated);
     setLists((prev) => prev.map((x) => x.id === currentList.id ? updated : x));
   }
@@ -717,15 +765,17 @@ export default function RouteBuilder() {
         return;
       }
       const targetRows = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow].sort(priorityCompare);
-      await RouteLists.update(targetList.id, { rows: targetRows });
-      const targetUpdated = { ...targetList, rows: targetRows };
+      const targetReviewReset = invalidateListReviewPatch();
+      await RouteLists.update(targetList.id, { rows: targetRows, ...targetReviewReset });
+      const targetUpdated = { ...targetList, rows: targetRows, ...targetReviewReset };
       const targetFinanceId = `${targetList.id}_${row.studentId}`;
       const existingTargetFinance = await FinanceRecords.get(targetFinanceId);
       await FinanceRecords.upsert(targetFinanceId, financePayload(targetRow, targetUpdated, targetRoute, targetSchool, existingTargetFinance || {}));
       await FinanceRecords.remove(`${currentList.id}_${row.studentId}`);
       const currentRows = (currentList.rows || []).filter((x) => x.studentId !== row.studentId);
-      await RouteLists.update(currentList.id, { rows: currentRows });
-      const currentUpdated = { ...currentList, rows: currentRows };
+      const currentReviewReset = invalidateListReviewPatch();
+      await RouteLists.update(currentList.id, { rows: currentRows, ...currentReviewReset });
+      const currentUpdated = { ...currentList, rows: currentRows, ...currentReviewReset };
       setCurrentList(currentUpdated); setLists((prev) => { const exists = prev.some((x) => x.id === targetUpdated.id); return prev.map((x) => x.id === currentUpdated.id ? currentUpdated : x).concat(exists ? [] : [targetUpdated]); });
       setMovingRowId(null); setMoveRouteId(''); setMoveOperatorId('');
       window.alert(`${row.name} fue movido a ${targetRoute.name}.`);
@@ -835,7 +885,27 @@ export default function RouteBuilder() {
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
           <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l.startDate)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
-          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-lg"><option value="">Abrir lista existente…</option>{lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => <option key={l.id} value={l.id}>{l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`}</option>)}</select><select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
+          <select value={listId} onChange={(e) => openList(e.target.value)} className="admin-select max-w-lg"><option value="">Abrir lista existente…</option>{lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => <option key={l.id} value={l.id}>{isListReviewed(l) ? '✓ ' : ''}{l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`}</option>)}</select>
+          <div className="w-full flex flex-wrap gap-1.5">
+            {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => (
+              <button
+                key={`list-review-${l.id}`}
+                type="button"
+                onClick={() => openList(l.id)}
+                className={`px-2 py-1 rounded border text-[11px] transition ${
+                  isListReviewed(l)
+                    ? 'bg-green-100 border-green-300 text-green-800'
+                    : 'bg-white border-navy-200 text-navy-500'
+                }`}
+                title={isListReviewed(l)
+                  ? `Revisada por ${l.reviewedByName || 'usuario'}${l.reviewedAt ? ` · ${new Date(l.reviewedAt).toLocaleString('es-MX')}` : ''}`
+                  : 'Pendiente de revisión'}
+              >
+                {isListReviewed(l) ? '✓ ' : ''}{l.listName || `${l.startDate} ${l.endDate}`}
+              </button>
+            ))}
+          </div>
+          <select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
         </div>
       </div>
 
@@ -951,6 +1021,51 @@ export default function RouteBuilder() {
             </table>
           </div>
           <div className="px-3 py-2 border-t border-navy-100 bg-navy-50/50 text-xs flex flex-wrap gap-4"><span><b>{list.length}</b> alumnos</span><span>E+S mismo día: <b>{list.filter(hasBothSameDay).length}</b></span><span>Estimado: <b>${filteredTotal().toLocaleString('es-MX')}</b></span></div>
+
+          <div className={`px-3 py-3 border-t ${
+            isListReviewed(currentList) ? 'bg-green-100 border-green-200' : 'bg-navy-50/50 border-navy-100'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">
+                  Revisión administrativa de la lista
+                  {isListReviewed(currentList) && <span className="ml-2 text-green-800">✓ Lista revisada</span>}
+                </div>
+                {isListReviewed(currentList) ? (
+                  <div className="text-xs text-green-800 mt-0.5">
+                    Revisada por <b>{currentList.reviewedByName || '—'}</b>
+                    {currentList.reviewedAt ? ` · ${new Date(currentList.reviewedAt).toLocaleString('es-MX')}` : ''}
+                  </div>
+                ) : (
+                  <div className="text-xs text-navy-500 mt-0.5">
+                    Marca ambos controles cuando hayas terminado la revisión completa.
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!currentList.reviewedStudents}
+                    disabled={reviewSaving || saving}
+                    onChange={(e) => saveListReview('students', e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Alumnos revisados
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!currentList.reviewedPayments}
+                    disabled={reviewSaving || saving}
+                    onChange={(e) => saveListReview('payments', e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Pagos revisados
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
