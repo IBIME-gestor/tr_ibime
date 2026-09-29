@@ -368,3 +368,20 @@ export const Mail = {
   queue: ({ to, subject, html }) =>
     createDoc('mail', { to: [to], message: { subject, html } }),
 };
+
+/* ------------------------------------------------------------------ */
+/*  Notificaciones masivas                                             */
+/*  La app solo registra la campaña. El envío real lo hace Google       */
+/*  Apps Script + Gmail Workspace, para evitar servicios pagados.      */
+/* ------------------------------------------------------------------ */
+export const Notifications = {
+  list: () => listAll('notificationCampaigns', [orderBy('createdAt', 'desc')]),
+  get: (id) => getOne('notificationCampaigns', id),
+  create: async (data) => {
+    const id = data.id || null;
+    if (!id) return createDoc('notificationCampaigns', data);
+    await setDoc(doc(db, 'notificationCampaigns', id), data, { merge: true });
+    return id;
+  },
+  update: (id, data) => updateDocById('notificationCampaigns', id, { ...data, updatedAt: serverTimestamp() }),
+};
