@@ -17,6 +17,7 @@ import {
   CircleDollarSign,
   Landmark,
   Bell,
+  FileSpreadsheet,
   Menu,
   X,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ const links = [
   { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: ['admin'] },
   { to: '/admin/finanzas', label: 'Finanzas', icon: Landmark, roles: ['admin'] },
   { to: '/admin/notificaciones', label: 'Notificaciones', icon: Bell, roles: ['admin'] },
+  { to: '/admin/cometa', label: 'Cometa · Conciliación', icon: FileSpreadsheet, roles: ['admin', 'cashier'] },
   { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
   { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
   { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
@@ -53,7 +55,7 @@ export default function AdminLayout() {
   // ruta admin por URL (o queda en /admin, que es solo para admin),
   // lo mandamos derechito a lo único que le corresponde.
   useEffect(() => {
-    if (profile?.role === 'cashier' && location.pathname !== '/admin/caja') {
+    if (profile?.role === 'cashier' && !['/admin/caja', '/admin/cometa'].includes(location.pathname)) {
       navigate('/admin/caja', { replace: true });
     }
   }, [profile?.role, location.pathname, navigate]);
