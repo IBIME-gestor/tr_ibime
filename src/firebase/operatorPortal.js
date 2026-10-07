@@ -10,6 +10,7 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from './config';
@@ -72,6 +73,15 @@ export const OperatorPortal = {
   async getLink(token) {
     const snap = await getDoc(doc(db, LINKS, token));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+
+  // Directorio de alumnos del enlace (copia mínima, en bloques, que sincroniza
+  // el admin). Se lee una sola vez al abrir el portal para el autocompletado.
+  async getDirectory(token) {
+    const snap = await getDocs(collection(db, LINKS, token, 'directory'));
+    const out = [];
+    snap.docs.forEach((d) => (d.data().students || []).forEach((st) => out.push(st)));
+    return out;
   },
 
   subscribeSubmissions(token, cb, onError) {
@@ -161,7 +171,48 @@ export const OperatorLinks = {
   async remove(token) {
     const subs = await getDocs(collection(db, LINKS, token, 'submissions'));
     await Promise.all(subs.docs.map((d) => deleteDoc(d.ref)));
+    const dir = await getDocs(collection(db, LINKS, token, 'directory'));
+    await Promise.all(dir.docs.map((d) => deleteDoc(d.ref)));
     await deleteDoc(doc(db, LINKS, token));
+  },
+
+  /**
+   * Copia al enlace los alumnos de los planteles de sus rutas (solo los
+   * campos necesarios para autocompletar). Reemplaza el directorio anterior.
+   * Devuelve cuántos alumnos quedaron disponibles.
+   */
+  async syncDirectory(token, routes, students) {
+    const schoolIds = new Set((routes || []).map((r) => r.schoolId).filter(Boolean));
+    const list = (students || [])
+      .filter((s) => schoolIds.has(s.schoolId))
+      .map((s) => ({
+        matricula: String(s.matricula || '').trim(),
+        name: s.name || '',
+        nivel: s.nivel || '',
+        grado: s.grado || '',
+        schoolId: s.schoolId || '',
+        familiarResponsable: s.familiarResponsable || '',
+        telefono: s.telefono || s.parentContact || '',
+        address: s.address || '',
+      }))
+      .filter((s) => s.matricula && s.name)
+      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+
+    const old = await getDocs(collection(db, LINKS, token, 'directory'));
+    const batch = writeBatch(db);
+    old.docs.forEach((d) => batch.delete(d.ref));
+    const SIZE = 250; // ~250 alumnos por documento, muy por debajo del límite de 1 MB
+    for (let i = 0; i < list.length; i += SIZE) {
+      batch.set(doc(db, LINKS, token, 'directory', `chunk${String(i / SIZE).padStart(3, '0')}`), {
+        students: list.slice(i, i + SIZE),
+      });
+    }
+    batch.update(doc(db, LINKS, token), {
+      directoryCount: list.length,
+      directorySyncedAt: serverTimestamp(),
+    });
+    await batch.commit();
+    return list.length;
   },
 };
 
