@@ -210,6 +210,12 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create, update, delete: if isAdmin();
 
+      // Directorio de alumnos para el autocompletado del operador (solo el admin lo escribe).
+      match /directory/{chunkId} {
+        allow get, list: if true;
+        allow write: if isAdmin();
+      }
+
       match /submissions/{subId} {
         function linkActive() {
           return get(/databases/$(database)/documents/operatorLinks/$(token)).data.active == true;
