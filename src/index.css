@@ -264,3 +264,61 @@ h1, h2, h3 {
 @media (prefers-reduced-motion: reduce) {
   .cascade-item { opacity: 1; animation: none; }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Menú superior: cascada ligera                                      */
+/* ------------------------------------------------------------------ */
+@keyframes nav-cascade-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nav-cascade {
+  opacity: 0;
+  animation: nav-cascade-in 0.22s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-cascade { opacity: 1; animation: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ajustes responsivos del panel (cajones, tablas, formularios)       */
+/* ------------------------------------------------------------------ */
+/* Las tablas anchas se desplazan dentro de su tarjeta, nunca rompen la página */
+.admin-card { min-width: 0; }
+.table-scroll { @apply w-full overflow-x-auto; -webkit-overflow-scrolling: touch; }
+
+/* En celular los campos miden 16px para que iOS no haga zoom al enfocar,
+   y los botones tienen área táctil cómoda. */
+@media (max-width: 640px) {
+  .admin-input, .admin-select, select.admin-input, textarea.admin-input { font-size: 16px; }
+  .btn-admin { min-height: 44px; }
+  .admin-card { @apply p-4; }
+  .admin-h1 { @apply text-lg; }
+}
+
+/* Barra de desplazamiento discreta en el contenido principal */
+main { scrollbar-width: thin; scrollbar-color: #d5dce8 transparent; }
+
+/* ------------------------------------------------------------------ */
+/*  Vista general (Resumen) y portal del operador                      */
+/* ------------------------------------------------------------------ */
+.hero-panel {
+  @apply relative overflow-hidden rounded-xl bg-navy-800 text-white p-5 sm:p-7;
+  background-image:
+    radial-gradient(circle at 100% 0%, rgba(255, 201, 60, 0.22), transparent 45%),
+    linear-gradient(135deg, #152238 0%, #22314f 100%);
+}
+
+.stat-tile {
+  @apply admin-card flex items-start gap-3 hover:border-navy-400 hover:shadow-panel transition-all;
+}
+
+.stat-icon {
+  @apply w-10 h-10 rounded-lg flex items-center justify-center shrink-0;
+}
+
+@media print {
+  header, .no-print { display: none !important; }
+}
