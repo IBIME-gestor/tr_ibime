@@ -24,6 +24,7 @@ import Pricing from './pages/admin/Pricing';
 import Finance from './pages/admin/Finance';
 import Notifications from './pages/admin/Notifications';
 import Cometa from './pages/admin/Cometa';
+import OperatorLinks from './pages/admin/OperatorLinks';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -32,6 +33,7 @@ import TripHistory from './pages/driver/TripHistory';
 import ReferenceRoute from './pages/driver/ReferenceRoute';
 
 import PublicTrack from './pages/PublicTrack';
+import OperatorPortal from './pages/OperatorPortal';
 
 export default function App() {
   return (
@@ -65,6 +67,7 @@ export default function App() {
         <Route path="finanzas" element={<Finance />} />
         <Route path="notificaciones" element={<Notifications />} />
         <Route path="cometa" element={<Cometa />} />
+        <Route path="solicitudes-operadores" element={<OperatorLinks />} />
       </Route>
 
       <Route
@@ -84,6 +87,9 @@ export default function App() {
 
       {/* Seguimiento para el padre de familia: sin login, solo con matrícula. */}
       <Route path="/seguimiento" element={<PublicTrack />} />
+
+      {/* Enlace externo para operadores: sin login, protegido por el token del enlace. */}
+      <Route path="/operador/:token" element={<OperatorPortal />} />
 
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
