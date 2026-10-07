@@ -468,12 +468,12 @@ export default function OperatorPortalPage() {
         )}
 
         {/* Buscador de alumnos con autocompletado */}
-        <div ref={searchBoxRef} className="relative cascade-item">
+        <div ref={searchBoxRef} className={`relative cascade-item ${dirOpen && dirQuery.trim().length >= 2 ? 'z-30' : ''}`}>
           <label className="admin-label">Buscar alumno por nombre o matrícula</label>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
             <input
-              className="admin-input pl-9 !h-12 text-base"
+              className="admin-input !pl-11 !h-12 text-base"
               placeholder="Empieza a escribir…"
               value={dirQuery}
               autoComplete="off"
@@ -490,7 +490,7 @@ export default function OperatorPortalPage() {
           </div>
 
           {dirOpen && dirQuery.trim().length >= 2 && (
-            <ul className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-lg border border-navy-100 shadow-panel overflow-hidden max-h-80 overflow-y-auto" role="listbox">
+            <ul className="absolute z-50 left-0 right-0 mt-1 bg-white rounded-lg border border-navy-100 shadow-panel overflow-hidden max-h-80 overflow-y-auto" role="listbox">
               {suggestions.length === 0 && (
                 <li className="px-4 py-3 text-sm text-navy-400">
                   {directory.length === 0
@@ -769,7 +769,7 @@ export default function OperatorPortalPage() {
             <div className="admin-card text-center py-10 text-navy-400">
               <Bus size={28} className="mx-auto mb-2" />
               <p className="text-sm">
-                {subs.length === 0 ? 'Todavía no has cargado alumnos. Usa “Agregar alumno”.' : 'Sin resultados con ese filtro.'}
+                {subs.length === 0 ? 'Todavía no has cargado alumnos. Usa “Capturar manualmente” o selecciona uno del buscador.' : 'Sin resultados con ese filtro.'}
               </p>
             </div>
           )}
