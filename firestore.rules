@@ -198,6 +198,65 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
+    // Portal externo de operadores (/operador/:token).
+    // El enlace (operatorLinks/{token}) lo crea y administra SOLO el admin.
+    // El token es largo y aleatorio: quien lo tiene puede leer su enlace y
+    // capturar/ver SUS solicitudes (subcolección). Lo capturado queda en
+    // "pending": nunca toca students ni routeLists; solo el admin aprueba
+    // (la aprobación escribe en students/routeLists con permisos de admin).
+    // ------------------------------------------------------------------
+    match /operatorLinks/{token} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+
+      match /submissions/{subId} {
+        function linkActive() {
+          return get(/databases/$(database)/documents/operatorLinks/$(token)).data.active == true;
+        }
+
+        function validContent(d) {
+          return d.matricula is string && d.matricula.size() > 0 && d.matricula.size() <= 40
+            && d.name is string && d.name.size() > 0 && d.name.size() <= 120
+            && d.routeId is string
+            && d.tipoServicio in ['completo', 'medio', 'diario'];
+        }
+
+        allow get, list: if true;
+
+        allow create: if linkActive()
+          && request.resource.data.status == 'pending'
+          && request.resource.data.linkToken == token
+          && validContent(request.resource.data)
+          && request.resource.data.keys().hasOnly([
+               'matricula', 'name', 'nivel', 'grado', 'familiarResponsable', 'telefono',
+               'address', 'routeId', 'routeName', 'schoolId', 'tipoServicio',
+               'medioServicio', 'diasSemana', 'fechasDiarias',
+               'linkToken', 'status', 'createdAt'
+             ]);
+
+        allow update: if isAdmin()
+          || (linkActive()
+              && resource.data.status in ['pending', 'rejected']
+              && request.resource.data.status == 'pending'
+              && validContent(request.resource.data)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                   'matricula', 'name', 'nivel', 'grado', 'familiarResponsable', 'telefono',
+                   'address', 'routeId', 'routeName', 'schoolId', 'tipoServicio',
+                   'medioServicio', 'diasSemana', 'fechasDiarias',
+                   'status', 'rejectReason', 'updatedAt'
+                 ]));
+
+        allow delete: if isAdmin() || (linkActive() && resource.data.status == 'pending');
+      }
+    }
+
+    // Consulta transversal (collectionGroup) del admin sobre todas las solicitudes.
+    match /{path=**}/submissions/{subId} {
+      allow read: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
     // Colecciones públicas (SIN login) para el seguimiento del padre de
     // familia. Contienen deliberadamente lo mínimo: matrícula -> ruta, y
     // un espejo de solo-lectura del recorrido del día (posición del
