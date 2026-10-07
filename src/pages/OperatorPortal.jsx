@@ -13,6 +13,9 @@ import {
   Save,
   X,
   Info,
+  UserPlus,
+  MapPin,
+  Phone,
 } from 'lucide-react';
 import { OperatorPortal } from '../firebase/operatorPortal';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -78,6 +81,12 @@ export default function OperatorPortalPage() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('todos');
   const [newDate, setNewDate] = useState('');
+  const [directory, setDirectory] = useState([]);
+  const [dirQuery, setDirQuery] = useState('');
+  const [dirOpen, setDirOpen] = useState(false);
+  const [dirActive, setDirActive] = useState(0);
+  const [formMode, setFormMode] = useState('manual'); // 'directory' = alumno elegido del buscador
+  const searchBoxRef = useRef(null);
   const fileRef = useRef(null);
   const formRef = useRef(null);
 
@@ -102,7 +111,86 @@ export default function OperatorPortalPage() {
     return OperatorPortal.subscribeSubmissions(token, (rows) => setSubs(rows));
   }, [token, link?.active]);
 
+  useEffect(() => {
+    if (!link?.active) return;
+    OperatorPortal.getDirectory(token)
+      .then(setDirectory)
+      .catch((err) => console.error('No se pudo cargar el directorio:', err));
+  }, [token, link?.active]);
+
+  useEffect(() => {
+    function onDown(e) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) setDirOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
   const routes = link?.routes || [];
+
+  // Matrículas ya capturadas (y su estado), para marcarlas en las sugerencias
+  const takenByMat = useMemo(() => {
+    const m = new Map();
+    subs.forEach((x) => {
+      if (x.status !== 'rejected') m.set(String(x.matricula).trim().toLowerCase(), x);
+    });
+    return m;
+  }, [subs]);
+
+  const suggestions = useMemo(() => {
+    const q = normKey(dirQuery);
+    if (q.length < 2) return [];
+    return directory
+      .filter((d) => normKey(d.name).includes(q) || normKey(d.matricula).includes(q))
+      .sort((a, b) => {
+        const sa = normKey(a.name).startsWith(q) || normKey(a.matricula).startsWith(q) ? 0 : 1;
+        const sb = normKey(b.name).startsWith(q) || normKey(b.matricula).startsWith(q) ? 0 : 1;
+        return sa - sb;
+      })
+      .slice(0, 8);
+  }, [dirQuery, directory]);
+
+  useEffect(() => setDirActive(0), [dirQuery]);
+
+  function pickStudent(st) {
+    const route =
+      routes.find((r) => r.schoolId && r.schoolId === st.schoolId) || (routes.length === 1 ? routes[0] : null);
+    setEditingId(null);
+    setForm({
+      ...emptyForm,
+      matricula: st.matricula,
+      name: st.name,
+      nivel: st.nivel || '',
+      grado: st.grado || '',
+      familiarResponsable: st.familiarResponsable || '',
+      telefono: st.telefono || '',
+      address: st.address || '',
+      routeId: route?.id || '',
+    });
+    setFormMode('directory');
+    setError('');
+    setDirQuery('');
+    setDirOpen(false);
+    setShowForm(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+
+  function onSearchKey(e) {
+    if (!dirOpen || !suggestions.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setDirActive((i) => (i + 1) % suggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setDirActive((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const st = suggestions[dirActive];
+      if (st && !takenByMat.has(String(st.matricula).trim().toLowerCase())) pickStudent(st);
+    } else if (e.key === 'Escape') {
+      setDirOpen(false);
+    }
+  }
 
   useEffect(() => {
     if (routes.length === 1 && !form.routeId) setForm((f) => ({ ...f, routeId: routes[0].id }));
@@ -133,6 +221,7 @@ export default function OperatorPortalPage() {
   }
 
   function openNew() {
+    setFormMode('manual');
     setEditingId(null);
     setForm({ ...emptyForm, routeId: routes.length === 1 ? routes[0].id : '' });
     setError('');
@@ -141,6 +230,7 @@ export default function OperatorPortalPage() {
   }
 
   function openEdit(s) {
+    setFormMode('manual');
     setEditingId(s.id);
     setForm({ ...emptyForm, ...s });
     setError('');
@@ -377,9 +467,78 @@ export default function OperatorPortalPage() {
           <div className="rounded-lg bg-go-light border border-go/20 text-go text-sm px-4 py-3 cascade-item">{notice}</div>
         )}
 
+        {/* Buscador de alumnos con autocompletado */}
+        <div ref={searchBoxRef} className="relative cascade-item">
+          <label className="admin-label">Buscar alumno por nombre o matrícula</label>
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
+            <input
+              className="admin-input pl-9 !h-12 text-base"
+              placeholder="Empieza a escribir…"
+              value={dirQuery}
+              autoComplete="off"
+              onChange={(e) => {
+                setDirQuery(e.target.value);
+                setDirOpen(true);
+              }}
+              onFocus={() => setDirOpen(true)}
+              onKeyDown={onSearchKey}
+              role="combobox"
+              aria-expanded={dirOpen && dirQuery.trim().length >= 2}
+              aria-autocomplete="list"
+            />
+          </div>
+
+          {dirOpen && dirQuery.trim().length >= 2 && (
+            <ul className="absolute z-20 left-0 right-0 mt-1 bg-white rounded-lg border border-navy-100 shadow-panel overflow-hidden max-h-80 overflow-y-auto" role="listbox">
+              {suggestions.length === 0 && (
+                <li className="px-4 py-3 text-sm text-navy-400">
+                  {directory.length === 0
+                    ? 'El buscador aún no tiene alumnos cargados. Usa "Capturar manualmente".'
+                    : 'Sin coincidencias. Si el alumno no aparece, usa "Capturar manualmente".'}
+                </li>
+              )}
+              {suggestions.map((st, idx) => {
+                const taken = takenByMat.get(String(st.matricula).trim().toLowerCase());
+                return (
+                  <li key={st.matricula} role="option" aria-selected={idx === dirActive}>
+                    <button
+                      type="button"
+                      disabled={!!taken}
+                      onMouseEnter={() => setDirActive(idx)}
+                      onClick={() => pickStudent(st)}
+                      className={`w-full text-left px-4 py-3 flex items-center gap-3 border-b border-navy-50 last:border-0 ${
+                        taken ? 'opacity-60 cursor-not-allowed' : idx === dirActive ? 'bg-navy-50' : 'hover:bg-navy-50'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-navy-900 truncate">{st.name}</p>
+                        <p className="text-xs text-navy-400 truncate">
+                          Mat. {st.matricula}
+                          {st.nivel ? ` · ${st.nivel}` : ''}
+                          {st.grado ? ` · ${st.grado}` : ''}
+                        </p>
+                      </div>
+                      {taken ? (
+                        <span className={STATUS[taken.status]?.cls || 'badge'}>Ya en tu lista</span>
+                      ) : (
+                        <UserPlus size={16} className="text-navy-400 shrink-0" />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="text-xs text-navy-400 mt-1.5">
+            Elige al alumno y solo indica su tipo de servicio.
+            {directory.length > 0 ? ` (${directory.length} alumnos disponibles)` : ''}
+          </p>
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-2">
-          <button type="button" onClick={openNew} className="btn-admin-primary sm:w-auto w-full">
-            <Plus size={16} /> Agregar alumno
+          <button type="button" onClick={openNew} className="btn-admin-ghost sm:w-auto w-full">
+            <Plus size={16} /> Capturar manualmente
           </button>
           <button
             type="button"
@@ -390,26 +549,55 @@ export default function OperatorPortalPage() {
             <Upload size={16} /> Importar Excel / CSV
           </button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-400" />
-            <input
-              className="admin-input pl-9"
-              placeholder="Buscar por nombre o matrícula"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
         </div>
 
         {showForm && (
           <form ref={formRef} onSubmit={handleSubmit} className="admin-card space-y-4 cascade-item scroll-mt-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-display font-bold text-navy-900">{editingId ? 'Editar alumno' : 'Nuevo alumno'}</h2>
+              <h2 className="font-display font-bold text-navy-900">
+                {editingId ? 'Editar alumno' : formMode === 'directory' ? 'Agregar alumno' : 'Nuevo alumno (captura manual)'}
+              </h2>
               <button type="button" onClick={closeForm} className="p-1 text-navy-400 hover:text-navy-800" aria-label="Cerrar">
                 <X size={18} />
               </button>
             </div>
 
+            {formMode === 'directory' && !editingId ? (
+              <div className="rounded-lg border border-navy-100 bg-navy-50/60 p-3 sm:p-4 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-navy-900">{form.name}</p>
+                    <p className="text-xs text-navy-400">
+                      Mat. {form.matricula}
+                      {form.nivel ? ` · ${form.nivel}` : ''}
+                      {form.grado ? ` · ${form.grado}` : ''}
+                    </p>
+                  </div>
+                  <button type="button" onClick={closeForm} className="link-action shrink-0">Cambiar alumno</button>
+                </div>
+                {form.familiarResponsable && <p className="text-xs text-navy-600">Familiar: {form.familiarResponsable}</p>}
+                {form.telefono && (
+                  <p className="text-xs text-navy-600 flex items-center gap-1.5"><Phone size={12} /> {form.telefono}</p>
+                )}
+                {form.address && (
+                  <p className="text-xs text-navy-600 flex items-start gap-1.5"><MapPin size={12} className="mt-0.5 shrink-0" /> {form.address}</p>
+                )}
+                {showRoutePicker && (
+                  <div className="pt-1">
+                    <label className="admin-label">Ruta *</label>
+                    <select className="admin-select" value={form.routeId} onChange={(e) => setField('routeId', e.target.value)}>
+                      <option value="">Elige la ruta…</option>
+                      {routes.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                          {r.schoolName ? ` — ${r.schoolName}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="admin-label">Matrícula *</label>
@@ -454,6 +642,7 @@ export default function OperatorPortalPage() {
                 </div>
               )}
             </div>
+            )}
 
             <div>
               <label className="admin-label">Servicio</label>
@@ -567,6 +756,14 @@ export default function OperatorPortalPage() {
         )}
 
         {/* Lista */}
+        {subs.length > 6 && (
+          <input
+            className="admin-input"
+            placeholder="Filtrar mi lista por nombre o matrícula"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
         <div className="space-y-2">
           {sorted.length === 0 && (
             <div className="admin-card text-center py-10 text-navy-400">
