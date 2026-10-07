@@ -12,6 +12,7 @@ import {
   Plus,
   Inbox,
   ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Drivers, Routes, Schools, Units, Students, PricingConcepts } from '../../firebase/services';
@@ -52,6 +53,7 @@ export default function OperatorLinksPage() {
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState(null);
   const [copied, setCopied] = useState('');
+  const [syncing, setSyncing] = useState('');
 
   // formulario de nuevo enlace
   const [operatorId, setOperatorId] = useState('');
@@ -159,16 +161,24 @@ export default function OperatorLinksPage() {
     const op = drivers.find((d) => d.id === operatorId);
     setCreating(true);
     try {
-      await OperatorLinks.create({
+      const linkRoutes = routeIds.map((id) => {
+        const r = routes.find((x) => x.id === id);
+        return { id, name: r?.name || '', schoolId: r?.schoolId || '', schoolName: schoolName(r?.schoolId) };
+      });
+      const token = await OperatorLinks.create({
         operatorId,
         operatorName: op?.name || '',
         label: label.trim(),
-        routes: routeIds.map((id) => {
-          const r = routes.find((x) => x.id === id);
-          return { id, name: r?.name || '', schoolId: r?.schoolId || '', schoolName: schoolName(r?.schoolId) };
-        }),
+        routes: linkRoutes,
         createdByName: profile?.name || '',
       });
+      // Directorio para el autocompletado del operador
+      try {
+        await OperatorLinks.syncDirectory(token, linkRoutes, await Students.list());
+      } catch (err) {
+        console.error(err);
+        window.alert('El enlace se creó, pero no se pudo cargar el directorio de alumnos. Usa "Actualizar alumnos" en el enlace.');
+      }
       setLabel('');
       setOperatorId('');
       setRouteIds([]);
@@ -188,6 +198,19 @@ export default function OperatorLinksPage() {
     }
     setCopied(token);
     setTimeout(() => setCopied(''), 2000);
+  }
+
+  async function syncLink(l) {
+    const token = l.token || l.id;
+    setSyncing(token);
+    try {
+      const n = await OperatorLinks.syncDirectory(token, l.routes || [], await Students.list());
+      window.alert(`Listo: ${n} alumno(s) disponibles para buscar en este enlace.`);
+    } catch (err) {
+      window.alert(err.message || 'No se pudo actualizar el directorio.');
+    } finally {
+      setSyncing('');
+    }
   }
 
   async function removeLink(l) {
@@ -311,6 +334,8 @@ export default function OperatorLinksPage() {
                       </p>
                       <p className="text-xs text-navy-400 mt-0.5">
                         {(l.routes || []).map((r) => r.name).join(', ') || 'Sin rutas'}
+                        {' · '}
+                        {typeof l.directoryCount === 'number' ? `${l.directoryCount} alumnos en el buscador` : 'buscador sin cargar'}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -336,6 +361,9 @@ export default function OperatorLinksPage() {
                     <a href={linkUrl(token)} target="_blank" rel="noreferrer" className="btn-admin-ghost !h-9">
                       <ExternalLink size={14} /> Abrir
                     </a>
+                    <button type="button" onClick={() => syncLink(l)} disabled={syncing === token} className="btn-admin-ghost !h-9">
+                      <RefreshCw size={14} className={syncing === token ? 'animate-spin' : ''} /> Actualizar alumnos
+                    </button>
                     <button
                       type="button"
                       onClick={() => OperatorLinks.setActive(token, l.active === false)}
