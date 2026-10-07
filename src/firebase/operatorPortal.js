@@ -177,14 +177,14 @@ export const OperatorLinks = {
   },
 
   /**
-   * Copia al enlace los alumnos de los planteles de sus rutas (solo los
-   * campos necesarios para autocompletar). Reemplaza el directorio anterior.
+   * Copia al enlace TODOS los alumnos de todos los planteles (solo los
+   * campos necesarios para autocompletar). Las rutas del operador ya no
+   * limitan el directorio: una ruta puede transportar alumnos de otros
+   * planteles. Reemplaza el directorio anterior.
    * Devuelve cuántos alumnos quedaron disponibles.
    */
   async syncDirectory(token, routes, students) {
-    const schoolIds = new Set((routes || []).map((r) => r.schoolId).filter(Boolean));
     const list = (students || [])
-      .filter((s) => schoolIds.has(s.schoolId))
       .map((s) => ({
         matricula: String(s.matricula || '').trim(),
         name: s.name || '',
@@ -490,6 +490,7 @@ export async function approveSubmissions(subs, links, ctx) {
       const operatorName = link?.operatorName || '';
 
       // 1) Alumno
+      const existing = studentsByMat.get(String(sub.matricula).trim().toLowerCase());
       const base = {
         matricula: sub.matricula,
         name: sub.name,
@@ -498,14 +499,15 @@ export async function approveSubmissions(subs, links, ctx) {
         familiarResponsable: sub.familiarResponsable || '',
         telefono: sub.telefono || '',
         address: sub.address || '',
-        schoolId: route.schoolId || sub.schoolId || '',
+        // Conserva el plantel real del alumno cuando viene del directorio.
+        // Solo usa el plantel de la ruta como respaldo para capturas manuales.
+        schoolId: sub.schoolId || existing?.schoolId || route.schoolId || '',
         routeId: route.id,
         tipoServicio: sub.tipoServicio || 'completo',
         medioServicio: sub.medioServicio || 'entrada',
         diasSemana: (sub.diasSemana || []).map(Number),
         fechasDiarias: sub.fechasDiarias || [],
       };
-      const existing = studentsByMat.get(String(sub.matricula).trim().toLowerCase());
       let student;
       if (existing) {
         if (existing.routeId && existing.routeId !== route.id) {
