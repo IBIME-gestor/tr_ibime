@@ -7,6 +7,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasUserProfile() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active != false;
+    }
+
     function myEmail() {
       return request.auth.token.email.lower();
     }
@@ -16,19 +22,19 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && userDoc().data.role == 'admin';
+      return hasUserProfile() && userDoc().data.role == 'admin';
     }
 
     function isDriver() {
-      return isSignedIn() && userDoc().data.role == 'driver';
+      return hasUserProfile() && userDoc().data.role == 'driver';
     }
 
     function isNanny() {
-      return isSignedIn() && userDoc().data.role == 'nanny';
+      return hasUserProfile() && userDoc().data.role == 'nanny';
     }
 
     function isCashier() {
-      return isSignedIn() && userDoc().data.role == 'cashier';
+      return hasUserProfile() && userDoc().data.role == 'cashier';
     }
 
     function myStaffId() {
@@ -44,7 +50,7 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/admins/$(myEmail()))
         ) ||
         (
-          (request.resource.data.role == 'driver' || request.resource.data.role == 'nanny') &&
+          (request.resource.data.role == 'driver' || request.resource.data.role == 'nanny' || request.resource.data.role == 'cashier') &&
           get(/databases/$(database)/documents/drivers/$(request.resource.data.staffId)).data.email.lower() == myEmail() &&
           get(/databases/$(database)/documents/drivers/$(request.resource.data.staffId)).data.role == request.resource.data.role
         )
@@ -54,7 +60,7 @@ service cloud.firestore {
     }
 
     match /admins/{email} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin();
       allow write: if isAdmin();
     }
 
@@ -69,7 +75,7 @@ service cloud.firestore {
     }
 
     match /drivers/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || (hasUserProfile() && request.auth.token.email != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower());
       allow write: if isAdmin();
     }
 
@@ -212,7 +218,8 @@ service cloud.firestore {
 
       // Directorio de alumnos para el autocompletado del operador (solo el admin lo escribe).
       match /directory/{chunkId} {
-        allow get, list: if true;
+        allow get, list: if isAdmin() ||
+          (get(/databases/$(database)/documents/operatorLinks/$(token)).data.active == true);
         allow write: if isAdmin();
       }
 
@@ -228,7 +235,7 @@ service cloud.firestore {
             && d.tipoServicio in ['completo', 'medio', 'diario'];
         }
 
-        allow get, list: if true;
+        allow get, list: if isAdmin() || linkActive();
 
         allow create: if linkActive()
           && request.resource.data.status == 'pending'
@@ -270,13 +277,22 @@ service cloud.firestore {
     // padre, ni el expediente completo del alumno.
     // ------------------------------------------------------------------
     match /publicStudentIndex/{matricula} {
-      allow read: if true;
+      // La búsqueda pública solo debe leer una matrícula concreta; no permite enumerar la colección.
+      allow get: if true;
+      allow list: if false;
       allow write: if isAdmin();
     }
 
     match /publicTracking/{tripId} {
-      allow read: if true;
-      allow write: if isAdmin() || isDriver() || isNanny();
+      // Seguimiento por ID conocido; se prohíbe listar todos los recorridos públicos.
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin() ||
+        ((isDriver() || isNanny()) &&
+          exists(/databases/$(database)/documents/trips/$(tripId)) &&
+          (get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == myStaffId() ||
+           get(/databases/$(database)/documents/trips/$(tripId)).data.nannyId == myStaffId()));
+      allow delete: if isAdmin();
     }
   }
 }
