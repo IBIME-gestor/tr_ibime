@@ -322,3 +322,15 @@ main { scrollbar-width: thin; scrollbar-color: #d5dce8 transparent; }
 @media print {
   header, .no-print { display: none !important; }
 }
+
+
+/* Leaflet usa z-index internos de hasta 1000 (paneles y controles +/-).
+   Sin aislar el mapa en su propio contexto de apilamiento, esos valores
+   compiten con el menú superior (z-40) y el mapa se pinta por encima de
+   los menús desplegables. Con z-index: 0 todo lo del mapa queda "encerrado"
+   dentro del contenedor. */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
