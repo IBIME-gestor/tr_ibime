@@ -10,7 +10,7 @@ service cloud.firestore {
     function hasUserProfile() {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active != false;
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('activo', true) != false;
     }
 
     function myEmail() {
@@ -42,7 +42,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
 
       allow create: if isSignedIn() && request.auth.uid == uid && (
         (
@@ -56,11 +56,12 @@ service cloud.firestore {
         )
       );
 
-      allow update, delete: if false;
+      allow update, delete: if isAdmin();
     }
 
     match /admins/{email} {
-      allow read: if isAdmin();
+      allow get: if isSignedIn() && request.auth.token.email != null && email == request.auth.token.email.lower();
+      allow list: if isAdmin();
       allow write: if isAdmin();
     }
 
@@ -75,7 +76,9 @@ service cloud.firestore {
     }
 
     match /drivers/{id} {
-      allow read: if isAdmin() || (hasUserProfile() && request.auth.token.email != null && resource.data.email != null && resource.data.email.lower() == request.auth.token.email.lower());
+      allow read: if isAdmin() ||
+        (isSignedIn() && request.auth.token.email != null &&
+         resource.data.email == request.auth.token.email.lower());
       allow write: if isAdmin();
     }
 
