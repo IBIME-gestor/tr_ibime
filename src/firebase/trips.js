@@ -12,6 +12,7 @@ import {
   writeBatch,
   serverTimestamp,
   deleteField,
+  deleteDoc,
 } from 'firebase/firestore';
 import { db } from './config';
 import { Routes, Students } from './services';
@@ -406,6 +407,22 @@ export async function addStudentToTrip(tripId, student, order, trip, addedByProf
     date: trip?.date || null,
     shift: trip?.shift || null,
   });
+}
+
+/** Quita un alumno solo de este recorrido; no elimina su expediente ni su ruta permanente. */
+export async function removeStudentFromTrip(tripId, studentId) {
+  const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
+  const stopSnap = await getDoc(stopRef);
+  if (!stopSnap.exists()) return;
+  const stop = stopSnap.data();
+  if (stop.status && stop.status !== 'pending') {
+    throw new Error('No se puede quitar un alumno después de registrar su asistencia.');
+  }
+  await deleteDoc(stopRef);
+  const snap = await getDocs(query(collection(db, 'trips', tripId, 'stops'), orderBy('order')));
+  const batch = writeBatch(db);
+  snap.docs.forEach((item, index) => batch.update(item.ref, { order: index }));
+  await batch.commit();
 }
 
 /* ------------------------------------------------------------------ */
