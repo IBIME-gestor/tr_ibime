@@ -20,6 +20,7 @@ import Cashier from './pages/admin/Cashier';
 import Payroll from './pages/admin/Payroll';
 import AccessControl from './pages/admin/AccessControl';
 import RouteBuilder from './pages/admin/RouteBuilder';
+import ListasConsulta from './pages/admin/ListasConsulta';
 import Pricing from './pages/admin/Pricing';
 import Finance from './pages/admin/Finance';
 import Notifications from './pages/admin/Notifications';
@@ -63,6 +64,9 @@ export default function App() {
         <Route path="nomina" element={<Payroll />} />
         <Route path="acceso" element={<AccessControl />} />
         <Route path="formar-ruta" element={<RouteBuilder />} />
+        <Route path="listas-alumnos/generar" element={<RouteBuilder />} />
+        <Route path="listas-alumnos/modificar" element={<RouteBuilder />} />
+        <Route path="listas-alumnos/consultar" element={<ListasConsulta />} />
         <Route path="tarifas" element={<Pricing />} />
         <Route path="finanzas" element={<Finance />} />
         <Route path="notificaciones" element={<Notifications />} />
