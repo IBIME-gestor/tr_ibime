@@ -222,10 +222,25 @@ export const Students = {
    * la matrícula del alumno el primer día (antes de tener orden de ruta).
    */
   async findByMatricula(matricula) {
-    const results = await listAll('students', [
-      where('matricula', '==', matricula.trim()),
-    ]);
+    const value = String(matricula || '').trim();
+    if (!value) return null;
+    const results = await listAll('students', [where('matricula', '==', value)]);
     return results[0] || null;
+  },
+
+  // Búsqueda flexible para el operador: matrícula, nombre o apellido.
+  // Firestore no hace búsquedas parciales/insensibles a mayúsculas de forma nativa,
+  // por eso se filtra el directorio cargado desde la colección.
+  async search(queryText, limit = 20) {
+    const term = String(queryText || '').trim().toLocaleLowerCase('es-MX');
+    if (!term) return [];
+    const all = await listAll('students', [orderBy('name')]);
+    return all.filter((student) => {
+      const name = String(student.name || '').toLocaleLowerCase('es-MX');
+      const matricula = String(student.matricula || '').toLocaleLowerCase('es-MX');
+      const apellido = String(student.apellido || student.lastName || '').toLocaleLowerCase('es-MX');
+      return name.includes(term) || matricula.includes(term) || apellido.includes(term);
+    }).slice(0, limit);
   },
 
   /**
