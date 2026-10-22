@@ -56,6 +56,7 @@ const groups = [
       { to: '/admin/listas/modificar', label: 'Modificar datos de listas', icon: Settings2, roles: ['admin'] },
       { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: ['admin'] },
       { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
+      { to: '/admin/vista-operador', label: 'Vista del operador', icon: RouteIcon, roles: ['admin'] },
       { to: '/admin/en-vivo', label: 'Flota en vivo', icon: Radio, roles: ['admin'] },
     ],
   },
