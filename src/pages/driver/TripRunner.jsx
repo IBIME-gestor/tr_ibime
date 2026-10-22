@@ -15,6 +15,7 @@ import {
   markArrived,
   markAllBulk,
   addStudentToTrip,
+  removeStudentFromTrip,
   completeTrip,
   updateLiveLocation,
   syncPublicTracking,
@@ -394,14 +395,38 @@ export default function TripRunner() {
     setSearchError('');
     setFound(null);
     if (!matricula.trim()) return;
-
-    const alreadyInTrip = stops.find((s) => s.matricula === matricula.trim());
-    const student = await Students.findByMatricula(matricula);
-    if (!student) {
-      setSearchError('No se encontró ningún alumno con esa matrícula.');
-      return;
+    try {
+      const matches = await Students.search(matricula.trim(), 20);
+      if (!matches.length) {
+        setSearchError('No se encontró ningún alumno por nombre, apellido o matrícula.');
+        return;
+      }
+      // Si hay coincidencia exacta por matrícula, priorizarla; de lo contrario,
+      // mostrar la primera coincidencia y permitir confirmar el nombre antes de agregar.
+      const term = matricula.trim().toLocaleLowerCase('es-MX');
+      const student = matches.find((s) => String(s.matricula || '').toLocaleLowerCase('es-MX') === term) || matches[0];
+      const alreadyInTrip = stops.find((s) => s.studentId === student.id || String(s.matricula || '').toLowerCase() === String(student.matricula || '').toLowerCase());
+      setFound({ student, alreadyInTrip });
+      if (matches.length > 1 && !matches.some((s) => String(s.matricula || '').toLocaleLowerCase('es-MX') === term)) {
+        setSearchError(`Hay ${matches.length} coincidencias. Verifica cuidadosamente el nombre y la matrícula antes de confirmar.`);
+      }
+    } catch (err) {
+      setSearchError(err?.message || 'No se pudo buscar al alumno.');
     }
-    setFound({ student, alreadyInTrip });
+  }
+
+  async function handleRemoveFromToday(stop) {
+    if (!trip || stop.status !== 'pending') return;
+    const ok = window.confirm(`¿Quitar a ${stop.name} únicamente de la lista de este recorrido? Su expediente y asignación permanente no se modificarán.`);
+    if (!ok) return;
+    try {
+      setBusy(true);
+      await removeStudentFromTrip(trip.id, stop.studentId);
+    } catch (err) {
+      setSearchError(err?.message || 'No se pudo quitar al alumno de este recorrido.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmMatriculaBoard() {
@@ -655,14 +680,14 @@ export default function TripRunner() {
           {!allResolved && (
         <div className="card">
           <p className="font-medium text-sm text-navy-600 mb-2">
-            ¿No aparece el alumno? Búscalo por matrícula
+            ¿No aparece el alumno? Búscalo por nombre, apellido o matrícula
           </p>
           <form onSubmit={handleSearchMatricula} className="flex gap-2">
             <input
               value={matricula}
               onChange={(e) => setMatricula(e.target.value)}
               inputMode="numeric"
-              placeholder="Matrícula"
+              placeholder="Nombre, apellido o matrícula"
               className="flex-1 rounded-xl border border-navy-100 px-3 py-3 text-lg"
             />
             <button type="submit" className="px-4 rounded-xl bg-navy-800 text-white font-display font-semibold">
@@ -767,7 +792,17 @@ export default function TripRunner() {
       <div>
         <p className="text-sm font-medium text-navy-600 mb-2 mt-4">Todos los alumnos</p>
         {stops.map((stop, i) => (
-          <StopCard key={stop.id} stop={stop} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
+          <div key={stop.id} className="relative">
+            <StopCard stop={stop} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
+            {stop.status === 'pending' && !allResolved && (
+              <button
+                type="button"
+                onClick={() => handleRemoveFromToday(stop)}
+                disabled={busy}
+                className="ml-3 mb-3 text-xs font-semibold text-stop underline underline-offset-2"
+              >Quitar de este recorrido</button>
+            )}
+          </div>
         ))}
       </div>
 
