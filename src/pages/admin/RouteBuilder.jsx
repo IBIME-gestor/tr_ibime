@@ -547,6 +547,20 @@ export default function RouteBuilder() {
 
   async function createList() {
     if (!route || !startDate || !endDate || startDate > endDate || !dates.length) return;
+    // Evita generar accidentalmente dos listas para la misma ruta, operador y periodo.
+    const effectiveOperatorId = operatorId || route.driverId || '';
+    const duplicate = lists.find((item) =>
+      item.routeId === route.id &&
+      (item.operatorId || '') === effectiveOperatorId &&
+      item.startDate === startDate && item.endDate === endDate &&
+      item.status !== 'eliminada'
+    );
+    if (duplicate) {
+      window.alert(`Ya existe una lista para esta ruta, operador y periodo: ${duplicate.listName || duplicate.id}. Selecciónala en las listas existentes para modificarla, en lugar de generar otra.`);
+      setCurrentList(duplicate);
+      setListId(duplicate.id);
+      return;
+    }
     setSaving(true);
     try {
       const source = allStudents.filter((s) => s.routeId === route.id);
@@ -566,9 +580,9 @@ export default function RouteBuilder() {
         status: 'abierta',
         createdByUid: user?.uid || '',
         createdByName: profile?.name || '',
-        operatorId: operatorId || '',
-        operatorName: operatorName(operatorId),
-        listName: (listName.trim() || defaultListName(route, operatorName(operatorId))),
+        operatorId: effectiveOperatorId,
+        operatorName: operatorName(effectiveOperatorId),
+        listName: (listName.trim() || defaultListName(route, operatorName(effectiveOperatorId))),
       };
       const id = await RouteLists.create(data);
       const created = { id, ...data };
