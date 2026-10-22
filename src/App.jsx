@@ -26,6 +26,7 @@ import Finance from './pages/admin/Finance';
 import Notifications from './pages/admin/Notifications';
 import Cometa from './pages/admin/Cometa';
 import OperatorLinks from './pages/admin/OperatorLinks';
+import OperatorRouteView from './pages/admin/OperatorRouteView';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="reportes" element={<Reports />} />
         <Route path="en-vivo" element={<FleetLive />} />
         <Route path="recorridos-activos" element={<ActiveTrips />} />
+        <Route path="vista-operador" element={<OperatorRouteView />} />
         <Route path="caja" element={<Cashier />} />
         <Route path="nomina" element={<Payroll />} />
         <Route path="acceso" element={<AccessControl />} />
