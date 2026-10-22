@@ -60,7 +60,7 @@ export default function ListasModificar() {
     const item = lists.find((row) => row.id === id);
     setSelectedId(id); setNotice(''); setError('');
     if (!item) { setRouteId(''); setOperatorId(''); setStartDate(''); setEndDate(''); setListName(''); return; }
-    setRouteId(item.routeId || ''); setOperatorId(item.operatorId || '');
+    setRouteId(item.routeId || ''); setOperatorId(item.operatorId || routes.find((r) => r.id === item.routeId)?.driverId || '');
     setStartDate(item.startDate || ''); setEndDate(item.endDate || ''); setListName(item.listName || '');
   }
 
@@ -152,7 +152,7 @@ export default function ListasModificar() {
         <div className="flex items-center gap-2 font-semibold text-navy-800"><Search size={17}/> 1. Selecciona la lista que necesitas corregir</div>
         <div className="grid md:grid-cols-2 gap-3">
           <div><label className="admin-label">Mes de la lista</label><input type="month" value={month} onChange={(e) => { setMonth(e.target.value); setSelectedId(''); }} className="admin-input w-full"/></div>
-          <div><label className="admin-label">Lista existente ({visibleLists.length})</label><select value={selectedId} onChange={(e) => chooseList(e.target.value)} className="admin-select w-full"><option value="">Selecciona una lista…</option>{visibleLists.map((item) => { const route = routes.find((r) => r.id === item.routeId); return <option key={item.id} value={item.id}>{item.listName || `${item.startDate} al ${item.endDate} · ${route?.name || 'Ruta'}`} · {item.operatorName || 'Sin operador'}</option>; })}</select></div>
+          <div><label className="admin-label">Lista existente ({visibleLists.length})</label><select value={selectedId} onChange={(e) => chooseList(e.target.value)} className="admin-select w-full"><option value="">Selecciona una lista…</option>{visibleLists.map((item) => { const route = routes.find((r) => r.id === item.routeId); const driver = drivers.find((d) => d.id === (item.operatorId || route?.driverId)); const operatorLabel = item.operatorName || driver?.name || 'Sin operador'; return <option key={item.id} value={item.id}>{item.listName || `${item.startDate} al ${item.endDate} · ${route?.name || 'Ruta'}`} · {operatorLabel} · ID {item.id.slice(-6)}</option>; })}</select></div>
         </div>
         {loading && <p className="text-sm text-navy-500">Cargando listas…</p>}
         {!loading && visibleLists.length === 0 && <p className="text-sm text-navy-500">No hay listas con fecha de inicio en el mes seleccionado.</p>}
