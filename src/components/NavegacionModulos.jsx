@@ -1,14 +1,4 @@
 import React from 'react'
-
-/**
- * Navegación en dos niveles: arriba las categorías, abajo los módulos de
- * la categoría elegida. Reemplaza la fila única de pestañas, que con
- * ~16 módulos ya no cabía de forma legible.
- *
- *   categorias: salida de armarCategorias() (utils/modulos.js)
- *   activo:     id del módulo seleccionado
- *   onCambiar:  (idModulo) => void
- */
 export default function NavegacionModulos({ categorias, activo, onCambiar, onChange }) {
   // Los paneles pasan 'onChange'; se acepta también 'onCambiar'.
   const cambiar = onCambiar || onChange
