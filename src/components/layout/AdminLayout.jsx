@@ -24,6 +24,7 @@ import {
   Compass,
   Database,
   Settings2,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -53,7 +54,8 @@ const groups = [
     items: [
       { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
       { to: '/admin/formar-ruta', label: 'Generar listas de alumnos', icon: ListOrdered, roles: ['admin'] },
-      { to: '/admin/listas/modificar', label: 'Modificar datos de listas', icon: Settings2, roles: ['admin'] },
+      { to: '/admin/listas/consultar', label: 'Consultar listas', icon: Search, roles: ['admin'] },
+      { to: '/admin/listas/modificar', label: 'Modificar listas', icon: Settings2, roles: ['admin'] },
       { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: ['admin'] },
       { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
       { to: '/admin/vista-operador', label: 'Vista del operador', icon: RouteIcon, roles: ['admin'] },
