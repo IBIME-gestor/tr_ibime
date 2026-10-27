@@ -26,6 +26,7 @@ import {
   Settings2,
   Search,
   PhoneCall,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -82,6 +83,7 @@ const groups = [
       { to: '/admin/caja', label: 'Caja', icon: Wallet, roles: ['admin', 'cashier'] },
       { to: '/admin/finanzas', label: 'Finanzas', icon: Landmark, roles: ['admin'] },
       { to: '/admin/cobranza', label: 'Cobranza por plantel', icon: PhoneCall, roles: ['admin'] },
+      { to: '/admin/cometa', label: 'Conciliación Cometa', icon: FileSpreadsheet, roles: ['admin'] },
       { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: ['admin'] },
     ],
   },
