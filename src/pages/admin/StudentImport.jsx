@@ -148,9 +148,10 @@ export default function StudentImport() {
         parentEmail: String(row['correo padre familia'] || '').trim().toLowerCase(),
       });
     }
-    const ok = valid.length ? await Students.bulkImport(valid) : 0;
-    setImporting(false);
-    setResult({ ok, failed });
+      const r = valid.length ? await Students.bulkImport(valid) : { total: 0, created: 0, updated: 0 };
+      const ok = r.total;
+      setImporting(false);
+      setResult({ ok, failed });
   }
 
   return (
