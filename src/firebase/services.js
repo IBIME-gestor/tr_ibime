@@ -249,26 +249,41 @@ export const Students = {
    * los manda en paralelo-secuencial. No asigna ruta ni calendario —
    * eso se hace después con bulkAssignRoute o editando cada alumno.
    */
-  async bulkImport(rows) {
-    let ok = 0;
-    for (const group of chunk(rows, BATCH_CHUNK_SIZE)) {
-      const batch = writeBatch(db);
-      group.forEach((row) => {
-        const ref = doc(collection(db, 'students'));
-        batch.set(ref, { routeId: '', ...row });
-      });
-      await batch.commit();
-      ok += group.length;
-    }
-    return ok;
-  },
+  // Reemplaza Students.bulkImport en src/firebase/services.js
+// Ahora hace "upsert" por matrícula: si ya existe, ACTUALIZA; si no, crea.
+// No toca routeId, pagos ni nada que ya tenga el alumno.
+  
+async bulkImport(rows) {
+  const norm = (m) => String(m || '').trim().toUpperCase();
 
-  /**
-   * Asignación masiva de ruta por matrícula (para no hacerlo de uno en
-   * uno en la pantalla de Rutas). items: [{ id, matricula, name, routeId }].
-   * Actualiza el alumno Y su espejo público (publicStudentIndex) en el
-   * mismo lote, sin leer cada documento de vuelta.
-   */
+  // 1) Mapa matrícula -> id de los alumnos que ya existen
+  const existing = await listAll('students');
+  const byMatricula = new Map();
+  existing.forEach((s) => { if (s.matricula) byMatricula.set(norm(s.matricula), s.id); });
+
+  // 2) Quita matrículas repetidas dentro del propio archivo (gana la última)
+  const unique = new Map();
+  rows.forEach((r) => unique.set(norm(r.matricula), r));
+
+  let created = 0;
+  let updated = 0;
+  for (const group of chunk([...unique.entries()], BATCH_CHUNK_SIZE)) {
+    const batch = writeBatch(db);
+    group.forEach(([mat, row]) => {
+      const id = byMatricula.get(mat);
+      if (id) {
+        batch.set(doc(db, 'students', id), { ...row, updatedAt: serverTimestamp() }, { merge: true });
+        updated += 1;
+      } else {
+        batch.set(doc(collection(db, 'students')), { routeId: '', ...row, createdAt: serverTimestamp() });
+        created += 1;
+      }
+    });
+    await batch.commit();
+  }
+  return { created, updated, total: created + updated };
+},
+
   async bulkAssignRoute(items) {
     let ok = 0;
     for (const group of chunk(items, BATCH_CHUNK_SIZE)) {
