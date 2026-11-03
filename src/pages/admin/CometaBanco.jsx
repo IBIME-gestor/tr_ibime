@@ -2,9 +2,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Upload, RefreshCw, Download, Search, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle,
-  Landmark, Link2, Unlink, RotateCcw, Check, Undo2,
+  Landmark, Link2, Unlink, RotateCcw, Check, Undo2, Plus,
 } from 'lucide-react';
-import { CometaBank, FinanceRecords, RouteLists, Schools, Students } from '../../firebase/services';
+import { CometaBank, FinanceRecords, RouteLists, Routes, Units, PricingConcepts, Schools, Students } from '../../firebase/services';
+import QuickAddToList from './QuickAddToList';
 import { useAuth } from '../../context/AuthContext';
 import { fmtDateOnly } from '../../utils/dates';
 import { readWorkbook } from '../../utils/xlsxRead';
@@ -149,6 +150,10 @@ export default function CometaBanco() {
   const [search, setSearch] = useState('');
   const [openKey, setOpenKey] = useState('');
   const [linkQuery, setLinkQuery] = useState('');
+  const [routes, setRoutes] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [concepts, setConcepts] = useState([]);
+  const [quick, setQuick] = useState(null); // módulo exprés «Agregar a lista»
   const [apply, setApply] = useState(null); // { key, items: {paymentId: {on, month}}, dates: {YYYY-MM: [fechas]} }
 
   async function loadAll() {
@@ -162,6 +167,12 @@ export default function CometaBanco() {
     } finally { setLoading(false); }
   }
   useEffect(() => { loadAll(); }, []);
+  // Tiempo real: si alguien agrega/quita alumnos en una lista (o en Formar ruta), el «Destino» se actualiza solo.
+  useEffect(() => RouteLists.subscribe(setLists), []);
+  useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => Routes.subscribe(setRoutes), []);
+  useEffect(() => Units.subscribe(setUnits), []);
+  useEffect(() => { PricingConcepts.list().then((c) => setConcepts(c || [])).catch((e) => console.error(e)); }, []);
 
   // ---- Ubicación del alumno (se recalcula con el padrón vigente) ------------
   const ctx = useMemo(() => {
@@ -322,6 +333,16 @@ export default function CometaBanco() {
     const ls = listsOf(student).filter((l) => String(l.startDate || '').slice(0, 7) === ym && rowOf(l, student));
     const list = ls.find((l) => !rowOf(l, student).paid) || ls[0] || null;
     return { list, row: list ? rowOf(list, student) : null };
+  }
+
+  /** Meses seleccionados que aún no tienen lista para el alumno → módulo exprés. */
+  function openQuick(group, student) {
+    const months = [...new Set(pendingOf(group).filter((p) => apply?.items?.[p.id]?.on && apply.items[p.id].month)
+      .map((p) => apply.items[p.id].month).filter((ym) => !destinationFor(student, ym).list))].sort();
+    if (!months.length) return;
+    const tipos = pendingOf(group).filter((p) => months.includes(apply.items[p.id]?.month)).map((p) => p.tipo);
+    const hint = tipos.includes('dia') ? 'diario' : tipos.includes('medio') ? 'medio' : 'completo';
+    setQuick({ student, months, hintTipo: hint });
   }
 
   function openApply(group) {
@@ -638,6 +659,7 @@ export default function CometaBanco() {
                                   <div><label className="admin-label">Mismo mes para los seleccionados</label><input type="month" className="admin-input" onChange={(e) => e.target.value && setAllMonth(e.target.value)} /></div>
                                   <button type="button" className="btn-admin-ghost" onClick={() => setApply((a) => ({ ...a, items: Object.fromEntries(Object.entries(a.items).map(([id, it]) => [id, { ...it, on: true }])) }))}>Seleccionar todos</button>
                                   <button type="button" className="btn-admin-ghost" onClick={() => setApply((a) => ({ ...a, items: Object.fromEntries(Object.entries(a.items).map(([id, it]) => [id, { ...it, on: false }])) }))}>Quitar selección</button>
+                                  {plan.some((e) => e.mode === 'mes' && e.ym) && <button type="button" className="btn-admin-primary" disabled={!!busy} onClick={() => openQuick(g, s)}><Plus size={13} className="inline mr-1"/>Agregar a lista ({plan.filter((e) => e.mode === 'mes' && e.ym).length} mes(es) sin lista)</button>}
                                 </div>
                                 <div className="overflow-x-auto"><table className="table-admin text-xs w-full"><thead><tr><th></th><th>Fecha de pago</th><th>Tipo</th><th className="text-right">Monto</th><th>Folio</th><th>Comentario</th><th>Mes al que se aplica</th><th>Destino</th></tr></thead><tbody>
                                   {pend.map((x) => {
@@ -648,7 +670,7 @@ export default function CometaBanco() {
                                       <td>{fmtDateOnly(x.fechaPago)}</td><td>{TIPO_LABEL[x.tipo]}</td><td className="text-right">{money(x.monto)}</td>
                                       <td className="font-mono">{x.folioOrden}</td><td className="max-w-[160px] truncate" title={x.comentarios}>{x.comentarios || '—'}</td>
                                       <td><input type="month" className="admin-input" value={it.month || ''} disabled={!it.on} onChange={(e) => setItem(x.id, { month: e.target.value })} /></td>
-                                      <td>{!it.on ? '—' : !it.month ? <span className="text-red-700">Elige mes</span> : dest?.list ? <span className="badge badge-go">Lista: {dest.list.listName || dest.list.startDate}{dest.row?.paid ? ' (ya pagado)' : ''}</span> : <span className="badge badge-amber">Sin lista · solo al mes</span>}</td>
+                                      <td>{!it.on ? '—' : !it.month ? <span className="text-red-700">Elige mes</span> : dest?.list ? <span className="badge badge-go">Lista: {dest.list.listName || dest.list.startDate}{dest.row?.paid ? ' (ya pagado)' : ''}</span> : <span className="inline-flex items-center gap-2"><span className="badge badge-amber">Sin lista · solo al mes</span><button type="button" className="text-[11px] underline text-navy-700" disabled={!!busy} onClick={() => openQuick(g, s)}>+ Agregar a lista</button></span>}</td>
                                     </tr>;
                                   })}
                                 </tbody></table></div>
@@ -696,6 +718,17 @@ export default function CometaBanco() {
           </div>
         )}
       </section>
+      {quick && <QuickAddToList
+        student={quick.student} months={quick.months} hintTipo={quick.hintTipo}
+        lists={lists} routes={routes} units={units} concepts={concepts} schools={schools} profile={profile} user={user}
+        onClose={() => setQuick(null)}
+        onDone={({ student, lists: updated, months }) => {
+          setStudents((prev) => prev.map((x) => (x.id === student.id ? student : x)));
+          setLists((prev) => prev.map((l) => updated.find((u) => u.id === l.id) || l));
+          setQuick(null);
+          setNotice(`${student.name} quedó agregado a la lista de ${months.join(', ')}. Ya puedes aplicar sus pagos ahí.`);
+        }}
+      />}
     </div>
   );
 }
