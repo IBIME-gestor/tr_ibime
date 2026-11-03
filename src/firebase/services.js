@@ -249,41 +249,26 @@ export const Students = {
    * los manda en paralelo-secuencial. No asigna ruta ni calendario —
    * eso se hace después con bulkAssignRoute o editando cada alumno.
    */
-  // Reemplaza Students.bulkImport en src/firebase/services.js
-// Ahora hace "upsert" por matrícula: si ya existe, ACTUALIZA; si no, crea.
-// No toca routeId, pagos ni nada que ya tenga el alumno.
-  
-async bulkImport(rows) {
-  const norm = (m) => String(m || '').trim().toUpperCase();
+  async bulkImport(rows) {
+    let ok = 0;
+    for (const group of chunk(rows, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach((row) => {
+        const ref = doc(collection(db, 'students'));
+        batch.set(ref, { routeId: '', ...row });
+      });
+      await batch.commit();
+      ok += group.length;
+    }
+    return ok;
+  },
 
-  // 1) Mapa matrícula -> id de los alumnos que ya existen
-  const existing = await listAll('students');
-  const byMatricula = new Map();
-  existing.forEach((s) => { if (s.matricula) byMatricula.set(norm(s.matricula), s.id); });
-
-  // 2) Quita matrículas repetidas dentro del propio archivo (gana la última)
-  const unique = new Map();
-  rows.forEach((r) => unique.set(norm(r.matricula), r));
-
-  let created = 0;
-  let updated = 0;
-  for (const group of chunk([...unique.entries()], BATCH_CHUNK_SIZE)) {
-    const batch = writeBatch(db);
-    group.forEach(([mat, row]) => {
-      const id = byMatricula.get(mat);
-      if (id) {
-        batch.set(doc(db, 'students', id), { ...row, updatedAt: serverTimestamp() }, { merge: true });
-        updated += 1;
-      } else {
-        batch.set(doc(collection(db, 'students')), { routeId: '', ...row, createdAt: serverTimestamp() });
-        created += 1;
-      }
-    });
-    await batch.commit();
-  }
-  return { created, updated, total: created + updated };
-},
-
+  /**
+   * Asignación masiva de ruta por matrícula (para no hacerlo de uno en
+   * uno en la pantalla de Rutas). items: [{ id, matricula, name, routeId }].
+   * Actualiza el alumno Y su espejo público (publicStudentIndex) en el
+   * mismo lote, sin leer cada documento de vuelta.
+   */
   async bulkAssignRoute(items) {
     let ok = 0;
     for (const group of chunk(items, BATCH_CHUNK_SIZE)) {
@@ -875,4 +860,80 @@ FinanceRecords.syncStudentPayment = async function syncStudentPaymentSafe(
   }
 
   return result;
+};
+
+
+/* ------------------------------------------------------------------ */
+/*  Pagos parciales por días (alumnos "diario")                        */
+/* ------------------------------------------------------------------ */
+/**
+ * Mantiene UN solo folio de pago por alumno/lista cuyo monto se va
+ * acumulando conforme paga más días. Mientras falten días por pagar el
+ * alumno queda en "desfase" (pendiente); al completarse queda al corriente.
+ * No usa Students.setPaymentStatus para no desmarcar otros registros.
+ */
+Students.recordPartialPayment = async function recordPartialPayment(studentId, {
+  paymentId = '', totalPaid, note = '', complete = false, nextDueDate = '',
+  byName = '', byUid = '', routeId = '', unitId = '', listId = '',
+  method = 'lista', extra = {},
+}) {
+  const amount = Number(totalPaid || 0);
+  let id = paymentId;
+  if (id) {
+    await setDoc(doc(db, 'students', studentId, 'payments', id), {
+      amount, note, cancelled: false, updatedAt: serverTimestamp(), updatedByName: byName || '', ...extra,
+    }, { merge: true });
+  } else {
+    const ref = await addDoc(collection(db, 'students', studentId, 'payments'), {
+      amount, method, note, registeredByName: byName || '', registeredByUid: byUid || '',
+      routeId, unitId, listId, cancelled: false, at: serverTimestamp(), ...extra,
+    });
+    id = ref.id;
+  }
+  await updateDocById('students', studentId, {
+    paymentStatus: complete ? 'al_corriente' : 'desfase',
+    nextDueDate: complete ? (nextDueDate || null) : null,
+    lastPaymentAt: serverTimestamp(),
+    lastPaymentAmount: amount,
+    lastPaymentMethod: method,
+    paymentStatusUpdatedAt: serverTimestamp(),
+    paymentStatusUpdatedBy: byName || '',
+  });
+  return id;
+};
+
+
+/* ------------------------------------------------------------------ */
+/*  Banco de pagos Cometa                                              */
+/*  Un documento por pago de Cometa. NUNCA se borran: solo cambian de  */
+/*  estado (por_asignar / conciliado / asignado).                      */
+/*  Id = folio de orden + folio de pago → subir el mismo reporte dos   */
+/*  veces no duplica nada.                                             */
+/* ------------------------------------------------------------------ */
+export const CometaBank = {
+  list: () => listAll('cometaPayments', []),
+  async createMany(rows) {
+    for (const group of chunk(rows, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach(({ id, ...data }) => {
+        batch.set(doc(db, 'cometaPayments', id), { ...data, createdAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+  },
+  // Cada pago con su propio parche (p. ej. cada orden por día ↔ un día distinto).
+  async updateEach(entries) {
+    for (const group of chunk(entries, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach(({ id, patch }) => batch.set(doc(db, 'cometaPayments', id), { ...patch, updatedAt: serverTimestamp() }, { merge: true }));
+      await batch.commit();
+    }
+  },
+  async updateMany(ids, patch) {
+    for (const group of chunk(ids, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach((id) => batch.set(doc(db, 'cometaPayments', id), { ...patch, updatedAt: serverTimestamp() }, { merge: true }));
+      await batch.commit();
+    }
+  },
 };
