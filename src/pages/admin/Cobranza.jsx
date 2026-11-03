@@ -48,7 +48,9 @@ function buildRow(student, records, ctx) {
   const serviceStart = startFromRecords || tsDate(student.createdAt) || '';
 
   // Un mes cuenta cuando ya inició y tiene monto a cobrar.
-  const billed = all.filter((r) => Number(r.montoEstimado || 0) > 0 && r.periodoInicio && r.periodoInicio <= today);
+  const listedMonths = new Set(all.filter((r) => r.listId && r.periodoInicio).map((r) => r.periodoInicio.slice(0, 7)));
+  const billed = all.filter((r) => Number(r.montoEstimado || 0) > 0 && r.periodoInicio && r.periodoInicio <= today
+    && !(r.sinLista && listedMonths.has(r.periodoInicio.slice(0, 7)))); // pago aplicado «solo al mes»: no duplicar si ya existe la lista
   const byMonth = new Map();
   billed.forEach((r) => {
     const ym = r.periodoInicio.slice(0, 7);
