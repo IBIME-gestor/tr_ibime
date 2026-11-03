@@ -7,6 +7,7 @@ import {
 import { CometaBank, FinanceRecords, RouteLists, Schools, Students } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
 import { fmtDateOnly } from '../../utils/dates';
+import { readWorkbook } from '../../utils/xlsxRead';
 
 /* ------------------------------------------------------------------ */
 /*  Banco de pagos Cometa — fase 1                                     */
@@ -62,7 +63,7 @@ function toIso(v) {
 
 /** Lee el reporte de Metabase (una hoja, una fila por orden pagada). */
 function parseWorkbook(buffer, fileName) {
-  const wb = XLSX.read(buffer, { type: 'array' }); // fechas como número de serie: sin desfase de zona horaria
+  const wb = readWorkbook(buffer); // repara zips «en streaming» (Metabase); fechas como número de serie: sin desfase de zona horaria
   const rows = [];
   wb.SheetNames.forEach((sheetName) => {
     const matrix = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '', raw: true });
