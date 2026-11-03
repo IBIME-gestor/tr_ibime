@@ -312,6 +312,7 @@ export const Pricing = PricingConcepts;
 /* ------------------------------------------------------------------ */
 export const RouteLists = {
   list: () => listAll('routeLists', [orderBy('startDate', 'desc')]),
+  subscribe: (cb) => subscribeAll('routeLists', [orderBy('startDate', 'desc')], cb),
   get: (id) => getOne('routeLists', id),
   create: (data) => createDoc('routeLists', data),
   update: (id, data) => updateDocById('routeLists', id, data),
