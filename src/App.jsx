@@ -25,6 +25,7 @@ import ListasModificar from './pages/admin/ListasModificar';
 import Pricing from './pages/admin/Pricing';
 import Finance from './pages/admin/Finance';
 import Cobranza from './pages/admin/Cobranza';
+import CometaBanco from './pages/admin/CometaBanco';
 import Notifications from './pages/admin/Notifications';
 import Cometa from './pages/admin/Cometa';
 import OperatorLinks from './pages/admin/OperatorLinks';
@@ -74,7 +75,8 @@ export default function App() {
         <Route path="finanzas" element={<Finance />} />
         <Route path="cobranza" element={<Cobranza />} />
         <Route path="notificaciones" element={<Notifications />} />
-        <Route path="cometa" element={<Cometa />} />
+        <Route path="cometa" element={<CometaBanco />} />
+        <Route path="cometa-anterior" element={<Cometa />} />
         <Route path="solicitudes-operadores" element={<OperatorLinks />} />
       </Route>
 
