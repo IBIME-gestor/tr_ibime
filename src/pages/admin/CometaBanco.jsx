@@ -149,7 +149,7 @@ export default function CometaBanco() {
   const [search, setSearch] = useState('');
   const [openKey, setOpenKey] = useState('');
   const [linkQuery, setLinkQuery] = useState('');
-  const [apply, setApply] = useState(null); // { key, listId, picked: [paymentIds], dates: [] }
+  const [apply, setApply] = useState(null); // { key, items: {paymentId: {on, month}}, dates: {YYYY-MM: [fechas]} }
 
   async function loadAll() {
     setLoading(true); setError('');
@@ -310,62 +310,53 @@ export default function CometaBanco() {
   }
 
 
-  // ---- Aplicar en Ruta Segura --------------------------------------------------
+  // ---- Aplicar en Ruta Segura (cada pago con su propio mes) ----------------------
   const listsOf = (student) => (ctx.listsByStudent.get(student.id) || []).slice().sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)));
   const rowOf = (list, student) => (list?.rows || []).find((r) => r.studentId === student.id);
   const pendingOf = (group) => group.items.filter((p) => (p.status || 'por_asignar') === 'por_asignar')
     .sort((a, b) => String(a.fechaPago).localeCompare(String(b.fechaPago)));
+  const lastDayOf = (ym) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`; };
 
-  function defaultsFor(group, student, listId) {
-    const list = lists.find((l) => l.id === listId);
-    const row = rowOf(list, student);
-    const month = String(list?.startDate || '').slice(0, 7);
-    const pend = pendingOf(group);
-    const diario = row?.tipoServicio === 'diario';
-    let picked;
-    if (diario) {
-      const days = pend.filter(isDia);
-      const inMonth = days.filter((p) => suggestMonth(p) === month);
-      picked = (inMonth.length ? inMonth : days).map((p) => p.id);
-    } else {
-      const fixed = pend.filter((p) => !isDia(p));
-      picked = (fixed.find((p) => suggestMonth(p) === month) || fixed[0]) ? [(fixed.find((p) => suggestMonth(p) === month) || fixed[0]).id] : [];
-    }
-    let dates = [];
-    if (diario && row) {
-      const free = serviceDates(row).filter((d) => !paidDatesOf(row).includes(d));
-      dates = free.slice(0, picked.length);
-    }
-    return { listId, picked, dates };
+  /** Lista del alumno en ese mes (si hay varias, la que aún no está pagada). */
+  function destinationFor(student, ym) {
+    const ls = listsOf(student).filter((l) => String(l.startDate || '').slice(0, 7) === ym && rowOf(l, student));
+    const list = ls.find((l) => !rowOf(l, student).paid) || ls[0] || null;
+    return { list, row: list ? rowOf(list, student) : null };
   }
 
-  function openApply(group, student) {
+  function openApply(group) {
     if (apply?.key === group.key) { setApply(null); return; }
-    const sl = listsOf(student);
-    const pend = pendingOf(group);
-    const sug = pend[0] ? suggestMonth(pend[0]) : '';
-    const list = sl.find((l) => String(l.startDate).slice(0, 7) === sug) || sl[0];
-    setApply({ key: group.key, ...defaultsFor(group, student, list?.id) });
+    const items = {};
+    pendingOf(group).forEach((p) => { items[p.id] = { on: true, month: suggestMonth(p) }; });
+    setApply({ key: group.key, items, dates: {} });
+  }
+  const setItem = (id, patch) => setApply((a) => a && ({ ...a, items: { ...a.items, [id]: { ...a.items[id], ...patch } } }));
+  const setAllMonth = (month) => setApply((a) => a && ({ ...a, items: Object.fromEntries(Object.entries(a.items).map(([id, it]) => [id, it.on ? { ...it, month } : it])) }));
+  const toggleDate = (ym, d) => setApply((a) => a && ({ ...a, dates: { ...a.dates, [ym]: (a.dates[ym] || []).includes(d) ? a.dates[ym].filter((x) => x !== d) : [...(a.dates[ym] || []), d].sort() } }));
+
+  /** Arma el plan: un renglón por mes con su destino (lista o solo el mes). */
+  function buildPlan(group, student) {
+    const sel = {};
+    pendingOf(group).forEach((p) => { const it = apply.items[p.id]; if (it?.on) (sel[it.month || ''] = sel[it.month || ''] || []).push(p); });
+    return Object.keys(sel).sort().map((ym) => {
+      const pays = sel[ym];
+      const { list, row } = ym ? destinationFor(student, ym) : { list: null, row: null };
+      const diario = row?.tipoServicio === 'diario';
+      const dates = (apply.dates[ym] || []).slice().sort();
+      const problems = []; const warns = [];
+      if (!ym) problems.push('Elige el mes de estos pagos.');
+      if (list && row) {
+        if (!diario && row.paid) problems.push(`En la lista de ${ym} el alumno ya aparece PAGADO. Si ya estaba registrado, concílialo en lugar de aplicarlo.`);
+        if (diario && dates.length !== pays.length) problems.push(`Lista ${ym}: elige exactamente ${pays.length} día(s) de servicio (llevas ${dates.length}).`);
+        if (pays.some(isDia) && !diario) warns.push(`${ym}: hay pagos «por día» pero en la lista el alumno es de servicio ${row.tipoServicio === 'medio' ? 'medio' : 'completo'}.`);
+        if (pays.some((x) => !isDia(x)) && diario) warns.push(`${ym}: hay pagos mensuales pero en la lista el alumno es diario.`);
+      }
+      return { ym, pays, list, row, diario, dates, mode: list && row ? 'lista' : 'mes', cometaSum: pays.reduce((n, x) => n + Number(x.monto || 0), 0), problems, warns };
+    });
   }
 
-  function togglePick(id) {
-    setApply((a) => a && ({ ...a, picked: a.picked.includes(id) ? a.picked.filter((x) => x !== id) : [...a.picked, id] }));
-  }
-  function toggleDate(d) {
-    setApply((a) => a && ({ ...a, dates: a.dates.includes(d) ? a.dates.filter((x) => x !== d) : [...a.dates, d].sort() }));
-  }
-
-  async function applyPayments(group, student) {
-    const list = lists.find((l) => l.id === apply.listId);
-    const row = rowOf(list, student);
-    const pays = pendingOf(group).filter((p) => apply.picked.includes(p.id));
-    if (!list || !row || !pays.length) return;
-    const diario = row.tipoServicio === 'diario';
-    const cometaSum = pays.reduce((n, p) => n + Number(p.monto || 0), 0);
-    const dates = [...apply.dates].sort();
-    if (diario && dates.length !== pays.length) { setError(`Elige exactamente ${pays.length} día(s) de servicio, uno por cada pago.`); return; }
-    if (!diario && row.paid) { setError('Este alumno ya aparece como PAGADO en esa lista. Si el pago ya estaba, márcalo como conciliado en lugar de aplicarlo otra vez.'); return; }
-
+  async function applyToList(student, e) {
+    const { list, row, pays, dates, diario, cometaSum } = e;
     let total; let complete; let nextRow;
     if (diario) {
       const nextPaid = [...new Set([...paidDatesOf(row), ...dates])].sort();
@@ -378,88 +369,136 @@ export default function CometaBanco() {
       complete = total >= Number(row.estimatedAmount || 0) - 0.009;
       nextRow = { ...row, paidAmount: r2(total), paid: complete };
     }
-    const expected = diario ? perDay(row) * pays.length : Number(row.estimatedAmount || 0) - Number(row.paidAmount || 0);
-    const diff = r2(cometaSum - expected);
-    const msg = `¿Aplicar ${pays.length} pago(s) de Cometa por ${money(cometaSum)} a ${student.name}?\n`
-      + `Lista: ${list.listName || list.startDate} (${String(list.startDate).slice(0, 7)})\n`
-      + (diario ? `Días: ${dates.map(shortDay).join(', ')}\n` : '')
-      + (Math.abs(diff) > 0.009 ? `\nOJO: Cometa cobró ${money(cometaSum)} y Ruta Segura espera ${money(expected)} (diferencia ${money(diff)}).\n` : '')
-      + (complete ? '\nQuedará PAGADO completo.' : '\nQuedará con saldo pendiente.');
-    if (!window.confirm(msg)) return;
+    const sameBucket = payments.filter((p) => p.status === 'asignado' && row.paymentId && p.paymentId === row.paymentId);
+    const folios = [...new Set([...sameBucket, ...pays].map((p) => p.folioOrden).filter(Boolean))];
+    const paymentId = await Students.recordPartialPayment(student.id, {
+      paymentId: row.paymentId || '', totalPaid: r2(total), complete, nextDueDate: list.endDate, method: 'cometa',
+      note: `Cometa · ${folios.join(', ')} · lista ${list.startDate} al ${list.endDate}`,
+      byName: profile?.name, byUid: user?.uid, routeId: list.routeId, unitId: '', listId: list.id,
+      extra: { cometaFolios: folios, source: 'cometa' },
+    });
+    nextRow.paymentId = paymentId;
+    const rows = (list.rows || []).map((r) => (r.studentId === student.id ? nextRow : r));
+    await RouteLists.update(list.id, { rows });
+    await FinanceRecords.upsert(`${list.id}_${student.id}`, complete
+      ? { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString(), cobradoBy: profile?.name || '', montoPagado: r2(total), fuentePago: 'cometa' }
+      : { cobrado: false, montoPagado: r2(total), fuentePago: 'cometa' });
+    const now = new Date().toISOString();
+    const entries = pays.map((p, i) => ({ id: p.id, patch: {
+      status: 'asignado', studentId: student.id, studentName: student.name, listId: list.id, listName: list.listName || '', noList: false,
+      appliedMonth: e.ym, appliedDate: diario ? dates[i] : '', paymentId, appliedBy: actor(), appliedAt: now,
+    } }));
+    return { entries, rows, listId: list.id, complete, total };
+  }
 
+  /** Mes sin lista: se crea el cargo del mes ya pagado, ligado al folio de Cometa. */
+  async function applyToMonth(student, e) {
+    const { ym, pays } = e;
+    const bucket = payments.filter((p) => p.status === 'asignado' && p.noList && p.studentId === student.id && p.appliedMonth === ym);
+    const all = [...bucket, ...pays];
+    const total = all.reduce((n, p) => n + Number(p.monto || 0), 0);
+    const folios = [...new Set(all.map((p) => p.folioOrden).filter(Boolean))];
+    const paymentId = await Students.recordPartialPayment(student.id, {
+      paymentId: bucket[0]?.paymentId || '', totalPaid: r2(total), complete: true, method: 'cometa', touchStudent: false,
+      note: `Cometa · ${folios.join(', ')} · ${ym} (sin lista)`,
+      byName: profile?.name, byUid: user?.uid, routeId: student.routeId || '', listId: '',
+      extra: { cometaFolios: folios, source: 'cometa', month: ym, sinLista: true },
+    });
+    await FinanceRecords.upsert(`cometa_${student.id}_${ym}`, {
+      listId: '', sinLista: true, studentId: student.id, studentName: student.name || '', matricula: student.matricula || '',
+      schoolId: student.schoolId || '', schoolName: ctx.schoolNameById[student.schoolId] || '', nivel: student.nivel || '', grado: student.grado || '',
+      routeId: student.routeId || '', periodoInicio: `${ym}-01`, periodoFin: lastDayOf(ym), tipoServicio: student.tipoServicio || '',
+      conceptName: pays[0]?.concepto || '', montoEstimado: r2(total), montoPagado: r2(total),
+      solicitudAtendida: false, servicioConfirmado: false, conceptoCargado: false,
+      cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString(), cobradoBy: profile?.name || '', fuentePago: 'cometa',
+    });
+    const now = new Date().toISOString();
+    const entries = pays.map((p) => ({ id: p.id, patch: {
+      status: 'asignado', studentId: student.id, studentName: student.name, listId: '', listName: '', noList: true,
+      appliedMonth: ym, appliedDate: '', paymentId, appliedBy: actor(), appliedAt: now,
+    } }));
+    return { entries, total };
+  }
+
+  async function applyAll(group, student) {
+    const plan = buildPlan(group, student);
+    if (!plan.length || plan.some((e) => e.problems.length)) return;
+    const money2 = (n) => money(n);
+    const msg = `¿Aplicar a ${student.name}?\n\n` + plan.map((e) => `• ${e.ym}: ${e.pays.length} pago(s) · ${money2(e.cometaSum)} → ${e.mode === 'lista' ? `lista «${e.list.listName || e.list.startDate}»${e.diario ? ` (días: ${e.dates.map(shortDay).join(', ')})` : ''}` : 'SOLO AL MES (el alumno no tiene lista de ese mes)'}`).join('\n')
+      + (plan.some((e) => e.warns.length) ? `\n\nAvisos:\n${plan.flatMap((e) => e.warns).join('\n')}` : '');
+    if (!window.confirm(msg)) return;
     setBusy('apply'); setError(''); setNotice('');
+    const done = [];
     try {
-      const sameBucket = payments.filter((p) => p.status === 'asignado' && row.paymentId && p.paymentId === row.paymentId);
-      const folios = [...new Set([...sameBucket, ...pays].map((p) => p.folioOrden).filter(Boolean))];
-      const paymentId = await Students.recordPartialPayment(student.id, {
-        paymentId: row.paymentId || '', totalPaid: r2(total), complete,
-        nextDueDate: list.endDate, method: 'cometa',
-        note: `Cometa · ${folios.join(', ')} · lista ${list.startDate} al ${list.endDate}`,
-        byName: profile?.name, byUid: user?.uid, routeId: list.routeId, unitId: '', listId: list.id,
-        extra: { cometaFolios: folios, source: 'cometa' },
-      });
-      nextRow.paymentId = paymentId;
-      const rows = (list.rows || []).map((r) => (r.studentId === student.id ? nextRow : r));
-      await RouteLists.update(list.id, { rows });
-      await FinanceRecords.upsert(`${list.id}_${student.id}`, complete
-        ? { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString(), cobradoBy: profile?.name || '', montoPagado: r2(total), fuentePago: 'cometa' }
-        : { cobrado: false, montoPagado: r2(total), fuentePago: 'cometa' });
-      const now = new Date().toISOString();
-      const entries = pays.map((p, i) => ({ id: p.id, patch: {
-        status: 'asignado', studentId: student.id, studentName: student.name, listId: list.id, listName: list.listName || '',
-        appliedMonth: String(list.startDate).slice(0, 7), appliedDate: diario ? dates[i] : '', paymentId, appliedBy: actor(), appliedAt: now,
-      } }));
-      try { await CometaBank.updateEach(entries); } catch (be) {
-        console.error(be);
-        setError('El pago SÍ se aplicó en Ruta Segura, pero no se pudo actualizar el banco. No lo repitas: presiona Actualizar y revisa.');
+      for (const e of plan) {
+        const res = e.mode === 'lista' ? await applyToList(student, e) : await applyToMonth(student, e);
+        await CometaBank.updateEach(res.entries).catch((be) => { console.error(be); setError('El pago SÍ se aplicó en Ruta Segura, pero no se pudo actualizar el banco. No lo repitas: presiona Actualizar.'); });
+        setPayments((prev) => prev.map((p) => { const x = res.entries.find((y) => y.id === p.id); return x ? { ...p, ...x.patch } : p; }));
+        if (res.rows) setLists((prev) => prev.map((l) => (l.id === res.listId ? { ...l, rows: res.rows } : l)));
+        done.push(`${e.ym}: ${e.pays.length} pago(s) ${e.mode === 'lista' ? 'en lista' : 'solo al mes'}`);
       }
-      setPayments((prev) => prev.map((p) => { const e = entries.find((x) => x.id === p.id); return e ? { ...p, ...e.patch } : p; }));
-      setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, rows } : l)));
       setApply(null);
-      setNotice(`${student.name}: ${pays.length} pago(s) aplicados (${money(cometaSum)}). ${complete ? 'Quedó pagado completo.' : `Pagado ${money(total)}; pendiente ${money(Math.max(0, Number(row.estimatedAmount || 0) - total))}.`}`);
-    } catch (e) {
-      console.error(e); setError(e?.message || 'No se pudo aplicar el pago.');
+      setNotice(`${student.name}: aplicado → ${done.join(' · ')}.`);
+    } catch (err) {
+      console.error(err);
+      setError(`${err?.message || 'No se pudo aplicar.'}${done.length ? ` Ya se habían aplicado: ${done.join(' · ')}.` : ''} Presiona Actualizar para ver el estado real.`);
     } finally { setBusy(''); }
   }
 
   async function undoApply(p) {
-    const list = lists.find((l) => l.id === p.listId);
-    const student = ctx.byId.get(p.studentId);
-    const row = list?.rows?.find((r) => r.studentId === p.studentId);
-    if (!window.confirm(`¿Deshacer la aplicación del pago ${p.folioOrden} (${money(p.monto)})? Se quitará de la lista y el pago volverá a «Por asignar».`)) return;
+    if (!window.confirm(`¿Deshacer la aplicación del pago ${p.folioOrden} (${money(p.monto)})? Se quitará de ${p.noList ? 'su mes' : 'la lista'} y el pago volverá a «Por asignar».`)) return;
     setBusy('undo'); setError(''); setNotice('');
     try {
+      const student = ctx.byId.get(p.studentId);
       const others = payments.filter((x) => x.id !== p.id && x.status === 'asignado' && x.paymentId && x.paymentId === p.paymentId);
-      if (list && row && student) {
-        let total; let nextRow;
-        if (row.tipoServicio === 'diario') {
-          const nextPaid = paidDatesOf(row).filter((d) => d !== p.appliedDate);
-          total = nextPaid.reduce((n, d) => n + dateAmount(row, d), 0);
-          nextRow = { ...row, paidDates: nextPaid, paidAmount: r2(total), paid: false };
-        } else {
-          total = Math.max(0, Number(row.paidAmount || 0) - Number(p.monto || 0));
-          nextRow = { ...row, paidAmount: r2(total), paid: false };
-        }
+      if (p.noList) {
+        const fid = `cometa_${p.studentId}_${p.appliedMonth}`;
         if (!others.length) {
-          if (p.paymentId) await Students.cancelPayment(student.id, p.paymentId, `Cometa ${p.folioOrden} deshecho desde el banco`, profile?.name);
-          nextRow = { ...nextRow, paymentId: '', paidDates: row.tipoServicio === 'diario' ? [] : row.paidDates, paidAmount: 0 };
-          total = 0;
+          if (p.paymentId) await Students.cancelPayment(p.studentId, p.paymentId, `Cometa ${p.folioOrden} deshecho desde el banco`, profile?.name);
+          await FinanceRecords.remove(fid);
         } else {
-          await Students.recordPartialPayment(student.id, {
-            paymentId: p.paymentId, totalPaid: r2(total), complete: false, nextDueDate: list.endDate, method: 'cometa',
-            note: `Cometa · ${others.map((x) => x.folioOrden).join(', ')} · lista ${list.startDate} al ${list.endDate}`,
-            byName: profile?.name, byUid: user?.uid, routeId: list.routeId, listId: list.id,
-            extra: { cometaFolios: others.map((x) => x.folioOrden), source: 'cometa' },
+          const total = others.reduce((n, x) => n + Number(x.monto || 0), 0);
+          await Students.recordPartialPayment(p.studentId, {
+            paymentId: p.paymentId, totalPaid: r2(total), complete: true, method: 'cometa', touchStudent: false,
+            note: `Cometa · ${others.map((x) => x.folioOrden).join(', ')} · ${p.appliedMonth} (sin lista)`, byName: profile?.name,
+            extra: { cometaFolios: others.map((x) => x.folioOrden), source: 'cometa', month: p.appliedMonth, sinLista: true },
           });
+          await FinanceRecords.upsert(fid, { montoEstimado: r2(total), montoPagado: r2(total) });
         }
-        const rows = (list.rows || []).map((r) => (r.studentId === student.id ? nextRow : r));
-        await RouteLists.update(list.id, { rows });
-        await FinanceRecords.upsert(`${list.id}_${student.id}`, { cobrado: false, ...(others.length ? {} : { pagoId: '' }), montoPagado: r2(total) });
-        setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, rows } : l)));
-      } else if (!others.length && p.paymentId && student) {
-        await Students.cancelPayment(student.id, p.paymentId, `Cometa ${p.folioOrden} deshecho (la lista ya no existe)`, profile?.name);
+      } else {
+        const list = lists.find((l) => l.id === p.listId);
+        const row = list?.rows?.find((r) => r.studentId === p.studentId);
+        if (list && row && student) {
+          let total; let nextRow;
+          if (row.tipoServicio === 'diario') {
+            const nextPaid = paidDatesOf(row).filter((d) => d !== p.appliedDate);
+            total = nextPaid.reduce((n, d) => n + dateAmount(row, d), 0);
+            nextRow = { ...row, paidDates: nextPaid, paidAmount: r2(total), paid: false };
+          } else {
+            total = Math.max(0, Number(row.paidAmount || 0) - Number(p.monto || 0));
+            nextRow = { ...row, paidAmount: r2(total), paid: false };
+          }
+          if (!others.length) {
+            if (p.paymentId) await Students.cancelPayment(student.id, p.paymentId, `Cometa ${p.folioOrden} deshecho desde el banco`, profile?.name);
+            nextRow = { ...nextRow, paymentId: '', paidDates: row.tipoServicio === 'diario' ? [] : row.paidDates, paidAmount: 0 };
+            total = 0;
+          } else {
+            await Students.recordPartialPayment(student.id, {
+              paymentId: p.paymentId, totalPaid: r2(total), complete: false, nextDueDate: list.endDate, method: 'cometa',
+              note: `Cometa · ${others.map((x) => x.folioOrden).join(', ')} · lista ${list.startDate} al ${list.endDate}`,
+              byName: profile?.name, byUid: user?.uid, routeId: list.routeId, listId: list.id,
+              extra: { cometaFolios: others.map((x) => x.folioOrden), source: 'cometa' },
+            });
+          }
+          const rows = (list.rows || []).map((r) => (r.studentId === student.id ? nextRow : r));
+          await RouteLists.update(list.id, { rows });
+          await FinanceRecords.upsert(`${list.id}_${student.id}`, { cobrado: false, ...(others.length ? {} : { pagoId: '' }), montoPagado: r2(total) });
+          setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, rows } : l)));
+        } else if (!others.length && p.paymentId && student) {
+          await Students.cancelPayment(student.id, p.paymentId, `Cometa ${p.folioOrden} deshecho (la lista ya no existe)`, profile?.name);
+        }
       }
-      const clear = { status: 'por_asignar', studentId: '', studentName: '', listId: '', listName: '', appliedMonth: '', appliedDate: '', paymentId: '', appliedBy: '', appliedAt: '' };
+      const clear = { status: 'por_asignar', studentId: '', studentName: '', listId: '', listName: '', noList: false, appliedMonth: '', appliedDate: '', paymentId: '', appliedBy: '', appliedAt: '' };
       await CometaBank.updateMany([p.id], clear);
       setPayments((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...clear } : x)));
       setNotice(`Pago ${p.folioOrden} regresó a «Por asignar».`);
@@ -581,62 +620,57 @@ export default function CometaBanco() {
                         </div>}
                         {['exacta', 'vinculada'].includes(g.loc.kind) && s && (() => {
                           const pend = pendingOf(g);
-                          const sl = listsOf(s);
                           if (!pend.length) return null;
-                          if (!sl.length) return <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">{s.name} todavía no está en ninguna lista. Los {pend.length} pago(s) esperan aquí: ubícalo en una lista (Operación → Generar listas) y regresa a aplicar.</p>;
                           const open = apply?.key === g.key;
-                          const list = open ? lists.find((l) => l.id === apply.listId) : null;
-                          const row = list ? rowOf(list, s) : null;
-                          const diario = row?.tipoServicio === 'diario';
-                          const picked = open ? pend.filter((x) => apply.picked.includes(x.id)) : [];
-                          const sumPicked = picked.reduce((n, x) => n + Number(x.monto || 0), 0);
-                          const free = diario ? serviceDates(row).filter((d) => !paidDatesOf(row).includes(d)) : [];
-                          const warns = [];
-                          if (row) {
-                            if (!diario && row.paid) warns.push('Ya está marcado como PAGADO en esta lista (¿ya se había registrado?). Si es así, concílialo en vez de aplicarlo.');
-                            if (picked.some(isDia) && !diario) warns.push('Hay pagos «por día» pero el alumno en esta lista es de servicio ' + (row.tipoServicio === 'medio' ? 'medio' : 'completo') + '.');
-                            if (picked.some((x) => !isDia(x)) && diario) warns.push('Hay pagos mensuales pero el alumno en esta lista es de servicio diario.');
-                          }
+                          const plan = open ? buildPlan(g, s) : [];
+                          const problems = plan.flatMap((e) => e.problems);
+                          const warns = plan.flatMap((e) => e.warns);
+                          const nSel = plan.reduce((n, e) => n + e.pays.length, 0);
                           return (
                             <div className="rounded-xl border border-navy-200 bg-white p-3 space-y-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <p className="font-semibold text-navy-800">Aplicar en Ruta Segura · {pend.length} pago(s) por asignar</p>
-                                <button type="button" className={open ? 'btn-admin-ghost' : 'btn-admin-primary'} disabled={!!busy} onClick={() => openApply(g, s)}>{open ? 'Cerrar' : 'Aplicar pagos…'}</button>
+                                <button type="button" className={open ? 'btn-admin-ghost' : 'btn-admin-primary'} disabled={!!busy} onClick={() => openApply(g)}>{open ? 'Cerrar' : 'Aplicar pagos…'}</button>
                               </div>
                               {open && <>
-                                <div className="grid md:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="admin-label">Lista y mes donde se marca</label>
-                                    <select className="admin-select w-full" value={apply.listId || ''} onChange={(e) => setApply({ key: g.key, ...defaultsFor(g, s, e.target.value) })}>
-                                      {sl.map((l) => { const r = rowOf(l, s); return <option key={l.id} value={l.id}>{String(l.startDate).slice(0, 7)} · {l.listName || 'Lista'} · {l.startDate} al {l.endDate} · {r?.paid ? 'PAGADO' : `${money(r?.estimatedAmount)}`}</option>; })}
-                                    </select>
-                                  </div>
-                                  {row && <div className="text-navy-600 self-end">Servicio: <b>{row.tipoServicio === 'diario' ? 'Diario' : row.tipoServicio === 'medio' ? 'Medio' : 'Completo'}</b> · Monto de la lista: <b>{money(row.estimatedAmount)}</b>{Number(row.paidAmount || 0) > 0 && !row.paid ? <> · Ya pagado: <b>{money(row.paidAmount)}</b></> : null}</div>}
+                                <p className="text-navy-500">Cada pago lleva su propio <b>mes</b>. Si el alumno tiene lista en ese mes, se marca ahí; si no tiene, el pago se aplica <b>solo al mes</b> (queda registrado y contará cuando lo ubiques en una lista).</p>
+                                <div className="flex flex-wrap items-end gap-3">
+                                  <div><label className="admin-label">Mismo mes para los seleccionados</label><input type="month" className="admin-input" onChange={(e) => e.target.value && setAllMonth(e.target.value)} /></div>
+                                  <button type="button" className="btn-admin-ghost" onClick={() => setApply((a) => ({ ...a, items: Object.fromEntries(Object.entries(a.items).map(([id, it]) => [id, { ...it, on: true }])) }))}>Seleccionar todos</button>
+                                  <button type="button" className="btn-admin-ghost" onClick={() => setApply((a) => ({ ...a, items: Object.fromEntries(Object.entries(a.items).map(([id, it]) => [id, { ...it, on: false }])) }))}>Quitar selección</button>
                                 </div>
-                                <div>
-                                  <label className="admin-label">Pagos de Cometa a aplicar</label>
-                                  <div className="flex flex-wrap gap-2">
-                                    {pend.map((x) => <label key={x.id} className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 cursor-pointer ${apply.picked.includes(x.id) ? 'border-navy-500 bg-navy-50' : 'border-navy-200'}`}>
-                                      <input type="checkbox" className="w-4 h-4" checked={apply.picked.includes(x.id)} onChange={() => togglePick(x.id)} />
-                                      <span>{fmtDateOnly(x.fechaPago)} · {TIPO_LABEL[x.tipo]} · {money(x.monto)} · <span className="font-mono">{x.folioOrden}</span></span>
-                                    </label>)}
-                                  </div>
-                                </div>
-                                {diario && <div>
-                                  <label className="admin-label">Días de servicio que cubren ({apply.dates.length} de {picked.length} elegidos)</label>
-                                  <div className="flex flex-wrap gap-2">
-                                    {serviceDates(row).map((d) => { const isPaid = paidDatesOf(row).includes(d); const on = apply.dates.includes(d);
-                                      return <label key={d} className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 ${isPaid ? 'border-green-300 bg-green-50 text-green-800' : on ? 'border-navy-500 bg-navy-50 cursor-pointer' : 'border-navy-200 cursor-pointer'}`}>
-                                        <input type="checkbox" className="w-4 h-4" checked={isPaid || on} disabled={isPaid} onChange={() => toggleDate(d)} />
-                                        <span>{shortDay(d)}{isPaid ? ' · pagado' : ''}</span>
-                                      </label>; })}
-                                  </div>
-                                  <button type="button" className="btn-admin-ghost mt-2" onClick={() => setApply((a) => ({ ...a, dates: free.slice(0, picked.length) }))}>Elegir los primeros {picked.length} pendientes</button>
-                                </div>}
+                                <div className="overflow-x-auto"><table className="table-admin text-xs w-full"><thead><tr><th></th><th>Fecha de pago</th><th>Tipo</th><th className="text-right">Monto</th><th>Folio</th><th>Comentario</th><th>Mes al que se aplica</th><th>Destino</th></tr></thead><tbody>
+                                  {pend.map((x) => {
+                                    const it = apply.items[x.id] || { on: false, month: '' };
+                                    const dest = it.on && it.month ? destinationFor(s, it.month) : null;
+                                    return <tr key={x.id} className={it.on ? '' : 'opacity-50'}>
+                                      <td><input type="checkbox" className="w-4 h-4" checked={!!it.on} onChange={(e) => setItem(x.id, { on: e.target.checked })} /></td>
+                                      <td>{fmtDateOnly(x.fechaPago)}</td><td>{TIPO_LABEL[x.tipo]}</td><td className="text-right">{money(x.monto)}</td>
+                                      <td className="font-mono">{x.folioOrden}</td><td className="max-w-[160px] truncate" title={x.comentarios}>{x.comentarios || '—'}</td>
+                                      <td><input type="month" className="admin-input" value={it.month || ''} disabled={!it.on} onChange={(e) => setItem(x.id, { month: e.target.value })} /></td>
+                                      <td>{!it.on ? '—' : !it.month ? <span className="text-red-700">Elige mes</span> : dest?.list ? <span className="badge badge-go">Lista: {dest.list.listName || dest.list.startDate}{dest.row?.paid ? ' (ya pagado)' : ''}</span> : <span className="badge badge-amber">Sin lista · solo al mes</span>}</td>
+                                    </tr>;
+                                  })}
+                                </tbody></table></div>
+                                {plan.filter((e) => e.mode === 'lista' && e.diario).map((e) => {
+                                  const free = serviceDates(e.row).filter((d) => !paidDatesOf(e.row).includes(d));
+                                  return <div key={e.ym}>
+                                    <label className="admin-label">Días de servicio de {e.ym} que cubren los {e.pays.length} pago(s) por día ({e.dates.length} elegidos)</label>
+                                    <div className="flex flex-wrap gap-2">
+                                      {serviceDates(e.row).map((d) => { const isPaid = paidDatesOf(e.row).includes(d); const on = e.dates.includes(d);
+                                        return <label key={d} className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 ${isPaid ? 'border-green-300 bg-green-50 text-green-800' : on ? 'border-navy-500 bg-navy-50 cursor-pointer' : 'border-navy-200 cursor-pointer'}`}>
+                                          <input type="checkbox" className="w-4 h-4" checked={isPaid || on} disabled={isPaid} onChange={() => toggleDate(e.ym, d)} />
+                                          <span>{shortDay(d)}{isPaid ? ' · pagado' : ''}</span>
+                                        </label>; })}
+                                    </div>
+                                    <button type="button" className="btn-admin-ghost mt-2" onClick={() => setApply((a) => ({ ...a, dates: { ...a.dates, [e.ym]: free.slice(0, e.pays.length) } }))}>Elegir los primeros {e.pays.length} pendientes</button>
+                                  </div>;
+                                })}
+                                {problems.map((w) => <p key={w} className="text-red-700 flex gap-2"><AlertTriangle size={14} className="shrink-0 mt-0.5"/>{w}</p>)}
                                 {warns.map((w) => <p key={w} className="text-amber-800 flex gap-2"><AlertTriangle size={14} className="shrink-0 mt-0.5"/>{w}</p>)}
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="text-navy-600">Cometa: <b>{picked.length}</b> pago(s) · <b>{money(sumPicked)}</b>{diario && row ? <> · Tarifa Ruta Segura: <b>{money(perDay(row) * picked.length)}</b></> : null}</span>
-                                  <button type="button" className="btn-admin-primary" disabled={!!busy || !picked.length || !row || (!diario && row.paid) || (diario && apply.dates.length !== picked.length)} onClick={() => applyPayments(g, s)}>{busy === 'apply' ? 'Aplicando…' : 'Aplicar y marcar pagado'}</button>
+                                  <span className="text-navy-600">{nSel} pago(s) · <b>{money(plan.reduce((n, e) => n + e.cometaSum, 0))}</b> · {plan.length} mes(es)</span>
+                                  <button type="button" className="btn-admin-primary" disabled={!!busy || !nSel || problems.length > 0} onClick={() => applyAll(g, s)}>{busy === 'apply' ? 'Aplicando…' : 'Aplicar y marcar pagado'}</button>
                                 </div>
                               </>}
                             </div>
@@ -649,7 +683,7 @@ export default function CometaBanco() {
                             <td>{p.zona}</td><td>{TIPO_LABEL[p.tipo]}</td><td className="max-w-[260px] truncate" title={p.concepto}>{p.concepto}</td>
                             <td className="text-right">{money(p.monto)}</td><td>{p.lugarPago}{p.medioPago ? ` · ${p.medioPago}` : ''}</td><td>{p.comentarios || '—'}</td>
                             <td>{p.status === 'conciliado' ? <span className="badge">Conciliado</span> : p.status === 'asignado' ? <span className="badge badge-go">Asignado</span> : <span className="badge badge-amber">Por asignar</span>}{p.reconciledNote ? <span className="block text-[10px] text-navy-400">{p.reconciledNote}</span> : null}
-                              {p.status === 'asignado' && <><span className="block text-[10px] text-navy-500">{p.appliedMonth} · {p.listName || 'lista'}{p.appliedDate ? ` · ${fmtDateOnly(p.appliedDate)}` : ''}</span><button type="button" className="text-[11px] text-red-700 underline" disabled={!!busy} onClick={() => undoApply(p)}><Undo2 size={11} className="inline mr-1"/>Deshacer</button></>}</td>
+                              {p.status === 'asignado' && <><span className="block text-[10px] text-navy-500">{p.appliedMonth} · {p.noList ? 'solo al mes (sin lista)' : (p.listName || 'lista')}{p.appliedDate ? ` · ${fmtDateOnly(p.appliedDate)}` : ''}</span><button type="button" className="text-[11px] text-red-700 underline" disabled={!!busy} onClick={() => undoApply(p)}><Undo2 size={11} className="inline mr-1"/>Deshacer</button></>}</td>
                           </tr>)}
                         </tbody></table>
                         <p className="text-[11px] text-navy-400">{ids.length} pago(s) · {g.items.length !== g.shown.length ? `${g.items.length} en total para esta matrícula (hay otros que no pasan el filtro)` : 'todos los de esta matrícula'}.</p>
