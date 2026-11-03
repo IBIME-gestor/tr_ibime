@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays, Search, Users, Route as RouteIcon, FileText, ChevronDown, ChevronUp,
   RefreshCw, CheckCircle2, AlertTriangle, Wallet, Settings2,
@@ -17,8 +17,18 @@ const money = (value) => Number(value || 0).toLocaleString('es-MX', {
 });
 
 const listAmount = (item) => (item.rows || []).reduce((n, row) => n + Number(row.estimatedAmount || 0), 0);
-const listPaidAmount = (item) => (item.rows || []).reduce((n, row) => n + (row.paid ? Number(row.estimatedAmount || 0) : 0), 0);
+const listPaidAmount = (item) => (item.rows || []).reduce((n, row) => n + paidAmountOf(row), 0);
 const listPaidCount = (item) => (item.rows || []).filter((row) => row.paid).length;
+// --- Alumnos "diario": se paga por día de servicio (entrada y/o salida) ---
+const dayUnits = (d) => (d?.entrada ? 1 : 0) + (d?.salida ? 1 : 0);
+const serviceDates = (row) => Object.keys(row.days || {}).filter((date) => dayUnits(row.days[date]) > 0).sort();
+const perDayAmount = (row) => Number(row.baseAmount || 0);
+const dateAmount = (row, date) => dayUnits(row.days?.[date]) * perDayAmount(row);
+const paidDatesOf = (row) => (row.paidDates || []).filter((d) => dayUnits(row.days?.[d]) > 0);
+const paidAmountOf = (row) => (row.tipoServicio === 'diario'
+  ? paidDatesOf(row).reduce((n, d) => n + dateAmount(row, d), 0)
+  : (row.paid ? Number(row.estimatedAmount || 0) : Number(row.paidAmount || 0)));
+const shortDate = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
 const serviceLabel = (row) => (
   row.tipoServicio === 'medio' ? `Medio (${row.medioServicio || 'entrada'})`
     : row.tipoServicio === 'diario' ? 'Diario' : 'Completo'
@@ -40,6 +50,7 @@ export default function ListasConsulta() {
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState('');
+  const [dayPanel, setDayPanel] = useState(null); // { listId, studentId, picked: [] }
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -79,6 +90,7 @@ export default function ListasConsulta() {
 
   // Marca / desmarca el pago de un alumno (misma lógica que usa la pantalla de generación).
   async function togglePaid(list, row) {
+    if (row.tipoServicio === 'diario') { openDayPanel(list, row); return; }
     setError(''); setNotice('');
     const key = `${list.id}_${row.studentId}`;
     setBusyKey(key);
@@ -122,6 +134,76 @@ export default function ListasConsulta() {
     } catch (e) {
       console.error(e);
       setError(e?.message || 'No se pudo actualizar el pago.');
+    } finally { setBusyKey(''); }
+  }
+
+  function openDayPanel(list, row) {
+    setError(''); setNotice('');
+    const same = dayPanel?.listId === list.id && dayPanel?.studentId === row.studentId;
+    setDayPanel(same ? null : { listId: list.id, studentId: row.studentId, picked: [] });
+  }
+
+  function togglePicked(date) {
+    setDayPanel((p) => p && ({ ...p, picked: p.picked.includes(date) ? p.picked.filter((d) => d !== date) : [...p.picked, date] }));
+  }
+
+  // Registra el pago de los días elegidos (acumula sobre lo que ya había pagado).
+  async function savePartialPayment(list, row, picked) {
+    if (!picked.length) return;
+    const key = `${list.id}_${row.studentId}`;
+    const alreadyPaid = paidDatesOf(row);
+    const nextPaid = [...new Set([...alreadyPaid, ...picked])].sort();
+    const dates = serviceDates(row);
+    const complete = dates.length > 0 && dates.every((d) => nextPaid.includes(d));
+    const total = nextPaid.reduce((n, d) => n + dateAmount(row, d), 0);
+    const added = picked.reduce((n, d) => n + dateAmount(row, d), 0);
+    if (!(perDayAmount(row) > 0)) { setError('Este alumno no tiene tarifa por día. Revisa el concepto de la ruta.'); return; }
+    if (!window.confirm(`¿Registrar pago de ${picked.length} día(s) por ${money(added)} para ${row.name}?\nPagado acumulado: ${nextPaid.length}/${dates.length} día(s) · ${money(total)}.${complete ? '' : '\nQuedará con saldo pendiente.'}`)) return;
+    setBusyKey(key); setError(''); setNotice('');
+    try {
+      const route = routes.find((r) => r.id === list.routeId);
+      const paymentId = await Students.recordPartialPayment(row.studentId, {
+        paymentId: row.paymentId || '',
+        totalPaid: total,
+        complete,
+        nextDueDate: list.endDate,
+        note: `${row.concept || 'Servicio'} · lista ${list.startDate} al ${list.endDate} · días pagados: ${nextPaid.join(', ')}`,
+        byName: profile?.name, byUid: user?.uid,
+        routeId: list.routeId, unitId: route?.unitId, listId: list.id,
+      });
+      const rows = (list.rows || []).map((x) => (x.studentId === row.studentId
+        ? { ...x, paidDates: nextPaid, paidAmount: Number(total.toFixed(2)), paymentId, paid: complete } : x));
+      await RouteLists.update(list.id, { rows });
+      const financeId = `${list.id}_${row.studentId}`;
+      await FinanceRecords.upsert(financeId, complete
+        ? { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString(), cobradoBy: profile?.name || '', montoPagado: Number(total.toFixed(2)), diasPagados: nextPaid.length }
+        : { cobrado: false, montoPagado: Number(total.toFixed(2)), diasPagados: nextPaid.length });
+      replaceList({ ...list, rows });
+      setDayPanel(null);
+      setNotice(complete
+        ? `${row.name}: pagó todos los días (${money(total)}).`
+        : `${row.name}: pagó ${nextPaid.length} de ${dates.length} días (${money(total)}). Quedan ${money(Number(row.estimatedAmount || 0) - total)} pendientes.`);
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || 'No se pudo registrar el pago por días.');
+    } finally { setBusyKey(''); }
+  }
+
+  // Borra todos los pagos por día de un alumno (por captura equivocada).
+  async function resetPartialPayments(list, row) {
+    if (!window.confirm(`¿Quitar TODOS los pagos por día registrados de ${row.name}? El pago se cancelará en su bitácora.`)) return;
+    const key = `${list.id}_${row.studentId}`;
+    setBusyKey(key); setError(''); setNotice('');
+    try {
+      if (row.paymentId) await Students.cancelPayment(row.studentId, row.paymentId, 'Pagos por día reiniciados desde Consultar listas', profile?.name);
+      const rows = (list.rows || []).map((x) => (x.studentId === row.studentId ? { ...x, paidDates: [], paidAmount: 0, paymentId: '', paid: false } : x));
+      await RouteLists.update(list.id, { rows });
+      await FinanceRecords.upsert(key, { cobrado: false, montoPagado: 0, diasPagados: 0 });
+      replaceList({ ...list, rows });
+      setDayPanel(null);
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || 'No se pudo reiniciar el pago.');
     } finally { setBusyKey(''); }
   }
 
@@ -241,15 +323,60 @@ export default function ListasConsulta() {
                     <button type="button" className="btn-admin-ghost" onClick={() => navigate('/admin/listas/modificar')}><Settings2 size={14} className="inline mr-2"/>Modificar listas</button>
                   </div>
                   <p className="text-xs text-navy-500">Estado: {item.status || 'Sin estado'} · Cobrado: <b>{money(listPaidAmount(item))}</b> de {money(listAmount(item))}</p>
-                  {rows.length ? <div className="overflow-x-auto"><table className="table-admin text-xs min-w-[720px]"><thead><tr><th>#</th><th>Alumno</th><th>Matrícula</th><th>Servicio</th><th>Días con servicio</th><th className="text-right">Monto estimado</th><th className="text-center">Pagado</th></tr></thead><tbody>
+                  {rows.length ? <div className="overflow-x-auto"><table className="table-admin text-xs min-w-[720px]"><thead><tr><th>#</th><th>Alumno</th><th>Matrícula</th><th>Servicio</th><th>Días con servicio</th><th className="text-right">Monto estimado</th><th className="text-center">Pago</th></tr></thead><tbody>
                     {rows.map((row, index) => {
                       const key = `${item.id}_${row.studentId}`;
-                      return <tr key={key} className={row.paid ? 'bg-green-50/60' : ''}>
-                        <td>{index + 1}</td><td>{row.name || '—'}</td><td>{row.matricula || '—'}</td><td>{serviceLabel(row)}</td>
-                        <td>{row.daysCount ?? Object.values(row.days || {}).filter((d) => d.entrada || d.salida).length}</td>
-                        <td className="text-right">{money(row.estimatedAmount)}</td>
-                        <td className="text-center"><input type="checkbox" className="w-4 h-4" checked={!!row.paid} disabled={busyKey === key} onChange={() => togglePaid(item, row)} title={row.paid ? 'Quitar marca de pago' : 'Registrar pago'} /></td>
-                      </tr>;
+                      const isDiario = row.tipoServicio === 'diario';
+                      const dates = isDiario ? serviceDates(row) : [];
+                      const paidDates = isDiario ? paidDatesOf(row) : [];
+                      const panelOpen = isDiario && dayPanel?.listId === item.id && dayPanel?.studentId === row.studentId;
+                      const picked = panelOpen ? dayPanel.picked : [];
+                      const pickedAmount = picked.reduce((n, d) => n + dateAmount(row, d), 0);
+                      const pending = Number(row.estimatedAmount || 0) - paidAmountOf(row);
+                      return <Fragment key={key}>
+                        <tr className={row.paid ? 'bg-green-50/60' : paidDates.length ? 'bg-amber-50/60' : ''}>
+                          <td>{index + 1}</td><td>{row.name || '—'}</td><td>{row.matricula || '—'}</td><td>{serviceLabel(row)}</td>
+                          <td>{row.daysCount ?? Object.values(row.days || {}).filter((d) => d.entrada || d.salida).length}</td>
+                          <td className="text-right">{money(row.estimatedAmount)}{isDiario && paidDates.length > 0 && <span className="block text-[10px] text-navy-500">Pagado {money(paidAmountOf(row))} · Falta {money(pending)}</span>}</td>
+                          <td className="text-center whitespace-nowrap">
+                            {isDiario ? (
+                              <button type="button" disabled={busyKey === key} onClick={() => openDayPanel(item, row)} className={`rounded-lg border px-2 py-1 ${row.paid ? 'border-green-300 text-green-800 bg-green-50' : paidDates.length ? 'border-amber-300 text-amber-800 bg-amber-50' : 'border-navy-200 text-navy-700'}`}>
+                                {row.paid ? '✓ ' : ''}{paidDates.length}/{dates.length} días
+                              </button>
+                            ) : (
+                              <input type="checkbox" className="w-4 h-4" checked={!!row.paid} disabled={busyKey === key} onChange={() => togglePaid(item, row)} title={row.paid ? 'Quitar marca de pago' : 'Registrar pago'} />
+                            )}
+                          </td>
+                        </tr>
+                        {panelOpen && <tr><td colSpan={7} className="bg-navy-50/60">
+                          <div className="p-3 space-y-3">
+                            <p className="font-semibold text-navy-800">Pago por días · {row.name} <span className="font-normal text-navy-500">({money(perDayAmount(row))} por servicio)</span></p>
+                            {dates.length === 0 ? <p className="text-navy-500">Este alumno no tiene días con servicio en la lista.</p> : (
+                              <div className="flex flex-wrap gap-2">
+                                {dates.map((date) => {
+                                  const isPaid = paidDates.includes(date);
+                                  const isPicked = picked.includes(date);
+                                  return <label key={date} className={`inline-flex items-center gap-2 rounded-lg border px-2 py-1 ${isPaid ? 'border-green-300 bg-green-50 text-green-800' : isPicked ? 'border-navy-500 bg-white' : 'border-navy-200 bg-white cursor-pointer'}`}>
+                                    <input type="checkbox" className="w-4 h-4" checked={isPaid || isPicked} disabled={isPaid || busyKey === key} onChange={() => togglePicked(date)} />
+                                    <span>{shortDate(date)} · {money(dateAmount(row, date))}</span>
+                                    {isPaid && <span className="text-[10px]">pagado</span>}
+                                  </label>;
+                                })}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex gap-2">
+                                <button type="button" className="btn-admin-ghost" onClick={() => setDayPanel((p) => ({ ...p, picked: dates.filter((d) => !paidDates.includes(d)) }))} disabled={busyKey === key}>Seleccionar los pendientes</button>
+                                {paidDates.length > 0 && <button type="button" className="btn-admin-ghost text-red-700 border-red-200" onClick={() => resetPartialPayments(item, row)} disabled={busyKey === key}>Quitar todos los pagos</button>}
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-navy-600">Nuevo pago: <b>{picked.length}</b> día(s) · <b>{money(pickedAmount)}</b></span>
+                                <button type="button" className="btn-admin-primary" disabled={!picked.length || busyKey === key} onClick={() => savePartialPayment(item, row, picked)}>{busyKey === key ? 'Guardando…' : 'Registrar pago'}</button>
+                              </div>
+                            </div>
+                          </div>
+                        </td></tr>}
+                      </Fragment>;
                     })}
                   </tbody></table></div> : <p className="text-sm text-navy-400">Esta lista no contiene alumnos.</p>}
                 </div>}
