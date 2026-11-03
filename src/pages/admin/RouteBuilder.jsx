@@ -3,13 +3,13 @@ import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, Ref
 import { useAuth } from '../../context/AuthContext';
 import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 
-const SERVICE_OPTIONS = [
+export const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
   { key: 'medio', label: 'Medio — entrada o salida' },
   { key: 'diario', label: 'Diario — fechas específicas' },
 ];
 
-const DAY_META = [
+export const DAY_META = [
   { value: 1, short: 'L', name: 'Lunes' },
   { value: 2, short: 'M', name: 'Martes' },
   { value: 3, short: 'X', name: 'Miércoles' },
@@ -105,7 +105,7 @@ function buildDays(student, dates) {
   return { days, selectedCount };
 }
 
-function buildStudentRow(student, dates, concepts, route) {
+export function buildStudentRow(student, dates, concepts, route) {
   const { days, selectedCount } = buildDays(student, dates);
   let conceptKey = 'completo';
   if (student.tipoServicio === 'medio') conceptKey = student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada';
@@ -158,14 +158,14 @@ function hasBothSameDay(row) {
   return Object.values(row.days || {}).some((d) => d.entrada && d.salida);
 }
 
-function priorityCompare(a, b) {
+export function priorityCompare(a, b) {
   const bothA = hasBothSameDay(a);
   const bothB = hasBothSameDay(b);
   if (bothA !== bothB) return bothA ? -1 : 1;
   return String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' });
 }
 
-function financePayload(row, listData, route, school, existing = {}) {
+export function financePayload(row, listData, route, school, existing = {}) {
   return {
     listId: listData.id || '',
     studentId: row.studentId,
@@ -204,7 +204,7 @@ function isListReviewed(list) {
   return !!(list?.reviewedStudents && list?.reviewedPayments);
 }
 
-function invalidateListReviewPatch() {
+export function invalidateListReviewPatch() {
   return {
     reviewedStudents: false,
     reviewedPayments: false,
@@ -215,7 +215,7 @@ function invalidateListReviewPatch() {
   };
 }
 
-function dayHeader(date) {
+export function dayHeader(date) {
   const d = new Date(`${date}T12:00:00`);
   const day = d.getDay();
   const meta = DAY_META.find((x) => x.value === day);
