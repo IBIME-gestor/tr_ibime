@@ -875,7 +875,7 @@ FinanceRecords.syncStudentPayment = async function syncStudentPaymentSafe(
 Students.recordPartialPayment = async function recordPartialPayment(studentId, {
   paymentId = '', totalPaid, note = '', complete = false, nextDueDate = '',
   byName = '', byUid = '', routeId = '', unitId = '', listId = '',
-  method = 'lista', extra = {},
+  method = 'lista', extra = {}, touchStudent = true,
 }) {
   const amount = Number(totalPaid || 0);
   let id = paymentId;
@@ -890,6 +890,7 @@ Students.recordPartialPayment = async function recordPartialPayment(studentId, {
     });
     id = ref.id;
   }
+  if (!touchStudent) return id;
   await updateDocById('students', studentId, {
     paymentStatus: complete ? 'al_corriente' : 'desfase',
     nextDueDate: complete ? (nextDueDate || null) : null,
