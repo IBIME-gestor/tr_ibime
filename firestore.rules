@@ -206,6 +206,11 @@ service cloud.firestore {
       allow read, write: if isAdmin() || isCashier();
     }
 
+    // Banco de pagos Cometa (un documento por pago; nunca se borran).
+    match /cometaPayments/{id} {
+      allow read, write: if isAdmin() || isCashier();
+    }
+
     // ------------------------------------------------------------------
     // Portal externo de operadores (/operador/:token).
     // El enlace (operatorLinks/{token}) lo crea y administra SOLO el admin.
