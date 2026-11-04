@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Home, History } from 'lucide-react';
+import { Home, History, ListChecks } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const navLinkClass = ({ isActive }) =>
@@ -39,6 +39,9 @@ export default function DriverLayout() {
         <nav className="flex gap-1 px-4 pb-2 overflow-x-auto">
           <NavLink to="/chofer" end className={navLinkClass}>
             <Home size={15} /> Inicio
+          </NavLink>
+          <NavLink to="/chofer/lista" className={navLinkClass}>
+            <ListChecks size={15} /> Mi lista
           </NavLink>
           <NavLink to="/chofer/historial" className={navLinkClass}>
             <History size={15} /> Mis recorridos
