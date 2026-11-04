@@ -75,6 +75,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Gasolina y mantenimiento/reparaciones de cada unidad: solo el admin.
+    match /unitFuelLogs/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /unitMaintenance/{id} {
+      allow read, write: if isAdmin();
+    }
+
     match /drivers/{id} {
       allow read: if isAdmin() ||
         (isSignedIn() && request.auth.token.email != null &&
