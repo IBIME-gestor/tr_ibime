@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES, ARRIVAL_WAIT_SECONDS } from '../firebase/trips';
+import { getPublicStudentIndex, subscribePublicTracking, TRIP_ALERT_TYPES, ARRIVAL_WAIT_SECONDS, LIVE_LOCATION_INTERVAL_MS } from '../firebase/trips';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { useArrivalCountdown, fmtCountdown } from '../utils/countdown';
 import { busIcon } from '../utils/mapIcons';
@@ -159,7 +159,7 @@ export default function PublicTrack() {
       setAnimatedLoc(to);
       return undefined;
     }
-    const duration = 13000; // un poco menos que los 15s entre actualizaciones
+    const duration = Math.max(1000, LIVE_LOCATION_INTERVAL_MS - 1000); // un poco menos que el intervalo entre actualizaciones
     const start = performance.now();
     function tick(now) {
       const t = Math.min(1, (now - start) / duration);
