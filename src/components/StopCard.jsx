@@ -60,7 +60,7 @@ export default function StopCard({
             {stop.name}
           </p>
           <p className="text-sm text-navy-400">
-            Matrícula {stop.matricula} · {STATUS_LABEL[stop.status] || 'Pendiente'}
+            Matrícula {stop.matricula} · {STATUS_LABEL[stop.status] || 'Pendiente'}{stop.sporadic ? ' · Esporádico' : ''}
           </p>
         </div>
         {isDone && <span className="text-2xl shrink-0">✓</span>}
