@@ -313,6 +313,7 @@ export const Pricing = PricingConcepts;
 export const RouteLists = {
   list: () => listAll('routeLists', [orderBy('startDate', 'desc')]),
   subscribe: (cb) => subscribeAll('routeLists', [orderBy('startDate', 'desc')], cb),
+  listByRoute: (routeId) => listAll('routeLists', [where('routeId', '==', routeId)]),
   get: (id) => getOne('routeLists', id),
   create: (data) => createDoc('routeLists', data),
   update: (id, data) => updateDocById('routeLists', id, data),
@@ -938,4 +939,24 @@ export const CometaBank = {
       await batch.commit();
     }
   },
+};
+
+/* ------------------------------------------------------------------ */
+/*  Gastos de unidades: gasolina y mantenimiento / reparaciones        */
+/*  unitFuelLogs:   unitId, date, time, amount ($), liters, odometer   */
+/*  unitMaintenance: unitId, date, kind, description, amount, provider */
+/*  Se usan en Reportes (costo real, rendimiento km/L, costo por km).  */
+/* ------------------------------------------------------------------ */
+export const UnitFuelLogs = {
+  subscribe: (cb) => subscribeAll('unitFuelLogs', [orderBy('date', 'desc')], cb),
+  create: (data) => createDoc('unitFuelLogs', data),
+  update: (id, data) => updateDocById('unitFuelLogs', id, data),
+  remove: (id) => removeDoc('unitFuelLogs', id),
+};
+
+export const UnitMaintenance = {
+  subscribe: (cb) => subscribeAll('unitMaintenance', [orderBy('date', 'desc')], cb),
+  create: (data) => createDoc('unitMaintenance', data),
+  update: (id, data) => updateDocById('unitMaintenance', id, data),
+  remove: (id) => removeDoc('unitMaintenance', id),
 };
