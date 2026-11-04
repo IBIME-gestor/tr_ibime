@@ -30,7 +30,7 @@ function fmtTime(ts) {
  *
  * A propósito solo reacciona cuando ENTRA o SALE un operador (la key es
  * la lista de ids, no las coordenadas) — si reencuadrara en cada
- * actualización de posición (cada ~15s por camión), sería molesto estar
+ * actualización de posición (cada ~7 s por camión), sería molesto estar
  * "regresando" el mapa mientras el admin lo está viendo o moviendo.
  */
 function FitBounds({ points }) {
