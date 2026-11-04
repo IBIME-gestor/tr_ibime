@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, RefreshCw, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes, RouteLists } from '../../firebase/services';
-import { listTripsByRouteBetween, getTripStopsOnce } from '../../firebase/trips';
+import { listTripsByRouteBetween, getTripStopsOnce, todayString } from '../../firebase/trips';
 import LoadingOverlay from '../../components/LoadingOverlay';
 
 /* ------------------------------------------------------------------ */
@@ -15,7 +15,6 @@ import LoadingOverlay from '../../components/LoadingOverlay';
 /* ------------------------------------------------------------------ */
 
 const DOW = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-const localToday = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 const monthOf = (d) => String(d || '').slice(0, 7);
 const lastDay = (ym) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2, '0')}`; };
 const dayLabel = (d) => { const x = new Date(`${d}T12:00:00`); return { dow: DOW[x.getDay()], n: String(x.getDate()).padStart(2, '0') }; };
@@ -32,7 +31,7 @@ export default function MyList() {
   const { routeId: routeParam } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const today = localToday();
+  const today = todayString(); // el día cambia a las 19:30
 
   const [routes, setRoutes] = useState([]);
   const [lists, setLists] = useState([]);
