@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Units } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
+import { FuelPanel, MaintenancePanel } from './UnitExpenses';
 
 const emptyForm = {
   plate: '',
@@ -20,6 +21,7 @@ export default function UnitsPage() {
   const [units, setUnits] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [tab, setTab] = useState('unidades');
 
   useEffect(() => Units.subscribe(setUnits), []);
 
@@ -46,9 +48,17 @@ export default function UnitsPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-5">Unidades</h1>
+      <h1 className="admin-h1 mb-3">Unidades</h1>
+      <div className="flex flex-wrap gap-2 mb-5">
+        {[['unidades', 'Unidades'], ['gasolina', 'Gasolina'], ['mantenimiento', 'Mantenimiento y reparaciones']].map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)} className={tab === k ? 'btn-admin-primary' : 'btn-admin-ghost'}>{label}</button>
+        ))}
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
+      {tab === 'gasolina' && <FuelPanel units={units} />}
+      {tab === 'mantenimiento' && <MaintenancePanel units={units} />}
+
+      {tab === 'unidades' && <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
         <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 cascade-item">
           <p className="font-display font-semibold text-sm text-navy-800 mb-3">
             {editingId ? 'Editar unidad' : 'Nueva unidad'}
@@ -186,7 +196,7 @@ export default function UnitsPage() {
             )}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
