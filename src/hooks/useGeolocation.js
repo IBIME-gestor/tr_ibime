@@ -49,7 +49,7 @@ export function watchLocation(onUpdate, options = {}) {
       /* si el chofer niega/pierde el permiso, simplemente dejamos de
          recibir actualizaciones; no interrumpimos el recorrido */
     },
-    { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000, ...options }
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000, ...options }
   );
   return () => navigator.geolocation.clearWatch(watchId);
 }
