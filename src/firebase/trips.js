@@ -66,6 +66,9 @@ import { Routes, Students } from './services';
 /** Segundos de espera tras marcar "Llegué" antes de que la app sugiera continuar. */
 export const ARRIVAL_WAIT_SECONDS = 120;
 
+/** Cada cuánto se publica la ubicación del camión (operador → admin y padres). */
+export const LIVE_LOCATION_INTERVAL_MS = 7000;
+
 const todayId = (date) => date; // 'YYYY-MM-DD'
 
 function tripDocId(routeId, date, shift) {
@@ -719,4 +722,17 @@ export function subscribePublicTracking(routeId, shift, callback) {
   return onSnapshot(ref, (snap) => {
     callback(snap.exists() ? { id: snap.id, ...snap.data() } : null);
   });
+}
+
+/** Recorridos de UNA ruta dentro de un rango de fechas (usa el índice routeId + date). */
+export async function listTripsByRouteBetween(routeId, startDate, endDate) {
+  const q = query(
+    collection(db, 'trips'),
+    where('routeId', '==', routeId),
+    where('date', '>=', startDate),
+    where('date', '<=', endDate),
+    orderBy('date', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
