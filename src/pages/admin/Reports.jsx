@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, TrendingUp, Users, Truck, Route as RouteIcon, CircleDollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { Routes, Units, Students, RouteLists, FinanceRecords } from '../../firebase/services';
+import { Routes, Units, Students, RouteLists, FinanceRecords, UnitFuelLogs, UnitMaintenance } from '../../firebase/services';
 import { listTripsBetween, getTripStopsOnce } from '../../firebase/trips';
 import { cascadeStyle } from '../../utils/cascade';
 
@@ -33,10 +33,14 @@ export default function Reports() {
   const [financeRecords, setFinanceRecords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [unitFilter, setUnitFilter] = useState('');
+  const [fuelLogs, setFuelLogs] = useState([]);
+  const [maintenance, setMaintenance] = useState([]);
 
   useEffect(() => Routes.subscribe(setRoutes), []);
   useEffect(() => Units.subscribe(setUnits), []);
   useEffect(() => Students.subscribe(setStudents), []);
+  useEffect(() => UnitFuelLogs.subscribe(setFuelLogs), []);
+  useEffect(() => UnitMaintenance.subscribe(setMaintenance), []);
   useEffect(() => {
     let active = true;
     RouteLists.list().then((rows) => { if (active) setLists(rows); }).catch((err) => { console.error('Error cargando listas:', err); if (active) setLists([]); });
@@ -143,6 +147,28 @@ export default function Reports() {
         const balance = collected - estimatedCost;
         const margin = collected ? (balance / collected) * 100 : 0;
 
+        // Gasto REAL capturado en Unidades (gasolina + mantenimiento/reparaciones).
+        const inRange = (x) => x.unitId === unit.id && x.date >= startDate && x.date <= endDate;
+        const fuel = fuelLogs.filter(inRange);
+        const fuelCost = fuel.reduce((n, l) => n + Number(l.amount || 0), 0);
+        const liters = fuel.reduce((n, l) => n + Number(l.liters || 0), 0);
+        const maintCost = maintenance.filter(inRange).reduce((n, m) => n + Number(m.amount || 0), 0);
+        const realCost = fuelCost + maintCost;
+        // Rendimiento: km de los recorridos / litros cargados en el periodo.
+        const kmPerL = liters > 0 && km > 0 ? km / liters : null;
+        // Rendimiento por tablero: entre la 1.ª y la última carga con km capturado
+        // (los litros de la 1.ª carga no cuentan: llenaron lo que se gastó ANTES).
+        const odo = fuel.filter((l) => l.odometer != null).sort((a, b) => `${a.date} ${a.time || ''}`.localeCompare(`${b.date} ${b.time || ''}`));
+        let kmPerLOdo = null;
+        if (odo.length >= 2) {
+          const dKm = Number(odo[odo.length - 1].odometer) - Number(odo[0].odometer);
+          const dL = odo.slice(1).reduce((n, l) => n + Number(l.liters || 0), 0);
+          if (dKm > 0 && dL > 0) kmPerLOdo = dKm / dL;
+        }
+        const realCostPerKm = km > 0 ? realCost / km : null;
+        const fuelCostPerKm = km > 0 ? fuelCost / km : null;
+        const realBalance = collected - realCost;
+
         return {
           id: unit.id,
           plate: unit.plate,
@@ -158,9 +184,10 @@ export default function Reports() {
           estimatedCost,
           balance,
           margin,
+          fuelCost, liters, maintCost, realCost, kmPerL, kmPerLOdo, realCostPerKm, fuelCostPerKm, realBalance,
         };
       });
-  }, [units, routes, trips, payments, lists, studentById, unitFilter, startDate, endDate, financePaidRecords, paymentById]);
+  }, [units, routes, trips, payments, lists, studentById, unitFilter, startDate, endDate, financePaidRecords, paymentById, fuelLogs, maintenance]);
 
   const totals = useMemo(() => rows.reduce((a, r) => ({
     units: a.units + 1,
@@ -171,8 +198,14 @@ export default function Reports() {
     collected: a.collected + r.collected,
     cost: a.cost + r.estimatedCost,
     balance: a.balance + r.balance,
+    fuelCost: a.fuelCost + r.fuelCost,
+    liters: a.liters + r.liters,
+    maintCost: a.maintCost + r.maintCost,
+    realCost: a.realCost + r.realCost,
+    realBalance: a.realBalance + r.realBalance,
   }), {
     units: 0, trips: 0, km: 0, served: 0, estimatedRevenue: 0, collected: 0, cost: 0, balance: 0,
+    fuelCost: 0, liters: 0, maintCost: 0, realCost: 0, realBalance: 0,
   }), [rows]);
 
   const collectionRate = totals.estimatedRevenue ? (totals.collected / totals.estimatedRevenue) * 100 : 0;
@@ -196,6 +229,14 @@ export default function Reports() {
       'Costo estimado': Number(r.estimatedCost.toFixed(2)),
       'Balance': Number(r.balance.toFixed(2)),
       'Margen %': Number(r.margin.toFixed(1)),
+      'Gasolina $': Number(r.fuelCost.toFixed(2)),
+      'Litros': Number(r.liters.toFixed(2)),
+      'Rendimiento km/L (recorridos)': r.kmPerL != null ? Number(r.kmPerL.toFixed(2)) : '',
+      'Rendimiento km/L (tablero)': r.kmPerLOdo != null ? Number(r.kmPerLOdo.toFixed(2)) : '',
+      'Mantenimiento y reparaciones $': Number(r.maintCost.toFixed(2)),
+      'Costo real $': Number(r.realCost.toFixed(2)),
+      'Costo real por km': r.realCostPerKm != null ? Number(r.realCostPerKm.toFixed(2)) : '',
+      'Balance real $': Number(r.realBalance.toFixed(2)),
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -287,16 +328,24 @@ export default function Reports() {
         </div>
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+        <div className="admin-card"><p className="text-xs text-navy-400">Gasolina</p><p className="text-xl font-display font-bold tabular-nums">{fmtMoney(totals.fuelCost)}</p><p className="text-xs text-navy-400 mt-1">{totals.liters.toFixed(1)} litros</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Mantenimiento y reparaciones</p><p className="text-xl font-display font-bold tabular-nums">{fmtMoney(totals.maintCost)}</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Rendimiento promedio</p><p className="text-xl font-display font-bold tabular-nums">{totals.liters > 0 && totals.km > 0 ? `${(totals.km / totals.liters).toFixed(2)} km/L` : '—'}</p><p className="text-xs text-navy-400 mt-1">km recorridos / litros cargados</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Costo real por km</p><p className="text-xl font-display font-bold tabular-nums">{totals.km > 0 ? fmtMoney(totals.realCost / totals.km) : '—'}</p><p className="text-xs text-navy-400 mt-1">gasolina + mantenimiento</p></div>
+        <div className="admin-card"><p className="text-xs text-navy-400">Balance real</p><p className="text-xl font-display font-bold tabular-nums">{fmtMoney(totals.realBalance)}</p><p className="text-xs text-navy-400 mt-1">cobrado − gasto real</p></div>
+      </div>
+
       <div className="admin-card p-0 overflow-hidden">
         <div className="px-5 py-4 border-b border-navy-100">
           <p className="font-display font-semibold">Balance por unidad</p>
           <p className="text-xs text-navy-400 mt-1">
             La ocupación se calcula como alumnos distintos atendidos / asientos disponibles de los recorridos.
-            Si no capturas costos en Unidades, el costo y la rentabilidad quedan subestimados.
+            «Costo» es la estimación (costo/km + fijo por recorrido). Las columnas de gasolina, mantenimiento, km/L y «Balance real» salen de lo que capturas en Unidades → Gasolina / Mantenimiento.
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="table-admin min-w-[1100px]">
+          <table className="table-admin min-w-[1700px]">
             <thead>
               <tr>
                 <th className="pl-5">Unidad</th>
@@ -309,7 +358,14 @@ export default function Reports() {
                 <th>Cobrado</th>
                 <th>Costo</th>
                 <th>Balance</th>
-                <th className="pr-5">Margen</th>
+                <th>Margen</th>
+                <th>Gasolina</th>
+                <th>Litros</th>
+                <th>km/L</th>
+                <th>km/L tablero</th>
+                <th>Mant. y rep.</th>
+                <th>Costo real/km</th>
+                <th className="pr-5">Balance real</th>
               </tr>
             </thead>
             <tbody>
@@ -325,7 +381,14 @@ export default function Reports() {
                   <td className="text-go font-semibold">{fmtMoney(r.collected)}</td>
                   <td>{fmtMoney(r.estimatedCost)}</td>
                   <td className="font-semibold">{fmtMoney(r.balance)}</td>
-                  <td className="pr-5">{r.margin.toFixed(1)}%</td>
+                  <td>{r.margin.toFixed(1)}%</td>
+                  <td>{fmtMoney(r.fuelCost)}</td>
+                  <td>{r.liters ? r.liters.toFixed(1) : '—'}</td>
+                  <td>{r.kmPerL != null ? r.kmPerL.toFixed(2) : '—'}</td>
+                  <td>{r.kmPerLOdo != null ? r.kmPerLOdo.toFixed(2) : '—'}</td>
+                  <td>{fmtMoney(r.maintCost)}</td>
+                  <td>{r.realCostPerKm != null ? fmtMoney(r.realCostPerKm) : '—'}</td>
+                  <td className="pr-5 font-semibold">{fmtMoney(r.realBalance)}</td>
                 </tr>
               ))}
             </tbody>
