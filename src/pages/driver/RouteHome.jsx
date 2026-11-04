@@ -317,6 +317,12 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
     return [...ordered, ...[...byId.values()].sort((a, b) => a.name.localeCompare(b.name))];
   }, [refStops, activeStudents]);
 
+  // Esporádicos (diario) siempre al final, igual que en el recorrido.
+  const orderedWithSporadicLast = useMemo(
+    () => [...orderedActiveStudents.filter((s) => s.tipoServicio !== 'diario'), ...orderedActiveStudents.filter((s) => s.tipoServicio === 'diario')],
+    [orderedActiveStudents]
+  );
+
   const studentLocById = useMemo(() => {
     const map = {};
     rosterAll.forEach((s) => {
@@ -338,7 +344,7 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
     () => allTrips.filter((t) => t.routeId === route.id).slice(0, 3),
     [allTrips, route.id]
   );
-  const visibleStops = showAllStops ? orderedActiveStudents : orderedActiveStudents.slice(0, 4);
+  const visibleStops = showAllStops ? orderedWithSporadicLast : orderedWithSporadicLast.slice(0, 4);
 
   return (
     <div className="card cascade-item" style={cascadeStyle(index + 1, 60)}>
@@ -408,6 +414,7 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
                     </div>
                     <p className="text-xs text-navy-400 truncate">
                       {s.matricula}
+                      {s.tipoServicio === 'diario' ? ' · Esporádico' : ''}
                       {s.address ? ` · ${s.address}` : ''}
                     </p>
                   </div>
