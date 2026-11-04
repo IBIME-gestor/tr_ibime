@@ -18,6 +18,7 @@ import {
   removeStudentFromTrip,
   completeTrip,
   updateLiveLocation,
+  LIVE_LOCATION_INTERVAL_MS,
   syncPublicTracking,
   getReferenceTrip,
   setTripAlert,
@@ -41,9 +42,8 @@ L.Icon.Default.mergeOptions({
 });
 
 // No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
-// nada para un ETA aproximado). Con una actualización cada 15s es más que
-// suficiente para que el mapa del padre se vea "en vivo".
-const LOCATION_THROTTLE_MS = 15000;
+// nada para un ETA aproximado). Se publica la última lectura cada
+// LIVE_LOCATION_INTERVAL_MS (7 s) para que el mapa del admin y del padre se vea "en vivo".
 
 function navUrls(destination) {
   if (!destination) return null;
@@ -242,14 +242,21 @@ export default function TripRunner() {
   // (solo el operador la transmite; la nanny no necesita duplicarla).
   useEffect(() => {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
-    const stop = watchLocation((location) => {
+    let latest = null;
+    let sentOnce = false;
+    const stopWatch = watchLocation((location) => {
+      latest = location;
       setMyLocation(location);
-      const now = Date.now();
-      if (now - lastSentAtRef.current < LOCATION_THROTTLE_MS) return;
-      lastSentAtRef.current = now;
-      updateLiveLocation(trip.id, location);
+      // Primera lectura: se publica de inmediato, sin esperar el primer intervalo.
+      if (!sentOnce) { sentOnce = true; lastSentAtRef.current = Date.now(); updateLiveLocation(trip.id, location); }
     });
-    return stop;
+    // Se envía la ÚLTIMA lectura cada 7 s (así no se pierde la última si el GPS llega entre intervalos).
+    const timer = setInterval(() => {
+      if (!latest) return;
+      lastSentAtRef.current = Date.now();
+      updateLiveLocation(trip.id, latest);
+    }, LIVE_LOCATION_INTERVAL_MS);
+    return () => { stopWatch(); clearInterval(timer); };
   }, [isDriver, trip?.id, trip?.status]);
 
   async function handleStartTrip(e) {
