@@ -452,6 +452,17 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
         </div>
       )}
 
+      <button
+        onClick={() => navigate(`/chofer/lista/${route.id}`)}
+        className="w-full flex items-center justify-between gap-2 mt-4 px-4 py-3 rounded-xl bg-navy-800 text-white active:scale-[0.98] transition-transform"
+      >
+        <span className="text-left">
+          <span className="block font-display font-semibold text-sm">Mi lista del mes</span>
+          <span className="block text-xs text-navy-300">Lo que me toca por día · lista original vs actual</span>
+        </span>
+        <ChevronRight size={16} />
+      </button>
+
       <p className="text-xs text-navy-400 mt-4 pt-3 border-t border-navy-100">
         ¿Ruta nueva para ti? Consulta cómo se hizo antes:{' '}
         <button
