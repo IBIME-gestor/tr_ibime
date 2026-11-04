@@ -75,9 +75,20 @@ function tripDocId(routeId, date, shift) {
   return `${routeId}_${date}_${shift}`;
 }
 
+/** Hora (local) a la que "cambia el día" de operación: 19:30. Antes se usaba UTC (≈ 18:00 en México). */
+export const DAY_ROLLOVER_HOUR = 19.5;
+
+/**
+ * "Hoy" para recorridos y listas, en hora LOCAL del dispositivo, y el día
+ * cambia a las 19:30 (no a medianoche): a esa hora ya cuenta como el día
+ * siguiente. Así la ruta de talleres de la tarde sigue siendo "de hoy".
+ */
 export function todayString() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  const d = new Date(Date.now() + (24 - DAY_ROLLOVER_HOUR) * 3600 * 1000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 /**
@@ -120,7 +131,19 @@ export function studentAppliesToday(student, dateStr, shift) {
 
   if (tipoServicio === 'medio') {
     const medioServicio = student.medioServicio || 'entrada';
+    // Si el alumno de medio solo va ciertos días (L–V), se respeta; sin días guardados = todos.
+    const dias = (student.diasSemana || []).map(Number);
+    if (dias.length) {
+      const dow = new Date(`${dateStr}T12:00:00`).getDay() || 7; // 1=lun … 7=dom
+      if (!dias.includes(dow)) return false;
+    }
     return medioServicio === (shift === 'morning' ? 'entrada' : 'salida');
+  }
+
+  // DIARIO (esporádico): solo en las fechas que tiene contratadas; nunca se repite solo.
+  if (tipoServicio === 'diario') {
+    if (!(student.fechasDiarias || []).includes(dateStr)) return false;
+    return servicioIncluyeTurno(student.medioServicio || 'entrada', shift);
   }
 
   if (tipoServicio === 'eventual_fijo') {
@@ -189,7 +212,12 @@ export async function startTrip(route, shift, driverId, kmInicial) {
   const students = allStudents.filter((s) => studentAppliesToday(s, date, shift));
   const savedOrder =
     shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
-  const ordered = orderStudents(students, savedOrder);
+  // Los esporádicos (diario) van al FINAL de la lista del día, después de los fijos.
+  const isSporadic = (s) => s.tipoServicio === 'diario';
+  const ordered = [
+    ...orderStudents(students.filter((s) => !isSporadic(s)), savedOrder),
+    ...orderStudents(students.filter(isSporadic), []),
+  ];
 
   const tripData = {
     routeId: route.id,
@@ -215,6 +243,7 @@ export async function startTrip(route, shift, driverId, kmInicial) {
       name: student.name,
       order: index,
       addedManually: false,
+      sporadic: student.tipoServicio === 'diario',
       status: 'pending',
     });
   });
