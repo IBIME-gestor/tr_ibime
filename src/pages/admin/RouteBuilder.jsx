@@ -165,6 +165,18 @@ export function priorityCompare(a, b) {
   return String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' });
 }
 
+/**
+ * Foto compacta de la lista tal como se generó (lista ORIGINAL). La vista del
+ * operador la compara contra la lista vigente para marcar altas, bajas y cambios.
+ * days[fecha]: 1 = entrada, 2 = salida, 3 = ambas.
+ */
+export function snapshotRows(rows) {
+  return (rows || []).map((r) => ({
+    studentId: r.studentId, name: r.name || '', matricula: r.matricula || '', tipoServicio: r.tipoServicio || '',
+    days: Object.fromEntries(Object.entries(r.days || {}).map(([d, v]) => [d, (v?.entrada ? 1 : 0) + (v?.salida ? 2 : 0)])),
+  }));
+}
+
 export function financePayload(row, listData, route, school, existing = {}) {
   return {
     listId: listData.id || '',
@@ -577,6 +589,7 @@ export default function RouteBuilder() {
         weekdays: [1, 2, 3, 4, 5],
         dates,
         rows,
+        originalRows: snapshotRows(rows),
         status: 'abierta',
         createdByUid: user?.uid || '',
         createdByName: profile?.name || '',
@@ -641,6 +654,7 @@ export default function RouteBuilder() {
       weekdays: [1,2,3,4,5],
       dates: nextDates,
       rows: nextRows,
+      originalRows: snapshotRows(nextRows),
       status: 'abierta',
       createdByUid: user?.uid || '',
       createdByName: profile?.name || '',
