@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Search, UserPlus, ListOrdered, CheckCircle2, Undo2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students } from '../../firebase/services';
 import {
@@ -16,6 +16,7 @@ import {
   markAllBulk,
   addStudentToTrip,
   removeStudentFromTrip,
+  applyOrderToTrip,
   completeTrip,
   updateLiveLocation,
   LIVE_LOCATION_INTERVAL_MS,
@@ -28,8 +29,20 @@ import {
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
 import { getFarewellMessage } from '../../utils/greetings';
 import { weekdayName, fmtCoords } from '../../utils/dates';
-import { numberedIcon } from '../../utils/mapIcons';
+import { numberedIcon, startFlagIcon, finishFlagIcon } from '../../utils/mapIcons';
+import { normalizeText } from '../../utils/search';
 import { optimizeStopOrder } from '../../utils/routeOptimizer';
+import { addToAssignmentBank } from '../../firebase/assignmentBank';
+import {
+  actualSequence,
+  withActualOrder,
+  proposeOrder,
+  sameOrder,
+  locKeyFor,
+  timeKeyFor,
+  actionVerb,
+  fmtLongDate,
+} from '../../utils/tripOrder';
 import StopCard from '../../components/StopCard';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
@@ -129,7 +142,15 @@ export default function TripRunner() {
   const [busy, setBusy] = useState(false);
   const [matricula, setMatricula] = useState('');
   const [found, setFound] = useState(null);
+  const [matches, setMatches] = useState([]); // resultados del buscador, para elegir
+  const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [bankNotice, setBankNotice] = useState('');
+  const [reference, setReference] = useState(null); // último recorrido completado de esta ruta/turno
+  const [proposalDismissed, setProposalDismissed] = useState(false);
+  const [applyingProposal, setApplyingProposal] = useState(false);
+  const [proposalExpanded, setProposalExpanded] = useState(false);
+  const [proposalError, setProposalError] = useState('');
   const [destinations, setDestinations] = useState({}); // studentId -> {lat,lng} | address string
   const [phones, setPhones] = useState({}); // studentId -> teléfono del padre
 
@@ -178,6 +199,7 @@ export default function TripRunner() {
           Students.listByRoute(routeId),
         ]);
         if (cancelled) return;
+        setReference(reference);
         const byId = {};
         const phoneById = {};
         students.forEach((s) => {
@@ -264,7 +286,9 @@ export default function TripRunner() {
     setKmError('');
     setStartingTrip(true);
     try {
-      const t = await startTrip(route, shift, profile.staffId, kmInicialInput);
+      // Dónde arranca la unidad: ahí se dibuja la banderita de salida.
+      const startLoc = (await getCurrentLocation({ timeout: 6000 })) || myLocation;
+      const t = await startTrip(route, shift, profile.staffId, kmInicialInput, startLoc);
       setTrip(t);
     } catch (err) {
       setKmError(err.message);
@@ -295,9 +319,39 @@ export default function TripRunner() {
     [stops]
   );
 
-  // Paradas que todavía faltan por resolver en esta fase: en la mañana,
-  // a quién falta recoger; en la tarde, a quién falta bajar.
-  const remainingStops = shift === 'morning' ? pendingBoarding : boardedWaitingDelivery;
+  // Paradas que todavía faltan por resolver: en la mañana, a quién falta
+  // recoger; en la tarde, a quién falta bajar (suben y bajan, así que
+  // cuenta también a quien aún no se marca como abordado).
+  const remainingStops = useMemo(
+    () =>
+      shift === 'morning'
+        ? pendingBoarding
+        : stops.filter((s) => s.status === 'pending' || s.status === 'boarded'),
+    [shift, pendingBoarding, stops]
+  );
+
+  // Orden REAL en que se ha ido atendiendo a los alumnos hoy (por hora de
+  // marcado). Es lo que numera el mapa: no la posición en la lista.
+  const locKey = locKeyFor(shift);
+  const timeKey = timeKeyFor(shift);
+  const doneSequence = useMemo(() => actualSequence(stops, shift), [stops, shift]);
+  const doneCount = doneSequence.length;
+  const orderedAll = useMemo(() => withActualOrder(stops, shift), [stops, shift]);
+
+  // Propuesta de orden: cómo se fue atendiendo el último recorrido completado
+  // de esta ruta/turno (el de ayer, normalmente). Se ofrece ANTES de
+  // "Recalcular orden", que reordena por cercanía desde donde está la unidad.
+  const remainingSorted = useMemo(
+    () => [...remainingStops].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [remainingStops]
+  );
+  const referenceStops = reference?.stops;
+  const proposalIds = useMemo(
+    () => (referenceStops?.length ? proposeOrder(remainingSorted, referenceStops) : []),
+    [remainingSorted, referenceStops]
+  );
+  const proposalDiffers =
+    proposalIds.length > 1 && !sameOrder(proposalIds, remainingSorted.map((s) => s.studentId));
 
   const remainingWithCoords = useMemo(
     () =>
@@ -339,6 +393,29 @@ export default function TripRunner() {
     const idx = Object.fromEntries(recalcOrder.map((id, i) => [id, i]));
     return [...list].sort((a, b) => (idx[a.studentId] ?? Infinity) - (idx[b.studentId] ?? Infinity));
   }
+
+  // Números del mapa: los ya atendidos llevan su orden real (1, 2, 3…) y los
+  // que faltan siguen contando desde ahí, en el orden en que se ven en la lista.
+  const fmtHour = (ts) =>
+    ts?.toDate ? ts.toDate().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '—';
+  const doneMarkers = doneSequence
+    .filter((s) => s[locKey]?.lat != null)
+    .map((s) => ({
+      id: s.id,
+      seq: s.seq,
+      name: s.name,
+      matricula: s.matricula,
+      lat: s[locKey].lat,
+      lng: s[locKey].lng,
+      hour: fmtHour(s[timeKey]),
+    }));
+  const remainingNumberById = new Map(
+    applyRecalcOrder(remainingSorted).map((s, i) => [s.studentId, doneCount + i + 1])
+  );
+  const remainingMarkers = applyRecalcOrder(remainingWithCoords).map((s) => ({
+    ...s,
+    number: remainingNumberById.get(s.studentId),
+  }));
 
   const mapCenter = myLocation
     ? [myLocation.lat, myLocation.lng]
@@ -400,26 +477,51 @@ export default function TripRunner() {
   async function handleSearchMatricula(e) {
     e.preventDefault();
     setSearchError('');
+    setBankNotice('');
     setFound(null);
-    if (!matricula.trim()) return;
+    setMatches([]);
+    const term = matricula.trim();
+    if (!term) return;
+    setSearching(true);
     try {
-      const matches = await Students.search(matricula.trim(), 20);
-      if (!matches.length) {
-        setSearchError('No se encontró ningún alumno por nombre, apellido o matrícula.');
+      const results = await Students.search(term, 12);
+      if (!results.length) {
+        setSearchError('No encontramos a nadie con eso. Prueba con otro nombre, otro apellido o la matrícula.');
         return;
       }
-      // Si hay coincidencia exacta por matrícula, priorizarla; de lo contrario,
-      // mostrar la primera coincidencia y permitir confirmar el nombre antes de agregar.
-      const term = matricula.trim().toLocaleLowerCase('es-MX');
-      const student = matches.find((s) => String(s.matricula || '').toLocaleLowerCase('es-MX') === term) || matches[0];
-      const alreadyInTrip = stops.find((s) => s.studentId === student.id || String(s.matricula || '').toLowerCase() === String(student.matricula || '').toLowerCase());
-      setFound({ student, alreadyInTrip });
-      if (matches.length > 1 && !matches.some((s) => String(s.matricula || '').toLocaleLowerCase('es-MX') === term)) {
-        setSearchError(`Hay ${matches.length} coincidencias. Verifica cuidadosamente el nombre y la matrícula antes de confirmar.`);
+      // Matrícula exacta, o un único resultado: se va directo a confirmar.
+      const exact = results.find((st) => normalizeText(st.matricula) === normalizeText(term));
+      if (exact || results.length === 1) {
+        pickStudent(exact || results[0]);
+        return;
       }
+      setMatches(results);
     } catch (err) {
       setSearchError(err?.message || 'No se pudo buscar al alumno.');
+    } finally {
+      setSearching(false);
     }
+  }
+
+  function findInTrip(student) {
+    return stops.find(
+      (s) =>
+        s.studentId === student.id ||
+        (student.matricula && normalizeText(s.matricula) === normalizeText(student.matricula))
+    );
+  }
+
+  function pickStudent(student) {
+    setSearchError('');
+    setFound({ student, alreadyInTrip: findInTrip(student) });
+  }
+
+  // Etiqueta que dice de un vistazo en qué situación está cada resultado.
+  function studentSituation(student) {
+    if (findInTrip(student)) return { label: 'Ya está en la lista de hoy', tone: 'text-go' };
+    if (!student.routeId) return { label: 'Sin ruta asignada', tone: 'text-signal-amber' };
+    if (student.routeId === routeId) return { label: 'De esta ruta · hoy no le toca', tone: 'text-navy-400' };
+    return { label: 'De otra ruta', tone: 'text-signal-amber' };
   }
 
   async function handleRemoveFromToday(stop) {
@@ -438,17 +540,47 @@ export default function TripRunner() {
 
   async function confirmMatriculaBoard() {
     setBusy(true);
-    const location = await getCurrentLocation();
-    const action = shift === 'morning' ? 'boarded' : 'delivered';
-    if (found.alreadyInTrip) {
-      await markStopManual(trip.id, found.student.id, action, location);
-    } else {
-      await addStudentToTrip(trip.id, found.student, stops.length, trip, profile);
-      await markStopManual(trip.id, found.student.id, action, location);
+    try {
+      const location = await getCurrentLocation();
+      const action = shift === 'morning' ? 'boarded' : 'delivered';
+      if (found.alreadyInTrip) {
+        await markStopManual(trip.id, found.student.id, action, location);
+      } else {
+        await addStudentToTrip(trip.id, found.student, stops.length, trip, profile);
+        await markStopManual(trip.id, found.student.id, action, location);
+        // Alta de último momento: además de subirlo hoy, queda en el banco
+        // de alumnos por asignar para que administración lo configure. Si
+        // esto falla no se interrumpe el recorrido.
+        try {
+          await addToAssignmentBank({ student: found.student, trip, route, profile });
+          setBankNotice(`${found.student.name} se agregó al recorrido y quedó en el banco de alumnos por asignar.`);
+        } catch (err) {
+          console.error('No se pudo registrar en el banco por asignar:', err);
+          setBankNotice(`${found.student.name} se agregó al recorrido.`);
+        }
+      }
+      setFound(null);
+      setMatches([]);
+      setMatricula('');
+    } catch (err) {
+      setSearchError(err?.message || 'No se pudo agregar al alumno. Intenta de nuevo.');
+    } finally {
+      setBusy(false);
     }
-    setFound(null);
-    setMatricula('');
-    setBusy(false);
+  }
+
+  async function handleApplyProposal() {
+    setApplyingProposal(true);
+    setProposalError('');
+    try {
+      await applyOrderToTrip(trip.id, proposalIds, stops);
+      setRecalcOrder(null);
+    } catch (err) {
+      console.error('No se pudo aplicar la propuesta:', err);
+      setProposalError(err?.message || 'No se pudo aplicar el orden. Intenta de nuevo.');
+    } finally {
+      setApplyingProposal(false);
+    }
   }
 
   async function handleFinish(e) {
@@ -456,7 +588,9 @@ export default function TripRunner() {
     setKmError('');
     setFinishing(true);
     try {
-      await completeTrip(trip.id, trip, kmFinalInput);
+      // Dónde se cierra el viaje: ahí se dibuja la bandera de meta.
+      const endLoc = (await getCurrentLocation({ timeout: 6000 })) || myLocation;
+      await completeTrip(trip.id, trip, kmFinalInput, false, endLoc);
       navigate(`/chofer/resumen/${trip.id}`);
     } catch (err) {
       setKmError(err.message);
@@ -580,32 +714,65 @@ export default function TripRunner() {
         <div className="rounded-2xl overflow-hidden border border-navy-100 cascade-item" style={{ height: 280 }}>
           <MapContainer
             center={mapCenter}
-            zoom={remainingWithCoords.length || myLocation ? 13 : 11}
+            zoom={remainingWithCoords.length || doneMarkers.length || myLocation ? 13 : 11}
             style={{ height: '100%', width: '100%' }}
           >
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
+            {trip?.startLocation?.lat != null && (
+              <Marker position={[trip.startLocation.lat, trip.startLocation.lng]} icon={startFlagIcon()}>
+                <Popup>Salida · aquí inició el recorrido</Popup>
+              </Marker>
+            )}
+            {trip?.endLocation?.lat != null && (
+              <Marker position={[trip.endLocation.lat, trip.endLocation.lng]} icon={finishFlagIcon()}>
+                <Popup>Meta · aquí se cerró el recorrido</Popup>
+              </Marker>
+            )}
             {myLocation && (
               <Marker position={[myLocation.lat, myLocation.lng]}>
                 <Popup>Tú (unidad)</Popup>
               </Marker>
             )}
-            {applyRecalcOrder(remainingWithCoords).map((s, i) => (
-              <Marker key={s.studentId} position={[s.coords.lat, s.coords.lng]} icon={numberedIcon(i + 1)}>
+            {doneMarkers.length > 1 && (
+              <Polyline
+                positions={doneMarkers.map((m) => [m.lat, m.lng])}
+                pathOptions={{ color: '#2E7D57', weight: 3, opacity: 0.7 }}
+              />
+            )}
+            {doneMarkers.map((m) => (
+              <Marker key={`done-${m.id}`} position={[m.lat, m.lng]} icon={numberedIcon(m.seq, '#2E7D57')}>
                 <Popup>
                   <div className="text-xs leading-relaxed">
-                    <p className="font-semibold">{i + 1}. {s.name}</p>
-                    <p>Matrícula: {s.matricula}</p>
+                    <p className="font-semibold">{m.seq}. {m.name}</p>
+                    <p>Matrícula: {m.matricula}</p>
+                    <p>{shift === 'morning' ? 'Recogido' : 'Bajó'} a las {m.hour}</p>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+            {remainingMarkers.map((m) => (
+              <Marker key={m.studentId} position={[m.coords.lat, m.coords.lng]} icon={numberedIcon(m.number)}>
+                <Popup>
+                  <div className="text-xs leading-relaxed">
+                    <p className="font-semibold">{m.number}. {m.name}</p>
+                    <p>Matrícula: {m.matricula}</p>
                     <p>{weekdayName(trip?.date)} · {trip?.date}</p>
-                    <p className="text-navy-400">{fmtCoords(s.coords.lat, s.coords.lng)}</p>
+                    <p className="text-navy-400">{fmtCoords(m.coords.lat, m.coords.lng)}</p>
                   </div>
                 </Popup>
               </Marker>
             ))}
           </MapContainer>
         </div>
+      )}
+      {showMap && (
+        <p className="text-xs text-navy-400 cascade-item">
+          Los números siguen el orden en que vas {shift === 'morning' ? 'recogiendo' : 'bajando'} a los alumnos:
+          verde = ya atendido, amarillo = falta. 🚩 salida · 🏁 meta.
+        </p>
       )}
       {showMap && remainingWithCoords.length < remainingStops.length && (
         <p className="text-xs text-navy-400 cascade-item">
@@ -681,10 +848,12 @@ export default function TripRunner() {
         </form>
       )}
 
-          {/* Buscar por matrícula — útil el primer día o para altas de última
-          hora, en cualquier turno (ida o vuelta) mientras el recorrido no
-          esté totalmente resuelto. */}
-          {!allResolved && (
+      {/* Buscar alumno por nombre, apellido o matrícula — útil el primer día o
+          para altas de último momento, en cualquier turno (ida o vuelta)
+          mientras el recorrido no esté totalmente resuelto. Quien no estaba
+          en la lista se agrega al recorrido y queda en el banco de alumnos
+          por asignar (ver Operación > Banco por asignar). */}
+      {!allResolved && (
         <div className="card">
           <p className="font-medium text-sm text-navy-600 mb-2">
             ¿No aparece el alumno? Búscalo por nombre, apellido o matrícula
@@ -692,20 +861,83 @@ export default function TripRunner() {
           <form onSubmit={handleSearchMatricula} className="flex gap-2">
             <input
               value={matricula}
-              onChange={(e) => setMatricula(e.target.value)}
-              inputMode="numeric"
-              placeholder="Nombre, apellido o matrícula"
-              className="flex-1 rounded-xl border border-navy-100 px-3 py-3 text-lg"
+              onChange={(e) => {
+                setMatricula(e.target.value);
+                setMatches([]);
+                setFound(null);
+              }}
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCapitalize="words"
+              placeholder="Ej. Pérez Ana, 24015"
+              className="flex-1 min-w-0 rounded-xl border border-navy-100 px-3 py-3 text-lg"
             />
-            <button type="submit" className="px-4 rounded-xl bg-navy-800 text-white font-display font-semibold">
-              Buscar
+            <button
+              type="submit"
+              disabled={searching}
+              className="px-4 rounded-xl bg-navy-800 text-white font-display font-semibold flex items-center gap-1.5 shrink-0"
+            >
+              <Search size={16} /> {searching ? 'Buscando…' : 'Buscar'}
             </button>
           </form>
+          <p className="text-xs text-navy-400 mt-1.5">
+            Escribe el nombre, el apellido o los dos, en el orden que quieras.
+          </p>
           {searchError && <p className="text-stop text-sm mt-2">{searchError}</p>}
+          {bankNotice && !found && (
+            <p className="text-sm mt-2 rounded-lg bg-go-light text-go px-3 py-2 flex items-start gap-2">
+              <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> {bankNotice}
+            </p>
+          )}
+
+          {matches.length > 0 && !found && (
+            <div className="mt-3">
+              <p className="text-xs text-navy-400 mb-1.5">
+                {matches.length} coincidencias · toca al alumno correcto
+              </p>
+              <ul className="space-y-2">
+                {matches.map((st) => {
+                  const sit = studentSituation(st);
+                  return (
+                    <li key={st.id}>
+                      <button
+                        type="button"
+                        onClick={() => pickStudent(st)}
+                        className="w-full text-left rounded-xl border border-navy-100 px-3 py-2.5 active:scale-[0.99] transition-transform"
+                      >
+                        <p className="font-display font-semibold text-navy-900 truncate">{st.name}</p>
+                        <p className="text-xs text-navy-400">
+                          Matrícula {st.matricula || '—'}
+                          {st.grado ? ` · ${st.grado}` : ''}
+                        </p>
+                        <p className={`text-xs mt-0.5 ${sit.tone}`}>{sit.label}</p>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
           {found && (
             <div className="mt-3 bg-signal-yellow/20 border-2 border-signal-yellow rounded-xl p-3">
               <p className="text-sm text-navy-600">¿Es este alumno?</p>
               <p className="font-display font-semibold text-lg">{found.student.name}</p>
+              <p className="text-xs text-navy-400">
+                Matrícula {found.student.matricula || '—'}
+                {found.student.grado ? ` · ${found.student.grado}` : ''}
+              </p>
+              {found.alreadyInTrip ? (
+                <p className="text-xs text-go mt-1.5">Ya está en la lista de hoy; solo se va a marcar.</p>
+              ) : (
+                <p className="text-xs text-navy-600 mt-1.5 flex items-start gap-1.5">
+                  <UserPlus size={13} className="shrink-0 mt-0.5" />
+                  Se agrega a este recorrido y queda en el banco de alumnos por asignar, para que
+                  administración lo configure en su ruta.
+                </p>
+              )}
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setFound(null)} className="flex-1 py-2 rounded-lg border border-navy-100">
                   No
@@ -723,15 +955,89 @@ export default function TripRunner() {
         </div>
       )}
 
+      {/* Propuesta de orden: cómo se fue atendiendo el último recorrido.
+          Va ANTES de "Recalcular orden" (que reordena por cercanía). */}
+      {!allResolved && reference && remainingSorted.length > 1 && (
+        proposalDiffers && !proposalDismissed ? (
+          <div className="rounded-2xl border-2 border-signal-yellow bg-signal-yellow/15 p-4 cascade-item">
+            <div className="flex items-start gap-3">
+              <ListOrdered size={20} className="text-navy-800 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="font-display font-semibold text-navy-900">Propuesta de orden para hoy</p>
+                <p className="text-sm text-navy-600 mt-0.5">
+                  Así los fuiste {actionVerb(shift)} el {fmtLongDate(reference.trip.date)}. Acomódalos
+                  igual antes de recalcular la ruta.
+                </p>
+              </div>
+            </div>
+            <ol className="mt-3 space-y-1">
+              {(proposalExpanded ? proposalIds : proposalIds.slice(0, 5)).map((id, i) => {
+                const st = remainingSorted.find((x) => x.studentId === id);
+                return (
+                  <li key={id} className="flex items-center gap-2 text-sm text-navy-800">
+                    <span className="w-6 h-6 rounded-full bg-navy-800 text-white text-xs font-display font-bold flex items-center justify-center shrink-0">
+                      {doneCount + i + 1}
+                    </span>
+                    <span className="truncate">{st?.name}</span>
+                  </li>
+                );
+              })}
+            </ol>
+            {proposalIds.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setProposalExpanded((v) => !v)}
+                className="text-xs font-medium text-navy-600 underline mt-2"
+              >
+                {proposalExpanded ? 'Ver menos' : `Ver los ${proposalIds.length - 5} restantes`}
+              </button>
+            )}
+            {proposalError && <p className="text-stop text-sm mt-2">{proposalError}</p>}
+            <div className="flex gap-2 mt-3">
+              <button
+                type="button"
+                onClick={() => setProposalDismissed(true)}
+                className="flex-1 py-2.5 rounded-xl border border-navy-100 bg-white text-sm font-medium text-navy-600"
+              >
+                Ahora no
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyProposal}
+                disabled={applyingProposal}
+                className="flex-1 py-2.5 rounded-xl bg-navy-800 text-white text-sm font-display font-semibold"
+              >
+                {applyingProposal ? 'Acomodando…' : 'Usar este orden'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          !proposalDiffers && (
+            <p className="text-xs text-navy-500 flex items-start gap-1.5 cascade-item">
+              <CheckCircle2 size={14} className="text-go shrink-0 mt-px" />
+              La lista de hoy ya va en el orden en que los fuiste {actionVerb(shift)} el{' '}
+              {fmtLongDate(reference.trip.date)}.
+            </p>
+          )
+        )
+      )}
+
       {/* Fase de abordaje */}
       {!boardingPhaseDone && (
         <div>
           <div className="flex items-center justify-between gap-2 mb-2">
             <p className="text-sm font-medium text-navy-600">{config.boardPhaseTitle}</p>
             {!config.boardedBulk && pendingBoarding.length > 1 && (
-              <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline shrink-0">
-                <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
-              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                {recalcOrder && (
+                  <button onClick={() => setRecalcOrder(null)} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
+                    <Undo2 size={12} /> Orden de la lista
+                  </button>
+                )}
+                <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
+                  <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
+                </button>
+              </div>
             )}
           </div>
           {config.boardedBulk ? (
@@ -743,6 +1049,7 @@ export default function TripRunner() {
               <StopCard
                 key={stop.id}
                 stop={stop}
+                number={doneCount + i + 1}
                 actionLabel={config.boardAction}
                 onAction={handleIndividualBoard}
                 onMarkAbsent={handleAbsent}
@@ -766,9 +1073,16 @@ export default function TripRunner() {
               {config.deliverPhaseTitle || 'Ve marcando a cada alumno'}
             </p>
             {!config.deliveredBulk && boardedWaitingDelivery.length > 1 && (
-              <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline shrink-0">
-                <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
-              </button>
+              <div className="flex items-center gap-3 shrink-0">
+                {recalcOrder && (
+                  <button onClick={() => setRecalcOrder(null)} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
+                    <Undo2 size={12} /> Orden de la lista
+                  </button>
+                )}
+                <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
+                  <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
+                </button>
+              </div>
             )}
           </div>
           {config.deliveredBulk ? (
@@ -780,6 +1094,7 @@ export default function TripRunner() {
               <StopCard
                 key={stop.id}
                 stop={stop}
+                number={doneCount + i + 1}
                 actionLabel={config.deliverAction}
                 onAction={handleIndividualDeliver}
                 onMarkAbsent={handleAbsent}
@@ -795,22 +1110,35 @@ export default function TripRunner() {
         </div>
       )}
 
-      {/* Lista completa de referencia (colapsable visualmente por estado) */}
+      {/* Lista completa: primero los ya atendidos, en el orden real en que se
+          atendieron (el mismo número que lleva el mapa), luego los que faltan. */}
       <div>
         <p className="text-sm font-medium text-navy-600 mb-2 mt-4">Todos los alumnos</p>
-        {stops.map((stop, i) => (
-          <div key={stop.id} className="relative">
-            <StopCard stop={stop} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
-            {stop.status === 'pending' && !allResolved && (
-              <button
-                type="button"
-                onClick={() => handleRemoveFromToday(stop)}
-                disabled={busy}
-                className="ml-3 mb-3 text-xs font-semibold text-stop underline underline-offset-2"
-              >Quitar de este recorrido</button>
-            )}
-          </div>
-        ))}
+        {(() => {
+          let next = doneCount;
+          return orderedAll.map((stop, i) => {
+            let number;
+            if (stop.seq) number = stop.seq;
+            else if (stop.status === 'absent') number = false;
+            else {
+              next += 1;
+              number = next;
+            }
+            return (
+              <div key={stop.id} className="relative">
+                <StopCard stop={stop} number={number} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
+                {stop.status === 'pending' && !allResolved && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFromToday(stop)}
+                    disabled={busy}
+                    className="ml-3 mb-3 text-xs font-semibold text-stop underline underline-offset-2"
+                  >Quitar de este recorrido</button>
+                )}
+              </div>
+            );
+          });
+        })()}
       </div>
 
       {allResolved && isDriver && (
