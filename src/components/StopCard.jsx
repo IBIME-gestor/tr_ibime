@@ -24,6 +24,11 @@ const STATUS_LABEL = {
  * fila que se puede envolver (flex-wrap) — así no se aprietan ni se
  * salen de la pantalla en un celular angosto.
  *
+ * `number` es el número que se muestra junto al nombre. Si no se pasa se usa
+ * la posición planeada (`order + 1`); el recorrido en vivo le pasa el orden
+ * REAL de atención para que coincida con el número del mapa. Con `false`
+ * no se muestra número.
+ *
  * Si se pasa `onArrive`, aparece el botón "Llegué" para arrancar el
  * contador de espera (visible también para el padre); una vez tocado,
  * ese botón se reemplaza por la cuenta regresiva en vivo.
@@ -37,6 +42,7 @@ export default function StopCard({
   disabled,
   nav,
   phone,
+  number,
   className = '',
   style,
 }) {
@@ -48,6 +54,9 @@ export default function StopCard({
   const isAbsent = stop.status === 'absent';
   const showActions = !isDone && !isAbsent && !disabled;
 
+  // number === false → sin número (p. ej. alumnos que no asistieron).
+  const shownNumber = number === false ? null : number ?? (stop.order != null ? stop.order + 1 : null);
+
   const secondsLeft = useArrivalCountdown(stop.arrivedAt, ARRIVAL_WAIT_SECONDS);
   const timeUp = secondsLeft === 0;
 
@@ -56,7 +65,7 @@ export default function StopCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-display font-semibold text-lg text-navy-900 truncate">
-            {stop.order != null ? `${stop.order + 1}. ` : ''}
+            {shownNumber != null ? `${shownNumber}. ` : ''}
             {stop.name}
           </p>
           <p className="text-sm text-navy-400">
