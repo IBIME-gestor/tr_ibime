@@ -87,10 +87,10 @@ function RouteMiniMap({ markers, schoolLoc, schoolName }) {
             <Popup>{schoolName || 'Plantel'}</Popup>
           </Marker>
         )}
-        {markers.map((m, i) => (
-          <Marker key={m.id} position={[m.loc.lat, m.loc.lng]} icon={numberedIcon(i + 1)}>
+        {markers.map((m) => (
+          <Marker key={m.id} position={[m.loc.lat, m.loc.lng]} icon={numberedIcon(m.n)}>
             <Popup>
-              {i + 1}. {m.name}
+              {m.n}. {m.name}
             </Popup>
           </Marker>
         ))}
@@ -334,8 +334,10 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
     return map;
   }, [rosterAll, refStops]);
 
-  const mapMarkers = orderedActiveStudents
-    .map((s) => ({ id: s.id, name: s.name, loc: studentLocById[s.id] }))
+  // El número del mapa es el mismo de la lista de abajo (orden en que se
+  // atendió la última vez), aunque a algunas paradas aún les falte ubicación.
+  const mapMarkers = orderedWithSporadicLast
+    .map((s, idx) => ({ id: s.id, name: s.name, loc: studentLocById[s.id], n: idx + 1 }))
     .filter((m) => m.loc);
 
   const school = schoolsById[route.schoolId];
