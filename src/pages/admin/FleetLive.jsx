@@ -5,6 +5,7 @@ import L from 'leaflet';
 import { Routes, Drivers } from '../../firebase/services';
 import { subscribeActiveTripsLive } from '../../firebase/trips';
 import { cascadeStyle } from '../../utils/cascade';
+import { busIcon, startFlagIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -158,6 +159,14 @@ export default function FleetLive() {
             />
             <FitBounds points={points} />
             <FlyToSelected point={selectedPoint} />
+            {trips.filter((t) => t.startLocation?.lat != null).map((trip) => (
+              <Marker key={`start-${trip.id}`} position={[trip.startLocation.lat, trip.startLocation.lng]} icon={startFlagIcon()}>
+                <Popup>
+                  <p className="font-medium">Salida · {routesById[trip.routeId]?.name || 'Ruta'}</p>
+                  <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'}</p>
+                </Popup>
+              </Marker>
+            ))}
             {withLocation.map((trip) => {
               const operatorName =
                 staffById[trip.driverId]?.name ||
@@ -167,6 +176,7 @@ export default function FleetLive() {
                 <Marker
                   key={trip.id}
                   position={[trip.liveLocation.lat, trip.liveLocation.lng]}
+                  icon={busIcon()}
                   eventHandlers={{ click: () => setSelectedId(trip.id) }}
                 >
                   <Popup>
