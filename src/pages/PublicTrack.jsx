@@ -90,15 +90,16 @@ const defaultShift = () => (new Date().getHours() < 12 ? 'morning' : 'afternoon'
 /* ------------------------------------------------------------------ */
 
 /**
- * El camión se mueve entre lecturas del GPS (cada ~7 s) deslizando el
+ * El camión se mueve entre lecturas del GPS (cada ~5 s) deslizando el
  * marcador de Leaflet directamente — sin pasar por el estado de React, que
  * volvería a pintar toda la página en cada cuadro de la animación.
  */
-function AnimatedBus({ position, follow }) {
+function AnimatedBus({ position, at, follow }) {
   const map = useMap();
   const markerRef = useRef(null);
   const fromRef = useRef(null);
   const frameRef = useRef(null);
+  const lastAtRef = useRef(null);
 
   useEffect(() => {
     if (!position) return undefined;
@@ -108,6 +109,17 @@ function AnimatedBus({ position, follow }) {
     fromRef.current = position;
     cancelAnimationFrame(frameRef.current);
 
+    // La animación dura lo que de verdad pasó entre las dos últimas
+    // posiciones (hora del servidor), para que el camioncito llegue justo
+    // cuando llega la siguiente y no se frene ni se adelante. Si hubo una
+    // pausa larga (estuvo parado y arrancó), se usa el intervalo normal.
+    const gap = at != null && lastAtRef.current != null ? at - lastAtRef.current : null;
+    if (at != null) lastAtRef.current = at;
+    const duration =
+      gap != null && gap >= 1500 && gap <= LIVE_LOCATION_INTERVAL_MS * 2
+        ? gap
+        : LIVE_LOCATION_INTERVAL_MS;
+
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     if (reduce || (from.lat === position.lat && from.lng === position.lng)) {
       marker.setLatLng([position.lat, position.lng]);
@@ -115,7 +127,6 @@ function AnimatedBus({ position, follow }) {
       return undefined;
     }
 
-    const duration = Math.max(1000, LIVE_LOCATION_INTERVAL_MS - 1000);
     const start = performance.now();
     function tick(now) {
       const t = Math.min(1, (now - start) / duration);
@@ -128,7 +139,7 @@ function AnimatedBus({ position, follow }) {
     frameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position?.lat, position?.lng]);
+  }, [position?.lat, position?.lng, at]);
 
   // Icono estable: no se vuelve a crear en cada render.
   const icon = useMemo(() => busIcon(), []);
@@ -718,7 +729,7 @@ export default function PublicTrack() {
                           <Popup>{tracking.destination.name || 'Plantel'} · meta</Popup>
                         </Marker>
                       )}
-                      <AnimatedBus position={completed ? null : liveLoc} follow={follow} />
+                      <AnimatedBus position={completed ? null : liveLoc} at={liveMs} follow={follow} />
                     </MapContainer>
 
                     <div className="absolute top-3 left-3 z-[1000] rounded-full bg-white/95 shadow px-3 py-1.5 text-xs font-medium flex items-center gap-2">
