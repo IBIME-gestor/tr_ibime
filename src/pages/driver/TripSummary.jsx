@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Printer } from 'lucide-react';
@@ -9,7 +9,8 @@ import { getTrip, getTripStopsOnce, todayString } from '../../firebase/trips';
 import { Students } from '../../firebase/services';
 import { getFirstName, getFarewellMessage } from '../../utils/greetings';
 import { fmtCoords } from '../../utils/dates';
-import { numberedIcon } from '../../utils/mapIcons';
+import { numberedIcon, startFlagIcon, finishFlagIcon } from '../../utils/mapIcons';
+import { actualSequence, withActualOrder, actionVerb } from '../../utils/tripOrder';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 
@@ -111,12 +112,19 @@ export default function TripSummary() {
   const locKey = trip.shift === 'morning' ? 'boardedLocation' : 'deliveredLocation';
   const timeLabel = trip.shift === 'morning' ? 'Hora de recogida' : 'Hora de bajada';
   const isToday = trip.date === todayString();
-  const withLocation = stops
-    .filter((s) => s.status !== 'absent' && s[locKey]?.lat)
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const mapCenter = withLocation[0]
-    ? [withLocation[0][locKey].lat, withLocation[0][locKey].lng]
-    : [19.4326, -99.1332];
+  // Orden REAL en que se atendió a cada alumno (por hora de marcado): el
+  // número del mapa es ese orden, no la posición que tenía en la lista.
+  const sequence = actualSequence(stops, trip.shift);
+  const withLocation = sequence.filter((s) => s[locKey]?.lat);
+  const orderedStops = withActualOrder(stops, trip.shift);
+  const startLoc = trip.startLocation?.lat != null ? trip.startLocation : null;
+  const endLoc = trip.endLocation?.lat != null ? trip.endLocation : null;
+  const routeLine = [
+    ...(startLoc ? [[startLoc.lat, startLoc.lng]] : []),
+    ...withLocation.map((s) => [s[locKey].lat, s[locKey].lng]),
+    ...(endLoc ? [[endLoc.lat, endLoc.lng]] : []),
+  ];
+  const mapCenter = routeLine[0] || [19.4326, -99.1332];
 
   return (
     <div className="space-y-4 pb-10">
@@ -152,11 +160,11 @@ export default function TripSummary() {
         </div>
       </div>
 
-      {withLocation.length > 0 && (
+      {(withLocation.length > 0 || startLoc || endLoc) && (
         <div className="summary-print">
           <div className="flex items-center justify-between mb-2 print:hidden">
             <p className="text-sm font-medium text-navy-600">
-              Mapa de {trip.shift === 'morning' ? 'recolección' : 'entrega'} ({withLocation.length} puntos)
+              Mapa de {trip.shift === 'morning' ? 'recolección' : 'entrega'} ({withLocation.length} puntos, en el orden en que fuiste {actionVerb(trip.shift)})
             </p>
             <button onClick={() => window.print()} className="flex items-center gap-1.5 text-sm font-medium text-navy-600 underline shrink-0">
               <Printer size={14} /> Imprimir mapa
@@ -171,11 +179,24 @@ export default function TripSummary() {
                 attribution="&copy; OpenStreetMap contributors"
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {withLocation.map((s, i) => (
-                <Marker key={s.id} position={[s[locKey].lat, s[locKey].lng]} icon={numberedIcon(i + 1)}>
+              {routeLine.length > 1 && (
+                <Polyline positions={routeLine} pathOptions={{ color: '#152238', weight: 3, opacity: 0.5, dashArray: '6 6' }} />
+              )}
+              {startLoc && (
+                <Marker position={[startLoc.lat, startLoc.lng]} icon={startFlagIcon()}>
+                  <Popup>Salida · aquí inició el recorrido</Popup>
+                </Marker>
+              )}
+              {endLoc && (
+                <Marker position={[endLoc.lat, endLoc.lng]} icon={finishFlagIcon()}>
+                  <Popup>Meta · aquí se cerró el recorrido</Popup>
+                </Marker>
+              )}
+              {withLocation.map((s) => (
+                <Marker key={s.id} position={[s[locKey].lat, s[locKey].lng]} icon={numberedIcon(s.seq)}>
                   <Popup>
                     <div className="text-xs leading-relaxed">
-                      <p className="font-semibold">{i + 1}. {s.name}</p>
+                      <p className="font-semibold">{s.seq}. {s.name}</p>
                       <p>Matrícula: {s.matricula}</p>
                       <p>{timeLabel}: {fmtTime(s[timeKey])}</p>
                       <p className="text-navy-400">{fmtCoords(s[locKey].lat, s[locKey].lng)}</p>
@@ -186,21 +207,23 @@ export default function TripSummary() {
             </MapContainer>
           </div>
           <div className="hidden print:block mt-3">
-            <p className="text-xs font-semibold text-navy-600 mb-1">Nomenclatura</p>
-            {withLocation.map((s, i) => (
+            <p className="text-xs font-semibold text-navy-600 mb-1">Nomenclatura (orden en que se atendió)</p>
+            {startLoc && <p className="text-xs text-navy-700">🚩 Salida · inicio del recorrido</p>}
+            {withLocation.map((s) => (
               <p key={s.id} className="text-xs text-navy-700">
-                {i + 1}. {s.name} — matrícula {s.matricula} · {timeLabel.toLowerCase()}: {fmtTime(s[timeKey])}
+                {s.seq}. {s.name} — matrícula {s.matricula} · {timeLabel.toLowerCase()}: {fmtTime(s[timeKey])}
               </p>
             ))}
+            {endLoc && <p className="text-xs text-navy-700">🏁 Meta · cierre del recorrido</p>}
           </div>
         </div>
       )}
 
       <div className="card divide-y divide-navy-100 cascade-item print:hidden" style={cascadeStyle(2, 60)}>
-        {stops.map((s, i) => (
+        {orderedStops.map((s, i) => (
           <div key={s.id} className="py-2 flex items-center justify-between gap-2 cascade-item" style={cascadeStyle(i, 20, 260)}>
             <div className="min-w-0">
-              <p className="font-medium truncate">{s.name}</p>
+              <p className="font-medium truncate">{s.seq ? `${s.seq}. ` : ''}{s.name}</p>
               <p className="text-xs text-navy-400">Matrícula {s.matricula}</p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
