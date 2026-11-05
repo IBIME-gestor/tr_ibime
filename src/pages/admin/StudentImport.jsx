@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { Link, useNavigate } from 'react-router-dom';
 import { Schools, Students } from '../../firebase/services';
+import { normalizePhone } from '../../utils/phone';
 
 // Columnas esperadas para validar el padrón antes de importarlo.
 // address y parentEmail siguen siendo opcionales.
@@ -47,10 +48,17 @@ function parseExcelFile(file) {
         const workbook = XLSX.read(e.target.result, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
-        const rows = raw.map((row) => {
+        // Segunda lectura con los valores reales: con raw:false un teléfono
+        // numérico llega como el texto que mostraba Excel ("5.25512E+11"),
+        // con los dígitos ya recortados. El valor real sí conserva los 12 dígitos.
+        const real = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+        const rows = raw.map((row, i) => {
           const out = {};
           Object.entries(row).forEach(([key, value]) => {
-            out[normalizeHeader(key)] = typeof value === 'string' ? value.trim() : value;
+            const name = normalizeHeader(key);
+            const exact = real[i]?.[key];
+            const v = name === 'telefono' && typeof exact === 'number' ? exact : value;
+            out[name] = typeof v === 'string' ? v.trim() : v;
           });
           return out;
         });
@@ -86,7 +94,7 @@ export default function StudentImport() {
       ...row,
       'grupo esp': row['grupo esp'] ?? '',
       'familiar responsable': row['familiar responsable'] ?? '',
-      telefono: row.telefono ?? '',
+      telefono: normalizePhone(row.telefono).phone || String(row.telefono ?? ''),
       'correo alumno': row['correo alumno'] ?? '',
       'correo padre familia': row['correo padre familia'] ?? '',
     })));
@@ -127,12 +135,15 @@ export default function StudentImport() {
     setImporting(true);
     const valid = [];
     const failed = [];
+    let badPhones = 0;
     for (const row of rows) {
       const schoolId = schoolIdFor(row.school);
       if (!row.matricula || !row.name || !schoolId) {
         failed.push(row);
         continue;
       }
+      const tel = normalizePhone(row.telefono);
+      if (tel.status === 'broken' || tel.status === 'invalid') badPhones += 1;
       valid.push({
         matricula: String(row.matricula).trim(),
         name: String(row.name).trim(),
@@ -141,17 +152,17 @@ export default function StudentImport() {
         grado: String(row.grado || '').trim(),
         grupoEsp: String(row['grupo esp'] || '').trim(),
         familiarResponsable: String(row['familiar responsable'] || '').trim(),
-        telefono: String(row.telefono || '').trim(),
+        telefono: tel.phone,
         address: row.address || '',
-        parentContact: row.telefono || '',
+        parentContact: tel.phone,
         studentEmail: String(row['correo alumno'] || '').trim().toLowerCase(),
         parentEmail: String(row['correo padre familia'] || '').trim().toLowerCase(),
       });
     }
       const r = valid.length ? await Students.bulkImport(valid) : { total: 0, created: 0, updated: 0 };
-      const ok = r.total;
+      const ok = typeof r === 'number' ? r : r.total;
       setImporting(false);
-      setResult({ ok, failed });
+      setResult({ ok, failed, badPhones });
   }
 
   return (
@@ -215,7 +226,9 @@ export default function StudentImport() {
                                 className="admin-input py-1.5 text-xs min-w-[110px]"
                               />
                             ) : (
-                              key === 'school' && !schoolIdFor(r.school) ? <span className="text-stop">{r.school} (no existe)</span> : (r[key] || '—')
+                              key === 'school' && !schoolIdFor(r.school) ? <span className="text-stop">{r.school} (no existe)</span>
+                              : key === 'telefono' && r.telefono && normalizePhone(r.telefono).status !== 'ok' ? <span className="text-stop" title="Debe ser +52 y 10 dígitos">{r.telefono}</span>
+                              : (r[key] || '—')
                             )}
                           </td>
                         ))}
@@ -251,6 +264,11 @@ export default function StudentImport() {
             {result.failed.length > 0 && (
               <p className="text-sm text-stop mt-1">
                 {result.failed.length} filas no se pudieron importar (matrícula, nombre o plantel inválido).
+              </p>
+            )}
+            {result.badPhones > 0 && (
+              <p className="text-sm text-signal-amber mt-1">
+                {result.badPhones} alumnos quedaron sin teléfono válido (venía en notación científica, p. ej. 5.25E+11, o no tenía 10 dígitos). Corrígelos en el archivo y vuelve a cargarlos.
               </p>
             )}
             <button onClick={() => navigate('/admin/alumnos')} className="link-action mt-3">
