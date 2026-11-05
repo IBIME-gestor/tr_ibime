@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { Link, useNavigate } from 'react-router-dom';
@@ -80,16 +80,62 @@ export default function StudentImport() {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
   const [editingIndex, setEditingIndex] = useState(null);
+  // Modo "solo corregir teléfonos": actualiza alumnos existentes por matrícula.
+  const [phoneOnly, setPhoneOnly] = useState(false);
+  const [existing, setExisting] = useState(null); // Map matrícula -> alumno
+  const [loadingExisting, setLoadingExisting] = useState(false);
 
   useEffect(() => Schools.subscribe(setSchools), []);
 
+  // Una sola lectura de todos los alumnos (≈4 000) en vez de una consulta por fila.
+  useEffect(() => {
+    if (!phoneOnly || existing) return;
+    setLoadingExisting(true);
+    Students.list()
+      .then((list) => {
+        const map = new Map();
+        list.forEach((st) => { const m = String(st.matricula || '').trim(); if (m) map.set(m, st); });
+        setExisting(map);
+      })
+      .catch(() => setFileError('No se pudo leer la lista de alumnos.'))
+      .finally(() => setLoadingExisting(false));
+  }, [phoneOnly, existing]);
+
+  const phoneReport = useMemo(() => {
+    if (!phoneOnly || !existing || !rows.length) return null;
+    const toUpdate = new Map();
+    const notFound = [];
+    const bad = [];
+    let same = 0;
+    rows.forEach((row) => {
+      const mat = String(row.matricula ?? '').trim();
+      if (!mat) return;
+      const st = existing.get(mat);
+      if (!st) { notFound.push(mat); return; }
+      const tel = normalizePhone(row.telefono);
+      if (tel.status !== 'ok') { bad.push({ mat, name: st.name, raw: String(row.telefono ?? '') }); return; }
+      if (st.telefono === tel.phone && st.parentContact === tel.phone) { same += 1; return; }
+      toUpdate.set(st.id, { id: st.id, matricula: mat, name: st.name, from: st.telefono || st.parentContact || '', telefono: tel.phone });
+    });
+    return { toUpdate: [...toUpdate.values()], notFound, bad, same };
+  }, [phoneOnly, existing, rows]);
+
+  function togglePhoneOnly(value) {
+    setPhoneOnly(value);
+    setRows([]);
+    setResult(null);
+    setFileError('');
+  }
+
   function applyRows(cols, data) {
-    const missing = REQUIRED_COLUMNS.filter((c) => !cols.includes(c));
+    const needed = phoneOnly ? ['matricula', 'telefono'] : REQUIRED_COLUMNS;
+    const missing = needed.filter((c) => !cols.includes(c));
     if (missing.length) {
       setFileError(`Faltan columnas en el archivo: ${missing.join(', ')}`);
       setRows([]);
       return;
     }
+    if (phoneOnly) { setRows(data); setEditingIndex(null); return; }
     setRows(data.map((row) => ({
       ...row,
       'grupo esp': row['grupo esp'] ?? '',
@@ -129,6 +175,19 @@ export default function StudentImport() {
       (s) => s.name.trim().toLowerCase() === (name || '').trim().toLowerCase()
     );
     return match?.id || null;
+  }
+
+  async function handlePhoneUpdate() {
+    if (!phoneReport) return;
+    setImporting(true);
+    try {
+      const updated = await Students.bulkUpdatePhones(phoneReport.toUpdate);
+      setResult({ phoneOnly: true, updated, same: phoneReport.same, notFound: phoneReport.notFound.length, bad: phoneReport.bad.length });
+      setExisting(null); // se recarga si se vuelve a usar
+    } catch (err) {
+      setFileError(err?.message || 'No se pudieron actualizar los teléfonos.');
+    }
+    setImporting(false);
   }
 
   async function handleImport() {
@@ -185,10 +244,53 @@ export default function StudentImport() {
       </p>
 
       <div className="admin-card space-y-4">
-        <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFile} className="text-sm" />
+        <label className="flex items-start gap-2 text-sm text-navy-700">
+          <input type="checkbox" checked={phoneOnly} onChange={(e) => togglePhoneOnly(e.target.checked)} className="mt-1" />
+          <span>
+            <b>Solo corregir teléfonos de alumnos que ya existen</b> (los busca por matrícula, no crea ni duplica alumnos).
+            El archivo solo necesita las columnas <code className="bg-navy-100 px-1 rounded">matricula</code> y <code className="bg-navy-100 px-1 rounded">telefono</code>.
+          </span>
+        </label>
+        {phoneOnly && loadingExisting && <p className="text-sm text-navy-400">Cargando alumnos registrados…</p>}
+        <input key={phoneOnly ? 'phone' : 'full'} type="file" accept=".csv,.xlsx,.xls" onChange={handleFile} disabled={phoneOnly && !existing} className="text-sm" />
         {fileError && <p className="text-stop text-sm">{fileError}</p>}
 
-        {rows.length > 0 && !result && (
+        {phoneOnly && phoneReport && !result && (
+          <>
+            <div className="text-sm text-navy-700 space-y-1">
+              <p><b>{phoneReport.toUpdate.length}</b> teléfonos se van a actualizar.</p>
+              <p className="text-navy-400">{phoneReport.same} ya estaban correctos.</p>
+              {phoneReport.notFound.length > 0 && <p className="text-signal-amber">{phoneReport.notFound.length} matrículas no existen en el sistema (se omiten).</p>}
+              {phoneReport.bad.length > 0 && <p className="text-stop">{phoneReport.bad.length} filas con teléfono inválido o en notación científica (se omiten; el teléfono actual no se toca).</p>}
+            </div>
+            {phoneReport.toUpdate.length > 0 && (
+              <div className="overflow-x-auto max-h-64 border border-navy-100 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-navy-50"><tr className="text-left"><th className="p-2">Matrícula</th><th className="p-2">Nombre</th><th className="p-2">Antes</th><th className="p-2">Después</th></tr></thead>
+                  <tbody>
+                    {phoneReport.toUpdate.slice(0, 50).map((u) => (
+                      <tr key={u.id} className="border-t border-navy-50"><td className="p-2">{u.matricula}</td><td className="p-2">{u.name}</td><td className="p-2 text-stop">{u.from || '—'}</td><td className="p-2 text-go">{u.telefono}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                {phoneReport.toUpdate.length > 50 && <p className="p-2 text-xs text-navy-400">Se muestran los primeros 50 de {phoneReport.toUpdate.length}.</p>}
+              </div>
+            )}
+            {phoneReport.bad.length > 0 && (
+              <details className="text-xs text-navy-600">
+                <summary className="cursor-pointer">Ver filas con teléfono inválido ({phoneReport.bad.length})</summary>
+                <ul className="mt-1 max-h-40 overflow-auto">
+                  {phoneReport.bad.slice(0, 200).map((b) => <li key={b.mat}>{b.mat} · {b.name} · “{b.raw}”</li>)}
+                </ul>
+              </details>
+            )}
+            <button onClick={handlePhoneUpdate} disabled={importing || phoneReport.toUpdate.length === 0} className="btn-admin bg-go text-white hover:bg-go/90">
+              {importing ? 'Actualizando…' : `Actualizar ${phoneReport.toUpdate.length} teléfonos`}
+            </button>
+          </>
+        )}
+
+        {!phoneOnly && rows.length > 0 && !result && (
           <>
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-navy-600">{rows.length} filas detectadas. Revisa y corrige antes de importar:</p>
@@ -260,13 +362,20 @@ export default function StudentImport() {
 
         {result && (
           <div className="bg-go-light border border-go rounded-lg p-4">
-            <p className="font-medium text-sm text-navy-800">Se importaron {result.ok} alumnos correctamente.</p>
-            {result.failed.length > 0 && (
+            {result.phoneOnly ? (
+              <>
+                <p className="font-medium text-sm text-navy-800">Se actualizaron {result.updated} teléfonos.</p>
+                <p className="text-xs text-navy-400 mt-1">{result.same} ya estaban correctos · {result.notFound} matrículas no encontradas · {result.bad} con teléfono inválido (sin cambios).</p>
+              </>
+            ) : (
+              <p className="font-medium text-sm text-navy-800">Se importaron {result.ok} alumnos correctamente.</p>
+            )}
+            {!result.phoneOnly && result.failed.length > 0 && (
               <p className="text-sm text-stop mt-1">
                 {result.failed.length} filas no se pudieron importar (matrícula, nombre o plantel inválido).
               </p>
             )}
-            {result.badPhones > 0 && (
+            {!result.phoneOnly && result.badPhones > 0 && (
               <p className="text-sm text-signal-amber mt-1">
                 {result.badPhones} alumnos quedaron sin teléfono válido (venía en notación científica, p. ej. 5.25E+11, o no tenía 10 dígitos). Corrígelos en el archivo y vuelve a cargarlos.
               </p>
