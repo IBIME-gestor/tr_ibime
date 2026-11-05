@@ -28,6 +28,7 @@ import {
   PhoneCall,
   FileSpreadsheet,
   CheckSquare,
+  Inbox,
   Map as MapIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -60,6 +61,7 @@ const groups = [
       { to: '/admin/formar-ruta', label: 'Generar listas de alumnos', icon: ListOrdered, roles: ['admin'] },
       { to: '/admin/listas/consultar', label: 'Consultar listas', icon: Search, roles: ['admin'] },
       { to: '/admin/listas/modificar', label: 'Modificar listas', icon: Settings2, roles: ['admin'] },
+      { to: '/admin/listas/banco', label: 'Banco por asignar', icon: Inbox, roles: ['admin'] },
       { to: '/admin/listas/asistencia', label: 'Asistencia vs lista', icon: CheckSquare, roles: ['admin'] },
       { to: '/admin/mapas-ruta', label: 'Mapas de recorridos', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: ['admin'] },
