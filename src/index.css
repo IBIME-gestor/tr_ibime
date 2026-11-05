@@ -334,3 +334,31 @@ main { scrollbar-width: thin; scrollbar-color: #d5dce8 transparent; }
   z-index: 0;
   isolation: isolate;
 }
+
+/* ------------------------------------------------------------------ */
+/* Camioncito del mapa: anillo suave que late alrededor del camión     */
+/* mientras el recorrido está en curso.                                */
+/* ------------------------------------------------------------------ */
+.bus-marker {
+  position: relative;
+  width: 58px;
+  height: 36px;
+}
+.bus-marker-pulse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 9999px;
+  background: rgba(255, 201, 60, 0.45);
+  animation: busPulse 2.4s ease-out infinite;
+}
+@keyframes busPulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bus-marker-pulse { animation: none; opacity: 0.35; }
+}
