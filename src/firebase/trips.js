@@ -15,7 +15,9 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { db } from './config';
+import { getOne } from './db';
 import { Routes, Students } from './services';
+import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActualOrder } from '../utils/tripOrder';
 
 /**
  * COLECCIONES PÚBLICAS (sin login) — solo lo mínimo para que un padre de
@@ -44,6 +46,7 @@ import { Routes, Students } from './services';
  *    startedAt, completedAt
  *    kmInicial, kmInicialAt   // obligatorio para crear el recorrido (lo pide el chofer)
  *    kmFinal, kmFinalAt       // obligatorio para poder cerrarlo (Finalizar recorrido)
+ *    startLocation, endLocation  // {lat,lng} donde se inició / donde se cerró (banderitas del mapa)
  *    bulkEventAt, bulkEventLocation   // el clic de "Llegamos al colegio" / "Todos abordaron"
  *
  * trips/{tripId}/stops/{studentId}
@@ -67,7 +70,26 @@ import { Routes, Students } from './services';
 export const ARRIVAL_WAIT_SECONDS = 120;
 
 /** Cada cuánto se publica la ubicación del camión (operador → admin y padres). */
-export const LIVE_LOCATION_INTERVAL_MS = 7000;
+export const LIVE_LOCATION_INTERVAL_MS = 5000;
+// Para ahorrar escrituras: solo se publica si el camión se movió al menos
+// esta distancia desde la última posición publicada...
+export const LIVE_LOCATION_MIN_MOVE_M = 15;
+// ...pero si lleva parado, se manda una señal de vida cada tanto para que
+// el padre y el admin sepan que el GPS sigue funcionando (no se ve "sin señal").
+export const LIVE_LOCATION_HEARTBEAT_MS = 30000;
+
+/** Distancia en metros entre dos puntos {lat, lng} (haversine). */
+export function metersBetween(a, b) {
+  if (!a || !b) return Infinity;
+  const R = 6371000;
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
 
 const todayId = (date) => date; // 'YYYY-MM-DD'
 
@@ -193,7 +215,7 @@ export function subscribeTodayTrip(routeId, shift, callback, onError) {
  * por lo tanto, aparece la lista de alumnos para nadie (ni chofer ni
  * nanny), que es justo el candado que se pidió.
  */
-export async function startTrip(route, shift, driverId, kmInicial) {
+export async function startTrip(route, shift, driverId, kmInicial, startLocation = null) {
   if (kmInicial == null || kmInicial === '' || Number.isNaN(Number(kmInicial))) {
     throw new Error('Se requiere el kilometraje inicial para iniciar el recorrido.');
   }
@@ -231,6 +253,9 @@ export async function startTrip(route, shift, driverId, kmInicial) {
     startedAt: serverTimestamp(),
     kmInicial: Number(kmInicial),
     kmInicialAt: serverTimestamp(),
+    // Dónde estaba la unidad al arrancar: es donde se dibuja la banderita
+    // de salida en los mapas.
+    startLocation: startLocation ? { lat: startLocation.lat, lng: startLocation.lng } : null,
   };
   await setDoc(tripRef, tripData);
 
@@ -457,6 +482,24 @@ export async function removeStudentFromTrip(tripId, studentId) {
   await batch.commit();
 }
 
+/**
+ * Acomoda en el recorrido de hoy a los alumnos indicados en el orden dado
+ * (p. ej. la propuesta "como los fuiste bajando ayer"). Los alumnos que NO
+ * se indican no se tocan: los indicados reutilizan las mismas posiciones
+ * que ya ocupaban, solo que en el nuevo orden. Como `order` es lo que usa
+ * el espejo público, el padre de familia ve el mismo orden que el operador.
+ */
+export async function applyOrderToTrip(tripId, orderedStudentIds, stops) {
+  const byId = new Map(stops.map((s) => [s.studentId, s]));
+  const ids = orderedStudentIds.filter((id) => byId.has(id));
+  const slots = ids.map((id) => byId.get(id).order ?? 0).sort((a, b) => a - b);
+  const batch = writeBatch(db);
+  ids.forEach((id, i) => {
+    batch.update(doc(db, 'trips', tripId, 'stops', id), { order: slots[i] });
+  });
+  await batch.commit();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Ubicación en vivo + espejo público (para seguimiento del padre)    */
 /* ------------------------------------------------------------------ */
@@ -483,6 +526,24 @@ export async function updateLiveLocation(tripId, location) {
  * indispensable para el mapa del padre — nunca el documento completo
  * del alumno ni datos de otras rutas.
  */
+// Ruta y plantel casi nunca cambian: se leen una vez y se reutilizan unos
+// minutos, en vez de volver a pedirlos cada vez que se marca a un alumno.
+const routeMetaCache = new Map();
+async function getRouteMeta(routeId) {
+  const hit = routeMetaCache.get(routeId);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit;
+  const route = await Routes.get(routeId);
+  let school = null;
+  try {
+    school = route?.schoolId ? await getOne('schools', route.schoolId) : null;
+  } catch {
+    school = null;
+  }
+  const meta = { at: Date.now(), route, school };
+  routeMetaCache.set(routeId, meta);
+  return meta;
+}
+
 export async function syncPublicTracking(trip, stops) {
   const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
   const publicStops = stops.map((s) => ({
@@ -491,23 +552,38 @@ export async function syncPublicTracking(trip, stops) {
     order: s.order,
     status: s.status,
     resolvedAt: s[timeKey] || null,
+    boardedAt: s.boardedAt || null,
+    deliveredAt: s.deliveredAt || null,
     arrivedAt: s.arrivedAt || null,
   }));
 
-  const route = await Routes.get(trip.routeId);
+  const { route, school } = await getRouteMeta(trip.routeId);
   const avgStopMinutes =
     (trip.shift === 'morning'
       ? route?.avgStopMinutesMorning
       : route?.avgStopMinutesAfternoon) || [];
 
+  // Puntos que se pueden mostrar sin riesgo en la vista pública: donde
+  // arrancó el camión y, en la ida, el plantel (destino). El destino de la
+  // vuelta es el domicilio de un alumno, así que NO se publica.
+  const schoolLoc = school?.geocodedLocation;
+  const destination =
+    trip.shift === 'morning' && schoolLoc?.lat != null
+      ? { lat: schoolLoc.lat, lng: schoolLoc.lng, name: school?.name || 'Plantel' }
+      : null;
+
   await setDoc(
     doc(db, 'publicTracking', trip.id || trip.tripId),
     {
       routeId: trip.routeId,
+      routeName: route?.name || '',
+      schoolName: school?.name || '',
       shift: trip.shift,
       date: trip.date,
       status: trip.status,
       avgStopMinutes,
+      startLocation: trip.startLocation?.lat != null ? { lat: trip.startLocation.lat, lng: trip.startLocation.lng } : null,
+      destination,
       stops: publicStops,
     },
     { merge: true }
@@ -524,22 +600,25 @@ export async function syncPublicTracking(trip, stops) {
  * día. Esto es lo que le permite a la vista del padre calcular un ETA
  * aproximado sin necesitar tráfico en vivo ni una API de pago.
  */
-async function updateAvgStopMinutes(trip, stops) {
-  const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
-  const finished = stops
-    .filter((s) => s.status !== 'absent' && s[timeKey]?.toMillis)
-    .sort((a, b) => a.order - b.order);
+async function updateAvgStopMinutes(trip, stops, savedOrder) {
+  // Se mide en el orden REAL en que se atendió a los alumnos (no en el
+  // planeado) y se guarda por posición en el orden que queda para mañana,
+  // que es justo el que usa la vista del padre para estimar su llegada.
+  const timeKey = timeKeyFor(trip.shift);
+  const finished = actualSequence(stops, trip.shift);
 
   if (finished.length < 2) return;
 
+  const positionOf = new Map(savedOrder.map((id, i) => [id, i]));
   const deltasByOrder = {};
   for (let i = 1; i < finished.length; i++) {
-    const prevMs = finished[i - 1][timeKey].toMillis();
-    const curMs = finished[i][timeKey].toMillis();
+    const prevMs = tsMs(finished[i - 1][timeKey]);
+    const curMs = tsMs(finished[i][timeKey]);
     const minutes = (curMs - prevMs) / 60000;
-    if (minutes > 0 && minutes < 60) {
+    const position = positionOf.get(finished[i].studentId);
+    if (position != null && minutes > 0 && minutes < 60) {
       // ignora saltos absurdos (ej. chofer corrigió una hora a mano)
-      deltasByOrder[finished[i].order] = minutes;
+      deltasByOrder[position] = minutes;
     }
   }
 
@@ -573,7 +652,7 @@ async function updateAvgStopMinutes(trip, stops) {
  * kilometraje final: sin él no se marca como completado ni se genera
  * el mapa final del recorrido (Reportes) para ese día.
  */
-export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false) {
+export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false, endLocation = null) {
   if (kmFinal == null || kmFinal === '' || Number.isNaN(Number(kmFinal))) {
     throw new Error('Se requiere el kilometraje final para cerrar el recorrido.');
   }
@@ -583,22 +662,20 @@ export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false)
   );
   const stops = stopsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
-  const finished = stops.filter((s) => s.status !== 'absent' && s[timeKey]);
-  finished.sort((a, b) => {
-    const ta = a[timeKey]?.toMillis ? a[timeKey].toMillis() : 0;
-    const tb = b[timeKey]?.toMillis ? b[timeKey].toMillis() : 0;
-    return ta - tb;
-  });
-  const newOrder = finished.map((s) => s.studentId);
+  // Orden real en que se atendió a los alumnos; lo que no se atendió se
+  // queda junto a sus vecinos de la lista (ver buildSavedOrder).
+  const newOrder = buildSavedOrder(stops, trip.shift);
 
   await Routes.saveOrderFromTrip(trip.routeId, trip.shift, newOrder);
-  await updateAvgStopMinutes(trip, stops);
+  await updateAvgStopMinutes(trip, stops, newOrder);
   await updateDoc(doc(db, 'trips', tripId), {
     status: 'completed',
     completedAt: serverTimestamp(),
     kmFinal: Number(kmFinal),
     kmFinalAt: serverTimestamp(),
+    // Dónde se cerró el viaje: ahí va la bandera de meta en los mapas.
+    // Si lo cerró el admin desde otro lado no se guarda (no sería real).
+    ...(endLocation?.lat != null ? { endLocation: { lat: endLocation.lat, lng: endLocation.lng } } : {}),
     // Conteos ya calculados aquí y guardados en el propio trip, para que
     // el historial del operador (TripHistory) los muestre sin tener que
     // volver a leer la subcolección de paradas de cada recorrido pasado.
@@ -666,14 +743,16 @@ export async function getReferenceTrip(routeId, shift) {
 
   const trip = { id: tripDoc.id, ...tripDoc.data() };
   const stops = await getTripStopsOnce(trip.id);
-  const locKey = shift === 'morning' ? 'boardedLocation' : 'deliveredLocation';
+  const locKey = locKeyFor(shift);
 
+  // En el orden REAL en que se atendió ese día (no el de la lista), con su
+  // número `seq` para dibujarlo en el mapa.
   return {
     trip,
-    stops: stops
-      .filter((s) => s.status !== 'absent')
-      .sort((a, b) => a.order - b.order)
-      .map((s) => ({ ...s, referenceLocation: s[locKey] || null })),
+    stops: withActualOrder(
+      stops.filter((s) => s.status !== 'absent'),
+      shift
+    ).map((s, i) => ({ ...s, seq: s.seq ?? i + 1, referenceLocation: s[locKey] || null })),
   };
 }
 
