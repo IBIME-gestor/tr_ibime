@@ -5,7 +5,8 @@ import L from 'leaflet';
 import { Printer } from 'lucide-react';
 import { Routes, Schools } from '../../firebase/services';
 import { listTripsByRouteBetween, getTripStopsOnce } from '../../firebase/trips';
-import { numberedIcon, schoolIcon } from '../../utils/mapIcons';
+import { numberedIcon, schoolIcon, startFlagIcon, finishFlagIcon } from '../../utils/mapIcons';
+import { actualSequence } from '../../utils/tripOrder';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -54,8 +55,10 @@ function Fit({ points, keyId }) {
   return null;
 }
 
-function MapBox({ title, markers, line, schoolLoc, schoolName, height = 340, keyId }) {
+function MapBox({ title, markers, line, schoolLoc, schoolName, startLoc, endLoc, height = 340, keyId }) {
   const pts = markers.map((m) => [m.lat, m.lng]);
+  if (startLoc?.lat != null) pts.push([startLoc.lat, startLoc.lng]);
+  if (endLoc?.lat != null) pts.push([endLoc.lat, endLoc.lng]);
   if (schoolLoc?.lat) pts.push([schoolLoc.lat, schoolLoc.lng]);
   return (
     <div className="admin-card p-0 overflow-hidden break-inside-avoid">
@@ -72,8 +75,10 @@ function MapBox({ title, markers, line, schoolLoc, schoolName, height = 340, key
             <Fit points={pts} keyId={keyId} />
             {line && markers.length > 1 && <Polyline positions={markers.map((m) => [m.lat, m.lng])} pathOptions={{ color: '#152238', weight: 3, opacity: 0.55, dashArray: '6 6' }} />}
             {schoolLoc?.lat && <Marker position={[schoolLoc.lat, schoolLoc.lng]} icon={schoolIcon()}><Popup>{schoolName || 'Plantel'}</Popup></Marker>}
+            {startLoc?.lat != null && <Marker position={[startLoc.lat, startLoc.lng]} icon={startFlagIcon()}><Popup>Salida · inicio del recorrido</Popup></Marker>}
+            {endLoc?.lat != null && <Marker position={[endLoc.lat, endLoc.lng]} icon={finishFlagIcon()}><Popup>Meta · cierre del recorrido</Popup></Marker>}
             {markers.map((m, i) => (
-              <Marker key={m.id} position={[m.lat, m.lng]} icon={numberedIcon(i + 1, m.color)}>
+              <Marker key={m.id} position={[m.lat, m.lng]} icon={numberedIcon(m.n ?? i + 1, m.color)}>
                 <Popup><div className="text-xs leading-relaxed">{m.popup}</div></Popup>
               </Marker>
             ))}
@@ -141,11 +146,12 @@ export default function MapasRecorridos() {
     const cfg = SHIFTS[shift];
     const trip = dayTrips.find((t) => t.shift === shift);
     if (!trip) return { trip: null, markers: [] };
-    const stops = (stopsByTrip[trip.id] || []).filter((s) => s.status !== 'absent' && s[cfg.locKey]?.lat).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    // Orden REAL de atención (por hora de marcado), no el de la lista.
+    const stops = actualSequence(stopsByTrip[trip.id] || [], shift).filter((s) => s[cfg.locKey]?.lat);
     return {
       trip,
       markers: stops.map((s) => ({
-        id: s.id, lat: s[cfg.locKey].lat, lng: s[cfg.locKey].lng, color: cfg.color,
+        id: s.id, n: s.seq, lat: s[cfg.locKey].lat, lng: s[cfg.locKey].lng, color: cfg.color,
         popup: <><p className="font-semibold">{s.name}</p><p>Matrícula: {s.matricula}</p><p>{cfg.short}: {fmtTs(s[cfg.timeKey])}</p></>,
       })),
     };
@@ -200,7 +206,7 @@ export default function MapasRecorridos() {
       <div className="flex flex-wrap items-end justify-between gap-3 print:hidden">
         <div>
           <h1 className="admin-h1">Mapas de recorridos</h1>
-          <p className="text-sm text-navy-400 mt-1 max-w-3xl">Los puntos reales donde el operador recogió (entrada) y entregó (salida) a cada alumno, por día y como promedio semanal para recalcular la ruta.</p>
+          <p className="text-sm text-navy-400 mt-1 max-w-3xl">Los puntos reales donde el operador recogió (entrada) y entregó (salida) a cada alumno, por día y como promedio semanal para recalcular la ruta. En el mapa del día los números son el orden en que se atendió a cada alumno; 🚩 marca dónde inició el recorrido y 🏁 dónde se cerró.</p>
         </div>
         <button className="btn-admin-ghost" onClick={() => window.print()}><Printer size={14} className="inline mr-1" />Imprimir</button>
       </div>
@@ -235,9 +241,9 @@ export default function MapasRecorridos() {
               const { trip, markers } = dayMarkers(shift);
               return (
                 <div key={shift} className="space-y-2">
-                  <MapBox title={cfg.label} markers={markers} line schoolLoc={school?.geocodedLocation} schoolName={school?.name} keyId={`${date}-${shift}-${markers.length}`} />
+                  <MapBox title={cfg.label} markers={markers} line schoolLoc={school?.geocodedLocation} schoolName={school?.name} startLoc={trip?.startLocation} endLoc={trip?.endLocation} keyId={`${date}-${shift}-${markers.length}`} />
                   {trip && <p className="text-xs text-navy-500">Inicio {fmtTs(trip.startedAt)} · fin {fmtTs(trip.completedAt)} · km {trip.kmInicial != null && trip.kmFinal != null ? (trip.kmFinal - trip.kmInicial).toFixed(1) : '—'} · {trip.status === 'completed' ? 'completado' : 'en curso'}</p>}
-                  {markers.length > 0 && <ol className="text-xs text-navy-600 columns-2 gap-4">{(stopsByTrip[trip.id] || []).filter((s) => s.status !== 'absent' && s[cfg.locKey]?.lat).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s, i) => <li key={s.id} className="break-inside-avoid">{i + 1}. {s.name} · {fmtTs(s[cfg.timeKey])}</li>)}</ol>}
+                  {markers.length > 0 && <ol className="text-xs text-navy-600 columns-2 gap-4">{actualSequence(stopsByTrip[trip.id] || [], shift).filter((s) => s[cfg.locKey]?.lat).map((s) => <li key={s.id} className="break-inside-avoid">{s.seq}. {s.name} · {fmtTs(s[cfg.timeKey])}</li>)}</ol>}
                 </div>
               );
             })}
