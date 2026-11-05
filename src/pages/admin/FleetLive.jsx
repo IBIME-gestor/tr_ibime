@@ -3,8 +3,11 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes, Drivers } from '../../firebase/services';
-import { subscribeActiveTripsLive } from '../../firebase/trips';
-import { cascadeStyle } from '../../utils/cascade';
+import { Link } from 'react-router-dom';
+import { History } from 'lucide-react';
+import { subscribeActiveTripsLive, todayString } from '../../firebase/trips';
+import { tsMs } from '../../utils/tripOrder';
+import { fmtAgo, signalState, SIGNAL_META } from '../../utils/tripStatus';
 import { busIcon, startFlagIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -31,7 +34,7 @@ function fmtTime(ts) {
  *
  * A propósito solo reacciona cuando ENTRA o SALE un operador (la key es
  * la lista de ids, no las coordenadas) — si reencuadrara en cada
- * actualización de posición (cada ~7 s por camión), sería molesto estar
+ * actualización de posición (cada ~5 s por camión), sería molesto estar
  * "regresando" el mapa mientras el admin lo está viendo o moviendo.
  */
 function FitBounds({ points }) {
@@ -65,93 +68,128 @@ function FlyToSelected({ point }) {
 }
 
 /**
- * Mapa en vivo de todos los recorridos activos, para el admin. A
- * diferencia del resto de pantallas de admin (que consultan solo bajo
- * demanda para cuidar lecturas), esta SÍ se actualiza sola en tiempo
- * real — es justo el punto: ver moverse los camiones sin refrescar.
+ * Flota en vivo — mapa en tiempo real de los recorridos de HOY.
  *
- * Un marcador por operador en curso: la consulta ya filtra por
- * status === 'in_progress', así que un recorrido aparece solo en cuanto
- * el chofer arranca (kilometraje inicial) y desaparece solo en cuanto se
- * cierra (kilometraje final) — sea el chofer o el admin quien lo cierre.
+ * Un recorrido que se quedó "en curso" de un día anterior ya no se mezcla
+ * con los de hoy: no aparece en el mapa ni en la lista, solo se avisa
+ * aparte con un enlace a «Recorridos en curso» para cerrarlo.
  */
 export default function FleetLive() {
   const [trips, setTrips] = useState([]);
   const [routesById, setRoutesById] = useState({});
   const [staffById, setStaffById] = useState({});
   const [selectedId, setSelectedId] = useState(null);
+  const [now, setNow] = useState(Date.now());
 
-  // Nombres de ruta y operador: catálogos chicos, se cargan una vez.
   useEffect(() => {
     Routes.list().then((rs) => setRoutesById(Object.fromEntries(rs.map((r) => [r.id, r]))));
     Drivers.list().then((ds) => setStaffById(Object.fromEntries(ds.map((d) => [d.id, d]))));
   }, []);
-
   useEffect(() => subscribeActiveTripsLive(setTrips), []);
+  // Reloj para que "hace 12 s" y el estado de la señal se mantengan al día.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
 
-  const withLocation = useMemo(
-    () => trips.filter((t) => t.liveLocation?.lat != null),
-    [trips]
+  const today = todayString();
+  const todayTrips = useMemo(
+    () => trips.filter((t) => t.date === today).sort((a, b) => String(routesById[a.routeId]?.name || '').localeCompare(String(routesById[b.routeId]?.name || ''), 'es')),
+    [trips, today, routesById]
   );
+  const staleOld = trips.length - todayTrips.length;
 
+  const withLocation = useMemo(() => todayTrips.filter((t) => t.liveLocation?.lat != null), [todayTrips]);
   const points = useMemo(
     () => withLocation.map((t) => ({ id: t.id, lat: t.liveLocation.lat, lng: t.liveLocation.lng })),
     [withLocation]
   );
-
   const selectedPoint = points.find((p) => p.id === selectedId) || null;
 
-  return (
-    <div>
-      <h1 className="admin-h1 mb-1">Flota en vivo</h1>
-      <p className="text-sm text-navy-400 mb-5">
-        Ubicación en tiempo real de todos los recorridos activos ahora mismo — se actualiza sola,
-        no hace falta refrescar.
-      </p>
+  const counts = useMemo(() => {
+    const c = { live: 0, weak: 0, lost: 0, none: 0 };
+    todayTrips.forEach((t) => { c[signalState(tsMs(t.liveLocation?.updatedAt), now)] += 1; });
+    return c;
+  }, [todayTrips, now]);
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-4">
-        <div className="space-y-2 order-2 lg:order-1 max-h-[520px] overflow-y-auto">
-          {trips.length === 0 && (
-            <div className="admin-card text-center text-sm text-navy-400 cascade-item">
-              No hay ningún recorrido en curso ahora mismo.
+  const icon = useMemo(() => busIcon(), []);
+  const flag = useMemo(() => startFlagIcon(), []);
+  const operatorOf = (trip) =>
+    staffById[trip.driverId]?.name || (trip.nannyId && staffById[trip.nannyId]?.name) || 'Operador';
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="admin-h1 mb-1">Flota en vivo</h1>
+        <p className="text-sm text-navy-500">
+          Dónde va cada camión <b>hoy</b>. Se actualiza sola, no hace falta refrescar.
+        </p>
+      </div>
+
+      {/* Resumen */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="En ruta hoy" value={todayTrips.length} cls="border-navy-100 bg-white text-navy-900" />
+        <Stat label="En vivo" value={counts.live} cls="border-emerald-200 bg-emerald-50 text-emerald-900" dot="bg-emerald-500" />
+        <Stat label="Señal débil / perdida" value={counts.weak + counts.lost} cls={counts.weak + counts.lost ? 'border-red-200 bg-red-50 text-red-900' : 'border-navy-100 bg-white text-navy-300'} dot="bg-red-500" />
+        <Stat label="Sin ubicación aún" value={counts.none} cls="border-slate-200 bg-slate-50 text-slate-700" dot="bg-slate-400" />
+      </div>
+
+      {staleOld > 0 && (
+        <Link
+          to="/admin/recorridos-activos"
+          className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 hover:bg-amber-100"
+        >
+          <History size={18} className="shrink-0" />
+          <span>
+            Hay <b>{staleOld}</b> recorrido{staleOld === 1 ? '' : 's'} de días anteriores que nunca se cerraron (no se
+            muestran aquí). <u>Revisarlos y cerrarlos</u>
+          </span>
+        </Link>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-4">
+        <div className="space-y-2 order-2 lg:order-1 max-h-[560px] overflow-y-auto pr-1">
+          {todayTrips.length === 0 && (
+            <div className="admin-card text-center text-sm text-navy-500 py-8">
+              No hay ningún recorrido en curso hoy ahora mismo.
             </div>
           )}
-          {trips.map((trip, i) => {
-            const stale =
-              trip.liveLocation?.updatedAt?.toMillis &&
-              Date.now() - trip.liveLocation.updatedAt.toMillis() > 3 * 60 * 1000;
-            const operatorName =
-              staffById[trip.driverId]?.name ||
-              (trip.nannyId && staffById[trip.nannyId]?.name) ||
-              'Operador';
+          {todayTrips.map((trip) => {
+            const upd = tsMs(trip.liveLocation?.updatedAt);
+            const sig = signalState(upd, now);
+            const meta = SIGNAL_META[sig];
+            const isMorning = trip.shift === 'morning';
+            const selected = selectedId === trip.id;
             return (
               <button
                 key={trip.id}
                 onClick={() => setSelectedId(trip.id)}
-                className={`admin-card w-full text-left cascade-item transition-shadow ${
-                  selectedId === trip.id ? 'ring-2 ring-signal-yellow' : ''
+                className={`w-full text-left rounded-xl border bg-white p-3 transition-all hover:shadow-md ${
+                  selected ? 'border-signal-yellow ring-2 ring-signal-yellow shadow-md' : 'border-navy-100'
                 }`}
-                style={cascadeStyle(i, 60)}
               >
-                <p className="font-medium truncate">
-                  {routesById[trip.routeId]?.name || 'Ruta'} ·{' '}
-                  {trip.shift === 'morning' ? 'Ida' : 'Vuelta'}
-                </p>
-                <p className="text-xs text-navy-400 mt-0.5">{operatorName}</p>
-                {trip.liveLocation ? (
-                  <p className={`text-xs mt-1 ${stale ? 'text-stop' : 'text-go'}`}>
-                    {stale ? '⚠️ Sin señal reciente' : '🟢 En vivo'} · última actualización{' '}
-                    {fmtTime(trip.liveLocation.updatedAt)}
-                  </p>
-                ) : (
-                  <p className="text-xs text-navy-400 mt-1">Aún sin transmitir ubicación</p>
-                )}
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-display font-semibold text-navy-900 truncate">{routesById[trip.routeId]?.name || 'Ruta'}</p>
+                  <span className={`shrink-0 text-[11px] font-semibold rounded-full px-2 py-0.5 ${isMorning ? 'bg-sky-100 text-sky-800' : 'bg-indigo-100 text-indigo-800'}`}>
+                    {isMorning ? 'Ida' : 'Vuelta'}
+                  </span>
+                </div>
+                <p className="text-sm text-navy-600 mt-0.5 truncate">{operatorOf(trip)}</p>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium border rounded-full px-2 py-0.5 ${meta.chip}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} ${sig === 'live' ? 'animate-pulse' : ''}`} />
+                    {meta.label}
+                  </span>
+                  <span className="text-[11px] text-navy-400">
+                    {upd != null ? `${fmtAgo(upd, now)} · ${fmtTime(trip.liveLocation.updatedAt)}` : `salió ${fmtTime(trip.startedAt)}`}
+                  </span>
+                </div>
               </button>
             );
           })}
         </div>
 
-        <div className="rounded-2xl overflow-hidden border border-navy-100 order-1 lg:order-2 w-full min-w-0" style={{ height: 520 }}>
+        <div className="rounded-2xl overflow-hidden border border-navy-100 order-1 lg:order-2 w-full min-w-0 relative" style={{ height: 560 }}>
           <MapContainer center={MEXICO_CITY} zoom={12} style={{ height: '100%', width: '100%' }}>
             <TileLayer
               attribution="&copy; OpenStreetMap contributors"
@@ -159,36 +197,48 @@ export default function FleetLive() {
             />
             <FitBounds points={points} />
             <FlyToSelected point={selectedPoint} />
-            {trips.filter((t) => t.startLocation?.lat != null).map((trip) => (
-              <Marker key={`start-${trip.id}`} position={[trip.startLocation.lat, trip.startLocation.lng]} icon={startFlagIcon()}>
+            {todayTrips.filter((t) => t.startLocation?.lat != null).map((trip) => (
+              <Marker key={`start-${trip.id}`} position={[trip.startLocation.lat, trip.startLocation.lng]} icon={flag}>
                 <Popup>
                   <p className="font-medium">Salida · {routesById[trip.routeId]?.name || 'Ruta'}</p>
                   <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'}</p>
                 </Popup>
               </Marker>
             ))}
-            {withLocation.map((trip) => {
-              const operatorName =
-                staffById[trip.driverId]?.name ||
-                (trip.nannyId && staffById[trip.nannyId]?.name) ||
-                'Operador';
-              return (
-                <Marker
-                  key={trip.id}
-                  position={[trip.liveLocation.lat, trip.liveLocation.lng]}
-                  icon={busIcon()}
-                  eventHandlers={{ click: () => setSelectedId(trip.id) }}
-                >
-                  <Popup>
-                    <p className="font-medium">{routesById[trip.routeId]?.name || 'Ruta'}</p>
-                    <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'} · {operatorName}</p>
-                  </Popup>
-                </Marker>
-              );
-            })}
+            {withLocation.map((trip) => (
+              <Marker
+                key={trip.id}
+                position={[trip.liveLocation.lat, trip.liveLocation.lng]}
+                icon={icon}
+                zIndexOffset={selectedId === trip.id ? 1000 : 0}
+                eventHandlers={{ click: () => setSelectedId(trip.id) }}
+              >
+                <Popup>
+                  <p className="font-medium">{routesById[trip.routeId]?.name || 'Ruta'}</p>
+                  <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'} · {operatorOf(trip)}</p>
+                  <p className="text-xs">{fmtAgo(tsMs(trip.liveLocation.updatedAt), now)}</p>
+                </Popup>
+              </Marker>
+            ))}
           </MapContainer>
+          {todayTrips.length > 0 && withLocation.length === 0 && (
+            <div className="absolute inset-x-0 top-3 mx-auto w-fit z-[500] rounded-full bg-white/95 shadow px-4 py-1.5 text-xs text-navy-600">
+              Esperando la primera ubicación de los camiones…
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, cls, dot }) {
+  return (
+    <div className={`rounded-2xl border p-3 ${cls}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-wide opacity-80 flex items-center gap-1.5">
+        {dot && <span className={`w-2 h-2 rounded-full ${dot}`} />} {label}
+      </p>
+      <p className="text-3xl font-display font-bold mt-0.5">{value}</p>
     </div>
   );
 }

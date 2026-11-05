@@ -5,12 +5,22 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { FinanceRecords, RouteLists, Routes, Students } from '../../firebase/services';
+import { Drivers, FinanceRecords, RouteLists, Routes, Students } from '../../firebase/services';
+import { listTripsBetween } from '../../firebase/trips';
 
 const currentMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
+
+// Una lista pertenece al mes si su PERIODO toca ese mes (no solo si empieza en él):
+// una lista del 26-oct al 06-nov también se debe ver en noviembre.
+const listInMonth = (list, month) => {
+  const start = String(list.startDate || '');
+  const end = String(list.endDate || list.startDate || '');
+  return !!start && start <= `${month}-31` && end >= `${month}-01`;
+};
+const fmtDay = (d) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) : '—');
 
 const money = (value) => Number(value || 0).toLocaleString('es-MX', {
   style: 'currency', currency: 'MXN', minimumFractionDigits: 2,
@@ -53,6 +63,8 @@ export default function ListasConsulta() {
   const [dayPanel, setDayPanel] = useState(null); // { listId, studentId, picked: [] }
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [check, setCheck] = useState(null); // revisión con recorridos { byRoute, drivers }
+  const [checking, setChecking] = useState(false);
 
   async function loadData() {
     setLoading(true); setError('');
@@ -71,7 +83,7 @@ export default function ListasConsulta() {
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('es-MX');
     return lists.filter((list) => {
-      if (String(list.startDate || '').slice(0, 7) !== month) return false;
+      if (!listInMonth(list, month)) return false;
       if (payFilter === 'pendientes' && !(list.rows || []).some((r) => !r.paid)) return false;
       if (payFilter === 'pagadas' && !((list.rows || []).length && (list.rows || []).every((r) => r.paid))) return false;
       const haystack = [list.listName, list.operatorName, routeNames[list.routeId], list.startDate, list.endDate]
@@ -79,6 +91,41 @@ export default function ListasConsulta() {
       return !q || haystack.includes(q);
     }).sort((a, b) => String(b.startDate || '').localeCompare(String(a.startDate || '')));
   }, [lists, month, search, payFilter, routeNames]);
+
+  // Revisión del mes: rutas sin lista y listas duplicadas (sin lecturas extra).
+  const coverage = useMemo(() => {
+    const monthLists = lists.filter((l) => l.status !== 'eliminada' && listInMonth(l, month));
+    const byRoute = new Map();
+    monthLists.forEach((l) => byRoute.set(l.routeId, [...(byRoute.get(l.routeId) || []), l]));
+    const missing = routes.filter((r) => !byRoute.has(r.id));
+    const groups = new Map();
+    monthLists.forEach((l) => {
+      const k = `${l.routeId}|${l.startDate}|${l.endDate}`;
+      groups.set(k, [...(groups.get(k) || []), l]);
+    });
+    const duplicates = [...groups.values()].filter((g) => g.length > 1);
+    const deleted = lists.filter((l) => l.status === 'eliminada' && listInMonth(l, month));
+    return { missing, duplicates, deleted, withList: byRoute };
+  }, [lists, routes, month]);
+
+  // Revisión con recorridos reales del mes (bajo demanda: lee los recorridos del mes).
+  async function runCheck() {
+    setChecking(true); setError('');
+    try {
+      const [trips, staff] = await Promise.all([listTripsBetween(`${month}-01`, `${month}-31`), Drivers.list()]);
+      const staffName = Object.fromEntries((staff || []).map((d) => [d.id, d.name]));
+      const byRoute = {};
+      trips.forEach((t) => {
+        const r = (byRoute[t.routeId] = byRoute[t.routeId] || { days: new Set(), drivers: new Set(), trips: 0 });
+        r.days.add(t.date); r.drivers.add(t.driverId); r.trips += 1;
+      });
+      setCheck({ byRoute, staffName });
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || 'No se pudieron consultar los recorridos del mes.');
+    } finally { setChecking(false); }
+  }
+  useEffect(() => { setCheck(null); }, [month]);
 
   const totalStudents = filtered.reduce((sum, item) => sum + (item.rows || []).length, 0);
   const totalAmount = filtered.reduce((sum, item) => sum + listAmount(item), 0);
@@ -277,6 +324,103 @@ export default function ListasConsulta() {
         <div className="admin-card flex items-center gap-3"><div className="rounded-lg bg-green-50 p-2"><Wallet size={19}/></div><div><p className="text-xs text-navy-400">Marcado como pagado</p><p className="text-xl font-bold">{money(totalPaid)}</p></div></div>
       </div>
 
+      {/* Revisión del mes: ¿alguna ruta se quedó sin lista o está duplicada? */}
+      {!loading && routes.length > 0 && (() => {
+        const ranWithoutList = check
+          ? coverage.missing.filter((r) => check.byRoute[r.id])
+          : [];
+        const mismatch = check
+          ? [...coverage.withList.entries()].flatMap(([routeId, ls]) => {
+              const ran = check.byRoute[routeId];
+              if (!ran) return [];
+              const listOps = new Set(ls.map((l) => l.operatorId).filter(Boolean));
+              const other = [...ran.drivers].filter((d) => d && listOps.size && !listOps.has(d));
+              return other.length ? [{ routeId, ls, other }] : [];
+            })
+          : [];
+        const problems = coverage.missing.length + coverage.duplicates.length;
+        return (
+          <section className={`rounded-2xl border p-4 space-y-3 ${problems ? 'border-amber-300 bg-amber-50/70' : 'border-emerald-200 bg-emerald-50/60'}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className={`font-semibold flex items-center gap-2 ${problems ? 'text-amber-900' : 'text-emerald-900'}`}>
+                  {problems ? <AlertTriangle size={17} /> : <CheckCircle2 size={17} />}
+                  {problems
+                    ? `Revisión de ${month}: ${coverage.missing.length} ruta(s) sin lista · ${coverage.duplicates.length} duplicada(s)`
+                    : `Revisión de ${month}: todas las rutas tienen su lista y no hay duplicadas`}
+                </p>
+                <p className="text-xs text-navy-500 mt-1 max-w-3xl">
+                  El operador pasa lista aunque la lista del mes no exista: la asistencia se arma con los alumnos de la ruta, no con esta lista. Una ruta sin lista sigue operando, solo que no aparece aquí.
+                </p>
+              </div>
+              <button className="btn-admin-ghost" onClick={runCheck} disabled={checking}>
+                <RefreshCw size={14} className={`inline mr-2 ${checking ? 'animate-spin' : ''}`} />
+                {checking ? 'Revisando…' : check ? 'Volver a revisar' : 'Cruzar con recorridos del mes'}
+              </button>
+            </div>
+
+            {coverage.missing.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-amber-900 mb-1.5">Rutas sin lista en este mes</p>
+                <div className="flex flex-wrap gap-2">
+                  {coverage.missing.map((r) => {
+                    const ran = check?.byRoute[r.id];
+                    return (
+                      <span key={r.id} className={`text-xs rounded-full border px-2.5 py-1 ${ran ? 'border-red-300 bg-red-50 text-red-800 font-semibold' : 'border-amber-200 bg-white text-navy-700'}`}>
+                        {r.name}{ran ? ` · operó ${ran.days.size} día(s) sin lista` : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+                {check && ranWithoutList.length === 0 && (
+                  <p className="text-xs text-navy-500 mt-1.5">Ninguna de ellas tuvo recorridos este mes, así que no hay información oculta.</p>
+                )}
+                {ranWithoutList.length > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <p className="text-xs text-red-800">Estas rutas sí operaron y no tienen lista: hay que generarla.</p>
+                    <button className="btn-admin-primary" onClick={() => navigate('/admin/formar-ruta')}>Generar lista</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {coverage.duplicates.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-amber-900 mb-1.5">Listas duplicadas (misma ruta y mismo periodo)</p>
+                <ul className="text-xs text-navy-700 space-y-1">
+                  {coverage.duplicates.map((g) => (
+                    <li key={g[0].id}>
+                      <b>{routeNames[g[0].routeId] || 'Ruta'}</b> · {fmtDay(g[0].startDate)} – {fmtDay(g[0].endDate)}: {g.length} listas ({g.map((l) => l.operatorName || 'sin operador').join(' / ')}).
+                      {' '}Si es el mismo operador, una sobra; si son distintos, puede ser un suplente.
+                    </li>
+                  ))}
+                </ul>
+                <button className="btn-admin-ghost mt-2" onClick={() => navigate('/admin/listas/modificar')}><Settings2 size={14} className="inline mr-2" />Modificar listas</button>
+              </div>
+            )}
+
+            {mismatch.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-amber-900 mb-1.5">Pasó lista alguien distinto al operador de la lista</p>
+                <ul className="text-xs text-navy-700 space-y-1">
+                  {mismatch.map((m) => (
+                    <li key={m.routeId}>
+                      <b>{routeNames[m.routeId] || 'Ruta'}</b>: la lista es de {m.ls.map((l) => l.operatorName || 'sin operador').join(' / ')}, pero también operó {m.other.map((d) => check.staffName[d] || 'otro operador').join(', ')}.
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {coverage.deleted.length > 0 && (
+              <p className="text-xs text-navy-500">
+                Hay {coverage.deleted.length} lista(s) marcada(s) como eliminada(s) en este periodo; se muestran abajo con su etiqueta.
+              </p>
+            )}
+          </section>
+        );
+      })()}
+
       <section className="admin-card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-navy-100 flex justify-between items-center gap-2">
           <h2 className="font-semibold text-navy-800">Listas de {month || '—'}</h2>
@@ -304,6 +448,8 @@ export default function ListasConsulta() {
                     <p className="text-xs text-navy-500 mt-1">{routeNames[item.routeId] || 'Ruta sin nombre'} · Operador: {item.operatorName || 'Sin asignar'}</p>
                     <p className="text-xs text-navy-400 mt-1">{item.startDate || '—'} al {item.endDate || '—'} · {rows.length} alumno(s) · {money(listAmount(item))} · Pagados {paidCount}/{rows.length}</p>
                   </div>
+                  {item.status === 'eliminada' && <span className="text-xs rounded-full px-2 py-1 whitespace-nowrap bg-red-100 text-red-800">Eliminada</span>}
+                  {String(item.startDate || '').slice(0, 7) !== month && <span className="text-xs rounded-full px-2 py-1 whitespace-nowrap bg-sky-100 text-sky-800">Periodo {fmtDay(item.startDate)} – {fmtDay(item.endDate)}</span>}
                   <span className={`text-xs rounded-full px-2 py-1 whitespace-nowrap ${item.reviewed ? 'bg-green-100 text-green-800' : 'bg-amber-50 text-amber-800'}`}>{item.reviewed ? 'Revisada' : 'Pendiente de revisión'}</span>
                   {isOpen ? <ChevronUp size={17}/> : <ChevronDown size={17}/>}
                 </button>

@@ -41,7 +41,7 @@ export default function ListasAsistencia() {
 
   const routeName = useMemo(() => Object.fromEntries(routes.map((r) => [r.id, r.name])), [routes]);
   const monthLists = useMemo(() => lists
-    .filter((l) => String(l.startDate || '').slice(0, 7) === month && l.status !== 'eliminada')
+    .filter((l) => String(l.startDate || '') <= `${month}-31` && String(l.endDate || l.startDate || '') >= `${month}-01` && l.startDate && l.status !== 'eliminada')
     .sort((a, b) => String(routeName[a.routeId] || '').localeCompare(String(routeName[b.routeId] || ''), 'es')), [lists, month, routeName]);
   const list = monthLists.find((l) => l.id === listId) || null;
 
