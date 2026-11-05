@@ -218,6 +218,34 @@ service cloud.firestore {
       }
     }
 
+    // ------------------------------------------------------------------
+    // Soporte (Admin → Soporte).
+    // clientErrors: errores que reporta la app (papás y operadores sin
+    // login incluidos), por eso crear es abierto pero con campos acotados;
+    // solo el admin lee, cambia el estatus o borra.
+    // auditLog: bitácora de cambios; la escribe cualquier personal con
+    // sesión, solo el admin la lee y nadie la edita ni la borra.
+    // ------------------------------------------------------------------
+    match /clientErrors/{id} {
+      allow create: if request.resource.data.keys().hasOnly([
+          'fingerprint', 'message', 'stack', 'source', 'route', 'role', 'uid',
+          'actorName', 'actorEmail', 'device', 'online', 'viewport', 'sessionId',
+          'extra', 'status', 'createdAt', 'expireAt'
+        ])
+        && request.resource.data.status == 'open'
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 400
+        && request.resource.data.stack is string
+        && request.resource.data.stack.size() <= 2000;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /auditLog/{id} {
+      allow create: if hasUserProfile();
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
     // "Buzón" de la extensión Trigger Email (firestore-send-email): la
     // app solo escribe aquí el aviso a mandar; la extensión ya
     // configurada en Firebase es quien realmente lo envía por SMTP.
