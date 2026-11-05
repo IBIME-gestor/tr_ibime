@@ -20,6 +20,9 @@ import {
   completeTrip,
   updateLiveLocation,
   LIVE_LOCATION_INTERVAL_MS,
+  LIVE_LOCATION_MIN_MOVE_M,
+  LIVE_LOCATION_HEARTBEAT_MS,
+  metersBetween,
   syncPublicTracking,
   getReferenceTrip,
   setTripAlert,
@@ -56,7 +59,7 @@ L.Icon.Default.mergeOptions({
 
 // No mandamos cada lectura del GPS a Firestore (sería carísimo y no aporta
 // nada para un ETA aproximado). Se publica la última lectura cada
-// LIVE_LOCATION_INTERVAL_MS (7 s) para que el mapa del admin y del padre se vea "en vivo".
+// LIVE_LOCATION_INTERVAL_MS (5 s) para que el mapa del admin y del padre se vea "en vivo".
 
 function navUrls(destination) {
   if (!destination) return null;
@@ -255,28 +258,44 @@ export default function TripRunner() {
   // que cambian las paradas, para que la vista del padre de familia
   // refleje el avance del recorrido sin que cada handler tenga que
   // acordarse de sincronizarlo por su cuenta.
+  // OJO: no depende de `trip` completo. Cada posición en vivo actualiza
+  // trips/{id}.liveLocation y, si dependiera de `trip`, volvería a disparar
+  // esta sincronización (una escritura de más cada 5 s). Solo se vuelve a
+  // sincronizar cuando cambia algo que de verdad se publica.
+  const tripRef = useRef(trip);
+  tripRef.current = trip;
   useEffect(() => {
-    if (!trip?.id || stops.length === 0) return;
-    syncPublicTracking({ id: trip.id, ...trip }, stops);
-  }, [trip, stops]);
+    const t = tripRef.current;
+    if (!t?.id || stops.length === 0) return;
+    syncPublicTracking({ id: t.id, ...t }, stops);
+  }, [trip?.id, trip?.routeId, trip?.shift, trip?.date, trip?.status, trip?.startLocation?.lat, trip?.startLocation?.lng, stops]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ubicación en vivo del camión mientras el recorrido está en curso
   // (solo el operador la transmite; la nanny no necesita duplicarla).
   useEffect(() => {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
     let latest = null;
-    let sentOnce = false;
+    let lastSent = null; // última posición publicada
+    const publish = (loc) => {
+      lastSent = loc;
+      lastSentAtRef.current = Date.now();
+      updateLiveLocation(trip.id, loc);
+    };
     const stopWatch = watchLocation((location) => {
       latest = location;
       setMyLocation(location);
       // Primera lectura: se publica de inmediato, sin esperar el primer intervalo.
-      if (!sentOnce) { sentOnce = true; lastSentAtRef.current = Date.now(); updateLiveLocation(trip.id, location); }
+      if (!lastSent) publish(location);
     });
-    // Se envía la ÚLTIMA lectura cada 7 s (así no se pierde la última si el GPS llega entre intervalos).
+    // Cada 5 s se revisa la ÚLTIMA lectura del GPS (así no se pierde si llega entre
+    // intervalos), pero solo se publica si el camión se movió ≥ 15 m o si lleva
+    // 30 s sin publicar (señal de vida). Parado en un semáforo o en una parada
+    // no se escribe nada de más.
     const timer = setInterval(() => {
       if (!latest) return;
-      lastSentAtRef.current = Date.now();
-      updateLiveLocation(trip.id, latest);
+      const moved = metersBetween(lastSent, latest) >= LIVE_LOCATION_MIN_MOVE_M;
+      const idleTooLong = Date.now() - lastSentAtRef.current >= LIVE_LOCATION_HEARTBEAT_MS;
+      if (moved || idleTooLong) publish(latest);
     }, LIVE_LOCATION_INTERVAL_MS);
     return () => { stopWatch(); clearInterval(timer); };
   }, [isDriver, trip?.id, trip?.status]);
