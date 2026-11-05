@@ -8,7 +8,7 @@ import { Routes as RoutesService } from '../../firebase/services';
 import { getReferenceTrip } from '../../firebase/trips';
 import { getCurrentLocation } from '../../hooks/useGeolocation';
 import { weekdayName, fmtCoords } from '../../utils/dates';
-import { numberedIcon } from '../../utils/mapIcons';
+import { numberedIcon, startFlagIcon, finishFlagIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -97,9 +97,9 @@ export default function ReferenceRoute() {
       {reference && (
         <div className="route-print">
           <p className="text-sm text-navy-400 print:hidden">
-            Basado en el recorrido del {reference.trip.date}. Toca "Navegar" en cada parada, en
-            orden, para ir abriendo Maps una por una — así respetas la secuencia real con la que
-            se atendió esta ruta.
+            Basado en el recorrido del {reference.trip.date}. Los números son el orden en que se
+            atendió a cada alumno ese día. Toca "Maps" en cada parada, en orden, para ir abriendo
+            la navegación una por una.
           </p>
           <p className="hidden print:block text-sm text-navy-600 mb-2">
             {route?.name} · {shift === 'morning' ? 'Ida (matutino)' : 'Vuelta (vespertino)'} ·
@@ -118,16 +118,26 @@ export default function ReferenceRoute() {
                     <Popup>Tu ubicación</Popup>
                   </Marker>
                 )}
+                {reference.trip.startLocation?.lat != null && (
+                  <Marker position={[reference.trip.startLocation.lat, reference.trip.startLocation.lng]} icon={startFlagIcon()}>
+                    <Popup>Salida · así arrancó ese recorrido</Popup>
+                  </Marker>
+                )}
+                {reference.trip.endLocation?.lat != null && (
+                  <Marker position={[reference.trip.endLocation.lat, reference.trip.endLocation.lng]} icon={finishFlagIcon()}>
+                    <Popup>Meta · así cerró ese recorrido</Popup>
+                  </Marker>
+                )}
                 {withLocation.map((s) => (
                   <Marker
                     key={s.id}
                     position={[s.referenceLocation.lat, s.referenceLocation.lng]}
-                    icon={numberedIcon(s.order + 1)}
+                    icon={numberedIcon(s.seq)}
                     eventHandlers={{ click: () => setActiveStop(s.id) }}
                   >
                     <Popup>
                       <div className="text-xs leading-relaxed">
-                        <p className="font-semibold">{s.order + 1}. {s.name}</p>
+                        <p className="font-semibold">{s.seq}. {s.name}</p>
                         <p>Matrícula: {s.matricula}</p>
                         <p>{weekdayName(reference.trip.date)} · {reference.trip.date}</p>
                         <p className="text-navy-400">{fmtCoords(s.referenceLocation.lat, s.referenceLocation.lng)}</p>
@@ -145,7 +155,7 @@ export default function ReferenceRoute() {
             <p className="text-xs font-semibold text-navy-600 mb-1">Nomenclatura</p>
             {reference.stops.map((s) => (
               <p key={s.id} className="text-xs text-navy-700">
-                {s.order + 1}. {s.name} — matrícula {s.matricula}
+                {s.seq}. {s.name} — matrícula {s.matricula}
                 {s.referenceLocation?.lat ? '' : ' (sin ubicación guardada)'}
               </p>
             ))}
@@ -162,7 +172,7 @@ export default function ReferenceRoute() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-display font-semibold text-lg text-navy-900 truncate">
-                      {s.order + 1}. {s.name}
+                      {s.seq}. {s.name}
                     </p>
                     <p className="text-sm text-navy-400">Matrícula {s.matricula}</p>
                   </div>
