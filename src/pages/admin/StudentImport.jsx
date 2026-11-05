@@ -81,7 +81,7 @@ export default function StudentImport() {
   const [result, setResult] = useState(null);
   const [editingIndex, setEditingIndex] = useState(null);
   // Modo "solo corregir teléfonos": actualiza alumnos existentes por matrícula.
-  const [phoneOnly, setPhoneOnly] = useState(false);
+  const [phoneOnly, setPhoneOnly] = useState(true);
   const [existing, setExisting] = useState(null); // Map matrícula -> alumno
   const [loadingExisting, setLoadingExisting] = useState(false);
 
@@ -112,10 +112,11 @@ export default function StudentImport() {
       if (!mat) return;
       const st = existing.get(mat);
       if (!st) { notFound.push(mat); return; }
+      const familiar = String(st.familiarResponsable || row['familiar responsable'] || '').trim();
       const tel = normalizePhone(row.telefono);
-      if (tel.status !== 'ok') { bad.push({ mat, name: st.name, raw: String(row.telefono ?? '') }); return; }
+      if (tel.status !== 'ok') { bad.push({ mat, name: st.name, familiar, raw: String(row.telefono ?? '') }); return; }
       if (st.telefono === tel.phone && st.parentContact === tel.phone) { same += 1; return; }
-      toUpdate.set(st.id, { id: st.id, matricula: mat, name: st.name, from: st.telefono || st.parentContact || '', telefono: tel.phone });
+      toUpdate.set(st.id, { id: st.id, matricula: mat, name: st.name, familiar, from: st.telefono || st.parentContact || '', telefono: tel.phone });
     });
     return { toUpdate: [...toUpdate.values()], notFound, bad, same };
   }, [phoneOnly, existing, rows]);
@@ -228,29 +229,40 @@ export default function StudentImport() {
     <div className="max-w-2xl">
       <Link to="/admin/alumnos" className="link-action">← Volver a alumnos</Link>
       <h1 className="admin-h1 mt-2 mb-2">Cargar alumnos por CSV o Excel</h1>
-      <p className="text-navy-400 text-sm mb-5">
-        Acepta archivos <code className="bg-navy-100 px-1 rounded">.csv</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">.xlsx</code> o{' '}
-        <code className="bg-navy-100 px-1 rounded">.xls</code>. La primera fila debe tener
-        columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">name</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">school</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">nivel</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">grado</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">grupo esp</code>,{' '}
-        <code className="bg-navy-100 px-1 rounded">familiar responsable</code> y{' '}
-        <code className="bg-navy-100 px-1 rounded">telefono</code>.{' '}
-        <code className="bg-navy-100 px-1 rounded">address</code> y <code className="bg-navy-100 px-1 rounded">parentEmail</code> son opcionales.
-      </p>
+
+      <div className="grid sm:grid-cols-2 gap-3 mb-5">
+        <button
+          type="button"
+          onClick={() => togglePhoneOnly(true)}
+          className={`text-left rounded-xl border-2 p-4 transition ${phoneOnly ? 'border-go bg-go-light' : 'border-navy-100 bg-white hover:border-navy-200'}`}
+        >
+          <p className="font-semibold text-sm text-navy-800">📞 Solo actualizar teléfonos</p>
+          <p className="text-xs text-navy-500 mt-1">Busca cada alumno por matrícula y cambia ÚNICAMENTE su teléfono. No crea alumnos ni toca ningún otro dato.</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => togglePhoneOnly(false)}
+          className={`text-left rounded-xl border-2 p-4 transition ${!phoneOnly ? 'border-signal-amber bg-white' : 'border-navy-100 bg-white hover:border-navy-200'}`}
+        >
+          <p className="font-semibold text-sm text-navy-800">➕ Alta de alumnos nuevos</p>
+          <p className="text-xs text-navy-500 mt-1">Crea alumnos con todos sus datos. Si la matrícula ya existe, se crea otro registro (duplicado).</p>
+        </button>
+      </div>
+
+      {phoneOnly ? (
+        <p className="text-navy-400 text-sm mb-5">
+          Acepta <code className="bg-navy-100 px-1 rounded">.csv</code>, <code className="bg-navy-100 px-1 rounded">.xlsx</code> o <code className="bg-navy-100 px-1 rounded">.xls</code>.
+          El archivo solo necesita dos columnas en la primera fila: <code className="bg-navy-100 px-1 rounded">matricula</code> y <code className="bg-navy-100 px-1 rounded">telefono</code>. Cualquier otra columna se ignora.
+        </p>
+      ) : (
+        <p className="text-navy-400 text-sm mb-5">
+          Acepta archivos <code className="bg-navy-100 px-1 rounded">.csv</code>, <code className="bg-navy-100 px-1 rounded">.xlsx</code> o <code className="bg-navy-100 px-1 rounded">.xls</code>. La primera fila debe tener
+          columnas: <code className="bg-navy-100 px-1 rounded">matricula</code>, <code className="bg-navy-100 px-1 rounded">name</code>, <code className="bg-navy-100 px-1 rounded">correo alumno</code>, <code className="bg-navy-100 px-1 rounded">school</code>, <code className="bg-navy-100 px-1 rounded">nivel</code>, <code className="bg-navy-100 px-1 rounded">grado</code>, <code className="bg-navy-100 px-1 rounded">grupo esp</code>, <code className="bg-navy-100 px-1 rounded">familiar responsable</code>, <code className="bg-navy-100 px-1 rounded">telefono</code> y <code className="bg-navy-100 px-1 rounded">correo padre familia</code>.
+          <b className="text-signal-amber"> Esta opción es solo para alumnos nuevos: si ya existen, quedarán duplicados. Para corregir teléfonos usa “Solo actualizar teléfonos”.</b>
+        </p>
+      )}
 
       <div className="admin-card space-y-4">
-        <label className="flex items-start gap-2 text-sm text-navy-700">
-          <input type="checkbox" checked={phoneOnly} onChange={(e) => togglePhoneOnly(e.target.checked)} className="mt-1" />
-          <span>
-            <b>Solo corregir teléfonos de alumnos que ya existen</b> (los busca por matrícula, no crea ni duplica alumnos).
-            El archivo solo necesita las columnas <code className="bg-navy-100 px-1 rounded">matricula</code> y <code className="bg-navy-100 px-1 rounded">telefono</code>.
-          </span>
-        </label>
         {phoneOnly && loadingExisting && <p className="text-sm text-navy-400">Cargando alumnos registrados…</p>}
         <input key={phoneOnly ? 'phone' : 'full'} type="file" accept=".csv,.xlsx,.xls" onChange={handleFile} disabled={phoneOnly && !existing} className="text-sm" />
         {fileError && <p className="text-stop text-sm">{fileError}</p>}
@@ -266,10 +278,10 @@ export default function StudentImport() {
             {phoneReport.toUpdate.length > 0 && (
               <div className="overflow-x-auto max-h-64 border border-navy-100 rounded-lg">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-navy-50"><tr className="text-left"><th className="p-2">Matrícula</th><th className="p-2">Nombre</th><th className="p-2">Antes</th><th className="p-2">Después</th></tr></thead>
+                  <thead className="sticky top-0 bg-navy-50"><tr className="text-left"><th className="p-2">Matrícula</th><th className="p-2">Nombre</th><th className="p-2">Familiar responsable</th><th className="p-2">Antes</th><th className="p-2">Después</th></tr></thead>
                   <tbody>
                     {phoneReport.toUpdate.slice(0, 50).map((u) => (
-                      <tr key={u.id} className="border-t border-navy-50"><td className="p-2">{u.matricula}</td><td className="p-2">{u.name}</td><td className="p-2 text-stop">{u.from || '—'}</td><td className="p-2 text-go">{u.telefono}</td></tr>
+                      <tr key={u.id} className="border-t border-navy-50"><td className="p-2">{u.matricula}</td><td className="p-2">{u.name}</td><td className="p-2">{u.familiar || '—'}</td><td className="p-2 text-stop">{u.from || '—'}</td><td className="p-2 text-go">{u.telefono}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -280,7 +292,7 @@ export default function StudentImport() {
               <details className="text-xs text-navy-600">
                 <summary className="cursor-pointer">Ver filas con teléfono inválido ({phoneReport.bad.length})</summary>
                 <ul className="mt-1 max-h-40 overflow-auto">
-                  {phoneReport.bad.slice(0, 200).map((b) => <li key={b.mat}>{b.mat} · {b.name} · “{b.raw}”</li>)}
+                  {phoneReport.bad.slice(0, 200).map((b) => <li key={b.mat}>{b.mat} · {b.name} · Familiar: {b.familiar || '—'} · “{b.raw}”</li>)}
                 </ul>
               </details>
             )}
