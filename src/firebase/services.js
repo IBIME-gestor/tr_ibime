@@ -8,9 +8,14 @@ import {
   updateDocById,
   removeDoc,
 } from './db';
+import { searchStudents } from '../utils/search';
 
 // Firestore acepta hasta 500 operaciones por lote; dejamos margen.
 const BATCH_CHUNK_SIZE = 400;
+
+// Lista de alumnos en memoria para la búsqueda del operador (ver Students.search).
+const STUDENTS_CACHE_MS = 10 * 60 * 1000;
+const studentsCache = { rows: null, at: 0 };
 
 function chunk(arr, size) {
   const out = [];
@@ -228,19 +233,25 @@ export const Students = {
     return results[0] || null;
   },
 
-  // Búsqueda flexible para el operador: matrícula, nombre o apellido.
-  // Firestore no hace búsquedas parciales/insensibles a mayúsculas de forma nativa,
-  // por eso se filtra el directorio cargado desde la colección.
+  // Búsqueda flexible para el operador: matrícula, nombre, apellido o
+  // cualquier combinación (en cualquier orden, sin importar acentos ni
+  // mayúsculas). Firestore no hace búsquedas parciales de forma nativa,
+  // por eso se filtra la lista de alumnos en el dispositivo. La lista se
+  // guarda en memoria unos minutos para no volver a leer miles de
+  // documentos en cada búsqueda.
   async search(queryText, limit = 20) {
-    const term = String(queryText || '').trim().toLocaleLowerCase('es-MX');
-    if (!term) return [];
-    const all = await listAll('students', [orderBy('name')]);
-    return all.filter((student) => {
-      const name = String(student.name || '').toLocaleLowerCase('es-MX');
-      const matricula = String(student.matricula || '').toLocaleLowerCase('es-MX');
-      const apellido = String(student.apellido || student.lastName || '').toLocaleLowerCase('es-MX');
-      return name.includes(term) || matricula.includes(term) || apellido.includes(term);
-    }).slice(0, limit);
+    if (!String(queryText || '').trim()) return [];
+    const now = Date.now();
+    if (!studentsCache.rows || now - studentsCache.at > STUDENTS_CACHE_MS) {
+      studentsCache.rows = await listAll('students', [orderBy('name')]);
+      studentsCache.at = now;
+    }
+    return searchStudents(studentsCache.rows, queryText, limit);
+  },
+
+  /** Descarta la lista en memoria de `search` (p. ej. tras dar de alta alumnos). */
+  clearSearchCache() {
+    studentsCache.rows = null;
   },
 
   /**
