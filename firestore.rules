@@ -183,6 +183,32 @@ service cloud.firestore {
       }
     }
 
+    // Banco de alumnos por asignar: el operador/nanny deja aquí a quien
+    // agrega al momento en un recorrido (ver src/firebase/assignmentBank.js);
+    // solo el admin lo lee y lo resuelve.
+    match /assignmentBank/{studentId} {
+      function bankKeys() {
+        return ['studentId', 'matricula', 'name', 'schoolId', 'studentRouteId', 'routeId',
+                'routeName', 'shift', 'date', 'tripId', 'configured', 'addedByStaffId',
+                'addedByName', 'addedByRole', 'status', 'events', 'lastAddedAt', 'updatedAt'];
+      }
+
+      allow read: if isAdmin();
+
+      allow create: if (isDriver() || isNanny())
+        && request.resource.data.status == 'pending'
+        && request.resource.data.studentId == studentId
+        && request.resource.data.keys().hasOnly(bankKeys());
+
+      // El operador solo puede volver a registrar al alumno (reabre como pendiente).
+      allow update: if isAdmin()
+        || ((isDriver() || isNanny())
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(bankKeys()));
+
+      allow delete: if isAdmin();
+    }
+
     // Nómina / bitácora diaria de personal (horarios, bonos, sustitutos).
     // Es información de RH — solo el admin la ve o la toca.
     match /staffLogs/{date} {
