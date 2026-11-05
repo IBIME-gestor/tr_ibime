@@ -9,13 +9,54 @@ import {
   removeDoc,
 } from './db';
 import { searchStudents } from '../utils/search';
+import { diffFields, logAudit } from './audit';
 
 // Firestore acepta hasta 500 operaciones por lote; dejamos margen.
 const BATCH_CHUNK_SIZE = 400;
 
 // Lista de alumnos en memoria para la búsqueda del operador (ver Students.search).
-const STUDENTS_CACHE_MS = 10 * 60 * 1000;
+// La lista se guarda también en el dispositivo (localStorage) para no volver a
+// leer miles de alumnos cada vez que el operador abre la app: son lecturas de
+// Firestore. Si una búsqueda no encuentra nada y la copia tiene más de 2 min,
+// se refresca una vez (por si el alumno se subió de último momento).
+const STUDENTS_CACHE_MS = 6 * 60 * 60 * 1000;
+const STUDENTS_MISS_REFRESH_MS = 2 * 60 * 1000;
+const STUDENTS_STORAGE_KEY = 'rs_students_search_v2';
 const studentsCache = { rows: null, at: 0 };
+
+function loadPersistedStudents() {
+  try {
+    const raw = window.localStorage.getItem(STUDENTS_STORAGE_KEY);
+    if (!raw) return;
+    const { at, rows } = JSON.parse(raw);
+    if (Array.isArray(rows) && at) { studentsCache.rows = rows; studentsCache.at = at; }
+  } catch { /* sin almacenamiento: se usa solo la memoria */ }
+}
+
+function persistStudents() {
+  try {
+    // Solo lo que usa la búsqueda y el alta al recorrido (copia ligera).
+    const rows = studentsCache.rows.map((s) => ({
+      id: s.id, name: s.name, matricula: s.matricula, apellido: s.apellido, lastName: s.lastName,
+      apellidos: s.apellidos, routeId: s.routeId, schoolId: s.schoolId, nivel: s.nivel, grado: s.grado,
+      tipoServicio: s.tipoServicio, medioServicio: s.medioServicio, diasSemana: s.diasSemana,
+      diasFijos: s.diasFijos, fechasEventuales: s.fechasEventuales,
+    }));
+    window.localStorage.setItem(STUDENTS_STORAGE_KEY, JSON.stringify({ at: studentsCache.at, rows }));
+  } catch { /* cuota llena u otro: no pasa nada */ }
+}
+
+function invalidateStudentsCache() {
+  studentsCache.rows = null;
+  studentsCache.at = 0;
+  try { window.localStorage.removeItem(STUDENTS_STORAGE_KEY); } catch { /* ignora */ }
+}
+
+async function refreshStudentsCache() {
+  studentsCache.rows = await listAll('students', [orderBy('name')]);
+  studentsCache.at = Date.now();
+  persistStudents();
+}
 
 function chunk(arr, size) {
   const out = [];
@@ -111,13 +152,45 @@ export const Students = {
   async create(data) {
     const id = await createDoc('students', data);
     await syncPublicStudentIndex({ id, ...data });
+    invalidateStudentsCache();
+    logAudit({
+      entityId: id,
+      entityName: data?.name,
+      matricula: data?.matricula,
+      action: 'create',
+      changes: diffFields({}, data),
+      source: 'alta de alumno',
+    });
     return id;
   },
 
   async update(id, data) {
+    let before = null;
+    try { before = await getOne('students', id); } catch { /* sin antes: se registra igual */ }
     await updateDocById('students', id, data);
     const full = await getOne('students', id);
+    // Si cambió la matrícula (o se le quitó la ruta), el espejo público de la
+    // matrícula anterior ya no debe seguir apuntando a este alumno.
+    const oldMat = String(before?.matricula || '').trim();
+    const newMat = String(full?.matricula || '').trim();
+    try {
+      if (oldMat && (oldMat !== newMat || !full?.routeId)) {
+        await deleteDoc(doc(db, 'publicStudentIndex', oldMat));
+      }
+      if (newMat && !full?.routeId && newMat !== oldMat) {
+        await deleteDoc(doc(db, 'publicStudentIndex', newMat));
+      }
+    } catch { /* si no existía, no pasa nada */ }
     await syncPublicStudentIndex(full);
+    invalidateStudentsCache();
+    logAudit({
+      entityId: id,
+      entityName: full?.name || before?.name,
+      matricula: full?.matricula || before?.matricula,
+      action: 'update',
+      changes: diffFields(before, data),
+      source: 'edición de alumno',
+    });
   },
 
   async remove(id) {
@@ -126,6 +199,18 @@ export const Students = {
     if (existing?.matricula) {
       await deleteDoc(doc(db, 'publicStudentIndex', existing.matricula.trim()));
     }
+    invalidateStudentsCache();
+    logAudit({
+      entityId: id,
+      entityName: existing?.name,
+      matricula: existing?.matricula,
+      action: 'delete',
+      changes: diffFields({}, {
+        name: existing?.name, matricula: existing?.matricula,
+        routeId: existing?.routeId, schoolId: existing?.schoolId,
+      }),
+      source: 'baja de alumno',
+    });
   },
 
   /**
@@ -242,16 +327,22 @@ export const Students = {
   async search(queryText, limit = 20) {
     if (!String(queryText || '').trim()) return [];
     const now = Date.now();
+    if (!studentsCache.rows) loadPersistedStudents();
     if (!studentsCache.rows || now - studentsCache.at > STUDENTS_CACHE_MS) {
-      studentsCache.rows = await listAll('students', [orderBy('name')]);
-      studentsCache.at = now;
+      await refreshStudentsCache();
     }
-    return searchStudents(studentsCache.rows, queryText, limit);
+    let results = searchStudents(studentsCache.rows, queryText, limit);
+    // Sin resultados con una copia vieja: pudo haberse subido un alumno hace poco.
+    if (results.length === 0 && Date.now() - studentsCache.at > STUDENTS_MISS_REFRESH_MS) {
+      await refreshStudentsCache();
+      results = searchStudents(studentsCache.rows, queryText, limit);
+    }
+    return results;
   },
 
-  /** Descarta la lista en memoria de `search` (p. ej. tras dar de alta alumnos). */
+  /** Descarta la lista guardada de `search` (p. ej. tras dar de alta o editar alumnos). */
   clearSearchCache() {
-    studentsCache.rows = null;
+    invalidateStudentsCache();
   },
 
   /**
@@ -271,6 +362,7 @@ export const Students = {
       await batch.commit();
       ok += group.length;
     }
+    logAudit({ action: 'bulk', source: 'importación masiva', note: `Importación masiva: ${ok} alumno(s) dados de alta.` });
     return ok;
   },
 
@@ -297,6 +389,14 @@ export const Students = {
       await batch.commit();
       ok += group.length;
     }
+    const sample = {};
+    items.slice(0, 40).forEach((it) => { sample[it.matricula || it.id] = { from: '', to: String(it.routeId || '') }; });
+    logAudit({
+      action: 'bulk',
+      source: 'asignación masiva de ruta',
+      note: `Asignación masiva de ruta: ${ok} alumno(s)${items.length > 40 ? ' (se muestran los primeros 40)' : ''}.`,
+      changes: sample,
+    });
     return ok;
   },
 };

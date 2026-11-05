@@ -30,6 +30,9 @@ import {
   CheckSquare,
   Inbox,
   Map as MapIcon,
+  Bug,
+  ScrollText,
+  Pencil,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -101,6 +104,16 @@ const groups = [
       { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: ['admin'] },
       { to: '/admin/nomina', label: 'Nómina de personal', icon: ClipboardList, roles: ['admin'] },
       { to: '/admin/acceso', label: 'Personas con acceso', icon: UserCog, roles: ['admin'] },
+    ],
+  },
+  {
+    key: 'soporte',
+    label: 'Soporte',
+    icon: Bug,
+    items: [
+      { to: '/admin/soporte/errores', label: 'Errores de usuarios', icon: Bug, roles: ['admin'] },
+      { to: '/admin/soporte/bitacora', label: 'Bitácora de cambios', icon: ScrollText, roles: ['admin'] },
+      { to: '/admin/soporte/alumnos', label: 'Editor de alumnos', icon: Pencil, roles: ['admin'] },
     ],
   },
 ];

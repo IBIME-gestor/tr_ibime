@@ -7,6 +7,8 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
+import { setErrorActor } from '../utils/errorLog';
+import { setAuditActor } from '../firebase/audit';
 
 /**
  * Autenticación con Google (cuenta institucional) + "auto-alta" del
@@ -66,6 +68,8 @@ export function AuthProvider({ children }) {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       setAuthError('');
       if (!firebaseUser) {
+        setErrorActor(null);
+        setAuditActor(null);
         setUser(null);
         setProfile(null);
         setLoading(false);
@@ -96,6 +100,9 @@ export function AuthProvider({ children }) {
           return;
         }
 
+        const who = { uid: firebaseUser.uid, name: profileData.name || firebaseUser.displayName || '', email: firebaseUser.email || '', role: profileData.role };
+        setErrorActor(who);
+        setAuditActor(who);
         setUser(firebaseUser);
         setProfile(profileData);
         setLoading(false);
