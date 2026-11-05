@@ -367,6 +367,37 @@ export const Students = {
   },
 
   /**
+   * Corrección masiva de teléfonos de alumnos que YA existen.
+   * items: [{ id, matricula, name, from, telefono }] (telefono ya normalizado).
+   * Solo toca telefono, parentContact y updatedAt; no crea ni duplica alumnos.
+   */
+  async bulkUpdatePhones(items) {
+    let ok = 0;
+    for (const group of chunk(items, BATCH_CHUNK_SIZE)) {
+      const batch = writeBatch(db);
+      group.forEach(({ id, telefono }) => {
+        batch.update(doc(db, 'students', id), {
+          telefono,
+          parentContact: telefono,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      ok += group.length;
+    }
+    invalidateStudentsCache();
+    const sample = {};
+    items.slice(0, 40).forEach((it) => { sample[it.matricula || it.id] = { from: String(it.from || ''), to: it.telefono }; });
+    logAudit({
+      action: 'bulk',
+      source: 'corrección masiva de teléfonos',
+      note: `Corrección masiva de teléfonos: ${ok} alumno(s)${items.length > 40 ? ' (se muestran los primeros 40)' : ''}.`,
+      changes: sample,
+    });
+    return ok;
+  },
+
+  /**
    * Asignación masiva de ruta por matrícula (para no hacerlo de uno en
    * uno en la pantalla de Rutas). items: [{ id, matricula, name, routeId }].
    * Actualiza el alumno Y su espejo público (publicStudentIndex) en el
