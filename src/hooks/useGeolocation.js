@@ -34,7 +34,9 @@ export function getCurrentLocation(options = {}) {
  * en el cleanup del efecto / al finalizar el recorrido).
  */
 export function watchLocation(onUpdate, options = {}) {
+  const { onError, ...geoOptions } = options;
   if (!('geolocation' in navigator)) {
+    if (onError) onError({ code: 0, message: 'unsupported' });
     return () => {};
   }
   const watchId = navigator.geolocation.watchPosition(
@@ -45,11 +47,12 @@ export function watchLocation(onUpdate, options = {}) {
         accuracy: pos.coords.accuracy,
       });
     },
-    () => {
-      /* si el chofer niega/pierde el permiso, simplemente dejamos de
-         recibir actualizaciones; no interrumpimos el recorrido */
+    (err) => {
+      /* no interrumpimos el recorrido; solo se avisa al llamador para que
+         le muestre al operador que su ubicación no se está enviando */
+      if (onError) onError(err);
     },
-    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000, ...options }
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000, ...geoOptions }
   );
   return () => navigator.geolocation.clearWatch(watchId);
 }
