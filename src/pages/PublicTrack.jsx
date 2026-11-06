@@ -736,6 +736,8 @@ export default function PublicTrack() {
                       <span className={`h-2 w-2 rounded-full ${liveIsStale || completed ? 'bg-wait' : 'bg-go'}`} />
                       {completed
                         ? 'Recorrido terminado'
+                        : liveIsStale
+                        ? `Última ubicación ${fmtAgo(liveMs, now)} · ${fmtClock(liveMs)}`
                         : liveMs
                         ? `Ubicación ${fmtAgo(liveMs, now)}`
                         : 'Ubicación en vivo'}
@@ -766,8 +768,11 @@ export default function PublicTrack() {
 
                 {liveIsStale && !completed && (
                   <p className="text-xs text-navy-600 bg-white border border-navy-100 rounded-xl px-3 py-2 mt-2">
-                    El camión no ha enviado su ubicación en los últimos {Math.round((now - liveMs) / 60000)} min.
-                    Puede estar en una zona sin señal; el mapa se actualiza solo cuando regrese.
+                    El camión no ha enviado su ubicación desde las {fmtClock(liveMs)} (hace {Math.round((now - liveMs) / 60000)} min).
+                    Puede ser una zona sin señal o que el teléfono del operador esté con la pantalla apagada; el
+                    mapa se actualiza solo cuando regrese. Lo último registrado de {childName || 'tu hijo(a)'} es lo
+                    que ves arriba.
+                    {now - liveMs >= 10 * 60 * 1000 && ' Si necesitas confirmar algo, comunícate con el plantel.'}
                   </p>
                 )}
               </section>
