@@ -548,7 +548,6 @@ export async function syncPublicTracking(trip, stops) {
   const timeKey = trip.shift === 'morning' ? 'boardedAt' : 'deliveredAt';
   const publicStops = stops.map((s) => ({
     matricula: s.matricula,
-    name: s.name,
     order: s.order,
     status: s.status,
     resolvedAt: s[timeKey] || null,
