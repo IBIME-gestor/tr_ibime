@@ -30,6 +30,7 @@ import {
   TRIP_ALERT_TYPES,
 } from '../../firebase/trips';
 import { getCurrentLocation, watchLocation } from '../../hooks/useGeolocation';
+import { useWakeLock } from '../../hooks/useWakeLock';
 import { getFarewellMessage } from '../../utils/greetings';
 import { weekdayName, fmtCoords } from '../../utils/dates';
 import { numberedIcon, startFlagIcon, finishFlagIcon } from '../../utils/mapIcons';
@@ -173,6 +174,8 @@ export default function TripRunner() {
   const lastSentAtRef = useRef(0);
   const [showMap, setShowMap] = useState(false);
   const [myLocation, setMyLocation] = useState(null);
+  const [gpsError, setGpsError] = useState(false);
+  const [signalGap, setSignalGap] = useState(null); // { minutes } cuando la pantalla estuvo apagada
   const [recalcOrder, setRecalcOrder] = useState(null); // ids en el orden recalculado, o null
   const [recalculating, setRecalculating] = useState(false);
 
@@ -284,9 +287,10 @@ export default function TripRunner() {
     const stopWatch = watchLocation((location) => {
       latest = location;
       setMyLocation(location);
+      setGpsError(false);
       // Primera lectura: se publica de inmediato, sin esperar el primer intervalo.
       if (!lastSent) publish(location);
-    });
+    }, { onError: () => setGpsError(true) });
     // Cada 5 s se revisa la ÚLTIMA lectura del GPS (así no se pierde si llega entre
     // intervalos), pero solo se publica si el camión se movió ≥ 15 m o si lleva
     // 30 s sin publicar (señal de vida). Parado en un semáforo o en una parada
@@ -299,6 +303,29 @@ export default function TripRunner() {
     }, LIVE_LOCATION_INTERVAL_MS);
     return () => { stopWatch(); clearInterval(timer); };
   }, [isDriver, trip?.id, trip?.status]);
+
+  // Pantalla encendida mientras el recorrido está en curso: si se apaga o se
+  // sale de la app, el navegador corta el GPS y el camión "desaparece" para
+  // el admin y para los padres.
+  const trackingActive = isDriver && trip?.status === 'in_progress';
+  const wakeLock = useWakeLock(trackingActive);
+
+  // Detecta que la página estuvo oculta (pantalla apagada o cambio de app) y
+  // se lo avisa al operador al regresar, con una vibración corta.
+  useEffect(() => {
+    if (!trackingActive) { setSignalGap(null); return undefined; }
+    let hiddenAt = document.visibilityState === 'hidden' ? Date.now() : null;
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt >= 30000) {
+        setSignalGap({ minutes: Math.max(1, Math.round((Date.now() - hiddenAt) / 60000)) });
+        try { navigator.vibrate?.([200, 100, 200]); } catch { /* sin vibración */ }
+      }
+      hiddenAt = null;
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [trackingActive]);
 
   async function handleStartTrip(e) {
     e.preventDefault();
@@ -694,6 +721,36 @@ export default function TripRunner() {
           {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
         </h1>
       </div>
+
+      {trackingActive && (
+        <div className="space-y-2 cascade-item">
+          {gpsError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900">
+              <b>No se está enviando tu ubicación.</b> Activa el permiso de ubicación para este sitio en los ajustes
+              del teléfono y regresa a esta pantalla.
+            </div>
+          )}
+          {signalGap && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 flex items-start justify-between gap-3">
+              <span>
+                <b>Tu ubicación se pausó unos {signalGap.minutes} min</b> porque la pantalla se apagó o saliste de la
+                app. Ya se reanudó; durante ese tiempo el admin y los padres no vieron el camión.
+              </span>
+              <button type="button" onClick={() => setSignalGap(null)} className="shrink-0 text-xs font-semibold underline">
+                Entendido
+              </button>
+            </div>
+          )}
+          <p className={`text-xs rounded-lg px-3 py-2 ${wakeLock.held ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
+            {wakeLock.held
+              ? '📍 Ubicación en vivo · la pantalla se mantiene encendida. No cambies de app.'
+              : wakeLock.supported
+              ? '📍 Mantén esta pantalla abierta y no la bloquees: si se apaga, se corta tu ubicación en vivo.'
+              : '📍 Mantén esta pantalla abierta y desactiva el bloqueo automático del teléfono: si se apaga, se corta tu ubicación en vivo.'}
+            {' '}Si abres Google Maps, regresa a esta pantalla.
+          </p>
+        </div>
+      )}
 
       {/* Mapa de la ruta: vista rápida adentro de la app + un botón para
           abrir la ruta completa (todas las paradas que faltan, en orden)
