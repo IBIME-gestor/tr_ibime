@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes, Drivers } from '../../firebase/services';
 import { Link } from 'react-router-dom';
-import { History } from 'lucide-react';
+import { History, PhoneCall, AlertTriangle } from 'lucide-react';
 import { subscribeActiveTripsLive, todayString } from '../../firebase/trips';
 import { tsMs } from '../../utils/tripOrder';
 import { fmtAgo, signalState, SIGNAL_META } from '../../utils/tripStatus';
@@ -112,6 +112,26 @@ export default function FleetLive() {
     return c;
   }, [todayTrips, now]);
 
+  // Recorridos que necesitan una llamada: llevan más de 3 min sin señal, o
+  // salieron hace más de 3 min y nunca han transmitido ubicación.
+  const lostTrips = useMemo(() => todayTrips
+    .map((t) => {
+      const upd = tsMs(t.liveLocation?.updatedAt);
+      const started = tsMs(t.startedAt);
+      const sig = signalState(upd, now);
+      const since = upd ?? started;
+      const lost = sig === 'lost' || (sig === 'none' && started != null && now - started > 3 * 60 * 1000);
+      return lost && since != null ? { trip: t, since } : null;
+    })
+    .filter(Boolean), [todayTrips, now]);
+
+  // El número en el título de la pestaña avisa aunque el admin esté en otra.
+  useEffect(() => {
+    const base = document.title.replace(/^⚠ \(\d+\) sin señal · /, '');
+    document.title = lostTrips.length ? `⚠ (${lostTrips.length}) sin señal · ${base}` : base;
+    return () => { document.title = base; };
+  }, [lostTrips.length]);
+
   const icon = useMemo(() => busIcon(), []);
   const flag = useMemo(() => startFlagIcon(), []);
   const operatorOf = (trip) =>
@@ -133,6 +153,33 @@ export default function FleetLive() {
         <Stat label="Señal débil / perdida" value={counts.weak + counts.lost} cls={counts.weak + counts.lost ? 'border-red-200 bg-red-50 text-red-900' : 'border-navy-100 bg-white text-navy-300'} dot="bg-red-500" />
         <Stat label="Sin ubicación aún" value={counts.none} cls="border-slate-200 bg-slate-50 text-slate-700" dot="bg-slate-400" />
       </div>
+
+      {lostTrips.length > 0 && (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 space-y-2">
+          <p className="flex items-center gap-2 font-semibold">
+            <AlertTriangle size={18} className="shrink-0" />
+            {lostTrips.length === 1 ? '1 camión sin señal' : `${lostTrips.length} camiones sin señal`}: llama al operador para confirmar
+          </p>
+          <ul className="space-y-1.5">
+            {lostTrips.map(({ trip, since }) => {
+              const phone = staffById[trip.driverId]?.phone;
+              return (
+                <li key={trip.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    <b>{routesById[trip.routeId]?.name || 'Ruta'}</b> · {trip.shift === 'morning' ? 'Ida' : 'Vuelta'} · {operatorOf(trip)}
+                    <span className="text-red-700"> · última señal {fmtAgo(since, now)}</span>
+                  </span>
+                  {phone && (
+                    <a href={`tel:${String(phone).replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 text-white text-xs font-semibold px-3 py-1.5">
+                      <PhoneCall size={13} /> Llamar
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {staleOld > 0 && (
         <Link
