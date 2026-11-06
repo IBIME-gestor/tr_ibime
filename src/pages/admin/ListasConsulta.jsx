@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays, Search, Users, Route as RouteIcon, FileText, ChevronDown, ChevronUp,
-  RefreshCw, CheckCircle2, AlertTriangle, Wallet, Settings2,
+  RefreshCw, CheckCircle2, AlertTriangle, Wallet, Settings2, History,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Drivers, FinanceRecords, RouteLists, Routes, Students } from '../../firebase/services';
+import { CometaBank, Drivers, FinanceRecords, RouteLists, Routes, Students } from '../../firebase/services';
 import { listTripsBetween } from '../../firebase/trips';
 
 const currentMonth = () => {
@@ -44,6 +44,134 @@ const serviceLabel = (row) => (
     : row.tipoServicio === 'diario' ? 'Diario' : 'Completo'
 );
 
+// ---------------------------------------------------------------------------
+// Historial de pagos de un alumno dentro de una lista: lo que se APLICÓ desde el
+// banco de Cometa (folio, mes, quién y cuándo), el registro de pago en Ruta Segura
+// y los avisos para detectar un pago mal relacionado.
+// ---------------------------------------------------------------------------
+const matKey = (v) => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const sumMonto = (arr, key = 'monto') => arr.reduce((n, p) => n + Number(p[key] || 0), 0);
+const fmtStamp = (v) => {
+  const d = v?.toDate ? v.toDate() : v ? new Date(v) : null;
+  return d && !Number.isNaN(d.getTime()) ? d.toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+};
+
+function PaymentHistory({ item, row, cometa, cometaError, manual, loading, otherLists, routeNames }) {
+  const matk = matKey(row.matricula);
+  const listMonth = String(item.startDate || '').slice(0, 7);
+  const byApplied = (a, b) => String(a.appliedAt || a.fechaPago || '').localeCompare(String(b.appliedAt || b.fechaPago || ''));
+  const mine = (cometa || []).filter((p) => p.studentId === row.studentId || p.linkedStudentId === row.studentId);
+  const applied = mine.filter((p) => p.status === 'asignado' && p.studentId === row.studentId);
+  const here = applied.filter((p) => p.listId === item.id).sort(byApplied);
+  const elsewhere = applied.filter((p) => p.listId !== item.id).sort(byApplied);
+  const unapplied = (cometa || []).filter((p) => (p.status || 'por_asignar') === 'por_asignar'
+    && (p.linkedStudentId === row.studentId || (matk && p.matriculaKey === matk)));
+  const hereSum = sumMonto(here);
+  const estimated = Number(row.estimatedAmount || 0);
+
+  const warns = [];
+  if (hereSum > estimated + 0.009) warns.push(`Lo aplicado desde Cometa (${money(hereSum)}) supera el monto de esta lista (${money(estimated)}). Puede ser un pago de otro mes o de otra ruta.`);
+  if (here.some((p) => p.appliedMonth && listMonth && p.appliedMonth !== listMonth)) warns.push('Hay pagos aplicados con un «mes aplicado» distinto al de esta lista. Revisa la columna Mes.');
+  if (otherLists.length > 0) warns.push('Este alumno también aparece en otra lista del mismo periodo (otra ruta). Verifica que cada pago esté en la lista correcta.');
+
+  const th = 'p-1.5 text-left font-semibold';
+  const td = 'p-1.5 align-top';
+  return (
+    <div className="p-3 space-y-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold text-navy-800">Historial de pagos · {row.name} <span className="font-normal text-navy-500">({row.matricula || 'sin matrícula'})</span></p>
+        <p className="text-navy-600">
+          Monto de la lista <b>{money(estimated)}</b> · Pagado en la lista <b>{money(paidAmountOf(row))}</b>
+          {here.length > 0 && <> · Aplicado de Cometa <b>{money(hereSum)}</b></>}
+        </p>
+      </div>
+
+      {warns.map((w) => (
+        <p key={w} className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2 flex gap-2"><AlertTriangle size={14} className="shrink-0 mt-0.5" />{w}</p>
+      ))}
+
+      {cometaError ? (
+        <p className="text-red-700">No se pudo leer el banco de Cometa: {cometaError}</p>
+      ) : cometa == null || loading ? (
+        <p className="text-navy-500">Cargando historial…</p>
+      ) : (
+        <>
+          <div>
+            <p className="font-semibold text-navy-700 mb-1">Pagos de Cometa aplicados a ESTA lista ({here.length})</p>
+            {here.length === 0 ? <p className="text-navy-400">Ningún pago de Cometa se ha aplicado a esta lista.</p> : (
+              <div className="overflow-x-auto"><table className="table-admin min-w-[760px]"><thead><tr>
+                <th className={th}>Fecha de pago</th><th className={th}>Folio orden</th><th className={th}>Folio pago</th><th className={th}>Concepto</th>
+                <th className={`${th} text-right`}>Monto</th><th className={th}>Mes aplicado</th><th className={th}>Día</th><th className={th}>Lo aplicó</th><th className={th}>Cuándo</th>
+              </tr></thead><tbody>
+                {here.map((p) => (
+                  <tr key={p.id} className={p.appliedMonth && listMonth && p.appliedMonth !== listMonth ? 'bg-amber-50' : ''}>
+                    <td className={td}>{fmtDay(p.fechaPago)}</td><td className={td}>{p.folioOrden || '—'}</td><td className={td}>{p.folioPago || '—'}</td>
+                    <td className={td}>{p.concepto || '—'}</td><td className={`${td} text-right`}>{money(p.monto)}</td>
+                    <td className={td}>{p.appliedMonth || '—'}</td><td className={td}>{p.appliedDate ? fmtDay(p.appliedDate) : '—'}</td>
+                    <td className={td}>{p.appliedBy || '—'}</td><td className={td}>{fmtStamp(p.appliedAt)}</td>
+                  </tr>
+                ))}
+                <tr className="font-semibold"><td className={td} colSpan={4}>Total aplicado a esta lista</td><td className={`${td} text-right`}>{money(hereSum)}</td><td colSpan={4} /></tr>
+              </tbody></table></div>
+            )}
+          </div>
+
+          {elsewhere.length > 0 && (
+            <div>
+              <p className="font-semibold text-navy-700 mb-1">Otros pagos de Cometa de este alumno, aplicados en OTRAS listas o meses ({elsewhere.length})</p>
+              <div className="overflow-x-auto"><table className="table-admin min-w-[640px]"><thead><tr>
+                <th className={th}>Fecha de pago</th><th className={th}>Folio orden</th><th className={`${th} text-right`}>Monto</th><th className={th}>Aplicado a</th><th className={th}>Mes aplicado</th><th className={th}>Lo aplicó</th>
+              </tr></thead><tbody>
+                {elsewhere.map((p) => (
+                  <tr key={p.id}>
+                    <td className={td}>{fmtDay(p.fechaPago)}</td><td className={td}>{p.folioOrden || '—'}</td><td className={`${td} text-right`}>{money(p.monto)}</td>
+                    <td className={td}>{p.noList ? 'Solo al mes (sin lista)' : (p.listName || 'Otra lista')}</td><td className={td}>{p.appliedMonth || '—'}</td><td className={td}>{p.appliedBy || '—'}</td>
+                  </tr>
+                ))}
+              </tbody></table></div>
+            </div>
+          )}
+
+          {unapplied.length > 0 && (
+            <p className="rounded-lg bg-sky-50 border border-sky-200 text-sky-900 px-3 py-2">
+              Esta matrícula tiene <b>{unapplied.length}</b> pago(s) en el banco de Cometa todavía <b>por asignar</b> ({money(sumMonto(unapplied))}).
+            </p>
+          )}
+        </>
+      )}
+
+      <div>
+        <p className="font-semibold text-navy-700 mb-1">Registro de pago en Ruta Segura para esta lista</p>
+        {manual == null ? <p className="text-navy-500">Cargando…</p> : manual.length === 0 ? <p className="text-navy-400">Sin registros de pago ligados a esta lista.</p> : (
+          <div className="overflow-x-auto"><table className="table-admin min-w-[560px]"><thead><tr>
+            <th className={th}>Fecha</th><th className={th}>Método</th><th className={`${th} text-right`}>Monto</th><th className={th}>Nota</th><th className={th}>Registró</th><th className={th}>Estado</th>
+          </tr></thead><tbody>
+            {manual.map((p) => (
+              <tr key={p.id} className={p.cancelled ? 'opacity-60' : ''}>
+                <td className={td}>{fmtStamp(p.at)}</td><td className={td}>{p.method || '—'}</td><td className={`${td} text-right`}>{p.amount == null ? '—' : money(p.amount)}</td>
+                <td className={td}>{p.note || '—'}</td><td className={td}>{p.registeredByName || p.updatedByName || '—'}</td><td className={td}>{p.cancelled ? 'Cancelado' : 'Vigente'}</td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        )}
+      </div>
+
+      {otherLists.length > 0 && (
+        <div>
+          <p className="font-semibold text-navy-700 mb-1">Otras listas del alumno en el mismo periodo</p>
+          <ul className="space-y-1">
+            {otherLists.map(({ list, r }) => (
+              <li key={list.id} className="rounded-lg border border-navy-100 bg-white px-3 py-1.5">
+                <b>{list.listName || routeNames[list.routeId] || 'Lista'}</b> · {routeNames[list.routeId] || 'Ruta'} · {list.startDate} al {list.endDate} · {serviceLabel(r)} · {money(r.estimatedAmount)} · pagado {money(paidAmountOf(r))}{r.paid ? ' ✓' : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Operación / Consultar listas
  * Lectura de las listas por mes + marca de pagos y de revisión.
@@ -65,6 +193,10 @@ export default function ListasConsulta() {
   const [notice, setNotice] = useState('');
   const [check, setCheck] = useState(null); // revisión con recorridos { byRoute, drivers }
   const [checking, setChecking] = useState(false);
+  const [histPanel, setHistPanel] = useState(null); // { listId, studentId }
+  const [cometa, setCometa] = useState(null); // banco de Cometa (se lee al abrir el primer historial)
+  const [cometaError, setCometaError] = useState('');
+  const [histManual, setHistManual] = useState({}); // studentId -> pagos de Ruta Segura
 
   async function loadData() {
     setLoading(true); setError('');
@@ -130,6 +262,22 @@ export default function ListasConsulta() {
   const totalStudents = filtered.reduce((sum, item) => sum + (item.rows || []).length, 0);
   const totalAmount = filtered.reduce((sum, item) => sum + listAmount(item), 0);
   const totalPaid = filtered.reduce((sum, item) => sum + listPaidAmount(item), 0);
+
+  async function openHistory(list, row) {
+    const same = histPanel?.listId === list.id && histPanel?.studentId === row.studentId;
+    if (same) { setHistPanel(null); return; }
+    setHistPanel({ listId: list.id, studentId: row.studentId });
+    if (cometa == null && !cometaError) {
+      CometaBank.list().then((rows) => setCometa(rows || [])).catch((e) => {
+        console.error(e); setCometaError(e?.message || 'sin permiso');
+      });
+    }
+    if (histManual[row.studentId] === undefined) {
+      Students.listPayments(row.studentId)
+        .then((pays) => setHistManual((prev) => ({ ...prev, [row.studentId]: pays || [] })))
+        .catch((e) => { console.error(e); setHistManual((prev) => ({ ...prev, [row.studentId]: [] })); });
+    }
+  }
 
   function replaceList(updated) {
     setLists((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
@@ -479,9 +627,10 @@ export default function ListasConsulta() {
                       const picked = panelOpen ? dayPanel.picked : [];
                       const pickedAmount = picked.reduce((n, d) => n + dateAmount(row, d), 0);
                       const pending = Number(row.estimatedAmount || 0) - paidAmountOf(row);
+                      const histOpen = histPanel?.listId === item.id && histPanel?.studentId === row.studentId;
                       return <Fragment key={key}>
                         <tr className={row.paid ? 'bg-green-50/60' : paidDates.length ? 'bg-amber-50/60' : ''}>
-                          <td>{index + 1}</td><td>{row.name || '—'}</td><td>{row.matricula || '—'}</td><td>{serviceLabel(row)}</td>
+                          <td>{index + 1}</td><td>{row.name || '—'} <button type="button" onClick={() => openHistory(item, row)} title="Ver historial de pagos de este alumno" className={`ml-1 align-middle rounded border px-1 py-0.5 ${histOpen ? 'border-navy-500 bg-navy-50 text-navy-800' : 'border-navy-200 text-navy-500 hover:text-navy-800'}`}><History size={12} /></button></td><td>{row.matricula || '—'}</td><td>{serviceLabel(row)}</td>
                           <td>{row.daysCount ?? Object.values(row.days || {}).filter((d) => d.entrada || d.salida).length}</td>
                           <td className="text-right">{money(row.estimatedAmount)}{isDiario && paidDates.length > 0 && <span className="block text-[10px] text-navy-500">Pagado {money(paidAmountOf(row))} · Falta {money(pending)}</span>}</td>
                           <td className="text-center whitespace-nowrap">
@@ -494,6 +643,21 @@ export default function ListasConsulta() {
                             )}
                           </td>
                         </tr>
+                        {histOpen && <tr><td colSpan={7} className="bg-navy-50/60 border-l-4 border-navy-300">
+                          <PaymentHistory
+                            item={item}
+                            row={row}
+                            cometa={cometa}
+                            cometaError={cometaError}
+                            loading={cometa == null && !cometaError}
+                            manual={histManual[row.studentId] === undefined ? null : histManual[row.studentId].filter((p) => p.listId === item.id || (row.paymentId && p.id === row.paymentId))}
+                            routeNames={routeNames}
+                            otherLists={lists
+                              .filter((l) => l.id !== item.id && l.status !== 'eliminada' && String(l.startDate || '') <= String(item.endDate || '') && String(l.endDate || l.startDate || '') >= String(item.startDate || ''))
+                              .map((l) => ({ list: l, r: (l.rows || []).find((x) => x.studentId === row.studentId) }))
+                              .filter((x) => x.r)}
+                          />
+                        </td></tr>}
                         {panelOpen && <tr><td colSpan={7} className="bg-navy-50/60">
                           <div className="p-3 space-y-3">
                             <p className="font-semibold text-navy-800">Pago por días · {row.name} <span className="font-normal text-navy-500">({money(perDayAmount(row))} por servicio)</span></p>
