@@ -24,6 +24,7 @@ import {
   LIVE_LOCATION_HEARTBEAT_MS,
   metersBetween,
   syncPublicTracking,
+  createTrackRecorder,
   getReferenceTrip,
   setTripAlert,
   clearTripAlert,
@@ -279,6 +280,11 @@ export default function TripRunner() {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
     let latest = null;
     let lastSent = null; // última posición publicada
+    // Huella GPS (por dónde pasó): se anota cada 5 s si avanzó y se sube en lotes.
+    const recorder = createTrackRecorder(trip.id);
+    const flushTimer = setInterval(() => recorder.flush(), 60000);
+    const onHide = () => { if (document.visibilityState === 'hidden') recorder.flush(); };
+    document.addEventListener('visibilitychange', onHide);
     const publish = (loc) => {
       lastSent = loc;
       lastSentAtRef.current = Date.now();
@@ -297,11 +303,16 @@ export default function TripRunner() {
     // no se escribe nada de más.
     const timer = setInterval(() => {
       if (!latest) return;
+      recorder.add(latest);
       const moved = metersBetween(lastSent, latest) >= LIVE_LOCATION_MIN_MOVE_M;
       const idleTooLong = Date.now() - lastSentAtRef.current >= LIVE_LOCATION_HEARTBEAT_MS;
       if (moved || idleTooLong) publish(latest);
     }, LIVE_LOCATION_INTERVAL_MS);
-    return () => { stopWatch(); clearInterval(timer); };
+    return () => {
+      stopWatch(); clearInterval(timer); clearInterval(flushTimer);
+      document.removeEventListener('visibilitychange', onHide);
+      recorder.flush();
+    };
   }, [isDriver, trip?.id, trip?.status]);
 
   // Pantalla encendida mientras el recorrido está en curso: si se apaga o se
