@@ -69,6 +69,7 @@ const groups = [
       { to: '/admin/listas/banco', label: 'Banco por asignar', icon: Inbox, roles: ['admin'] },
       { to: '/admin/listas/asistencia', label: 'Asistencia vs lista', icon: CheckSquare, roles: ['admin'] },
       { to: '/admin/mapas-ruta', label: 'Mapas de recorridos', icon: MapIcon, roles: ['admin'] },
+      { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: ['admin'] },
       { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
       { to: '/admin/vista-operador', label: 'Vista del operador', icon: RouteIcon, roles: ['admin'] },
