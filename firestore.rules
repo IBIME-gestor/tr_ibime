@@ -185,6 +185,14 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow write: if isAdmin() || isDriver() || isNanny();
       }
+
+      // Huella GPS del recorrido: la sube el operador de ese viaje; solo el admin la lee.
+      match /track/{chunkId} {
+        allow read: if isAdmin();
+        allow create: if isAdmin() ||
+          (isDriver() && get(/databases/$(database)/documents/trips/$(tripId)).data.driverId == myStaffId());
+        allow update, delete: if isAdmin();
+      }
     }
 
     // Banco de alumnos por asignar: el operador/nanny deja aquí a quien
