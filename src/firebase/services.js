@@ -1102,3 +1102,14 @@ export const UnitMaintenance = {
   update: (id, data) => updateDocById('unitMaintenance', id, data),
   remove: (id) => removeDoc('unitMaintenance', id),
 };
+
+/* ------------------------------------------------------------------ */
+/*  Borradores de planeación de rutas (solo admin)                     */
+/*  Guardan cambios propuestos de ruta por alumno SIN aplicarlos.       */
+/* ------------------------------------------------------------------ */
+export const RouteDrafts = {
+  list: () => listAll('routeDrafts', [orderBy('createdAt', 'desc')]),
+  create: (data) => createDoc('routeDrafts', data),
+  update: (id, data) => updateDocById('routeDrafts', id, data),
+  remove: (id) => removeDoc('routeDrafts', id),
+};
