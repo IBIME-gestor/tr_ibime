@@ -81,3 +81,18 @@ export async function resolveSchoolLocation(school) {
   }
   return loc;
 }
+
+
+/** Nombre de la calle de un punto (geocodificación inversa, misma cola de 1 solicitud/seg). */
+export async function reverseGeocode(lat, lng) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&zoom=17&lat=${lat}&lon=${lng}`;
+  try {
+    const r = await throttledFetch(url);
+    const a = r?.address || {};
+    const road = a.road || a.pedestrian || a.residential || a.highway || '';
+    const area = a.suburb || a.neighbourhood || a.city_district || a.town || a.city || '';
+    return road ? { road, area } : null;
+  } catch {
+    return null;
+  }
+}
