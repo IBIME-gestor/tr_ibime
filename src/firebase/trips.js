@@ -843,3 +843,60 @@ export async function listTripsByRouteBetween(routeId, startDate, endDate) {
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
+
+/* ------------------------------------------------------------------ */
+/*  Huella GPS del recorrido (trips/{tripId}/track/{chunk})            */
+/*  Guarda POR DÓNDE pasó el camión para medir distancia y comparar    */
+/*  semanas. Es independiente de liveLocation (que solo guarda el      */
+/*  último punto). Para gastar poco: se anota un punto solo si el      */
+/*  camión avanzó ≥ TRACK_MIN_MOVE_M y se sube en lotes.               */
+/* ------------------------------------------------------------------ */
+export const TRACK_MIN_MOVE_M = 12;
+export const TRACK_MAX_ACCURACY_M = 60;
+const TRACK_CHUNK_POINTS = 100;
+
+/**
+ * Cada punto se guarda aplanado en `p` como [lat, lng, segundosEpoch, ...]
+ * (Firestore no permite arreglos anidados).
+ */
+export function createTrackRecorder(tripId) {
+  let buf = [];
+  let last = null;
+  let flushing = false;
+  async function flush() {
+    if (flushing || !buf.length) return;
+    flushing = true;
+    const take = buf; buf = [];
+    try {
+      await setDoc(doc(db, 'trips', tripId, 'track', String(Date.now())), {
+        p: take, n: take.length / 3, createdAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error('No se pudo guardar la huella GPS:', e);
+      buf = take.concat(buf); // se reintenta en el siguiente lote
+    } finally { flushing = false; }
+  }
+  function add(loc) {
+    if (!loc || loc.lat == null || loc.lng == null) return;
+    if (loc.accuracy != null && loc.accuracy > TRACK_MAX_ACCURACY_M) return;
+    if (last && metersBetween(last, loc) < TRACK_MIN_MOVE_M) return;
+    last = { lat: loc.lat, lng: loc.lng };
+    buf.push(Number(loc.lat.toFixed(5)), Number(loc.lng.toFixed(5)), Math.round(Date.now() / 1000));
+    if (buf.length >= TRACK_CHUNK_POINTS * 3) flush();
+  }
+  return { add, flush };
+}
+
+/** Lee la huella completa de un recorrido: [{lat, lng, t(seg)}] en orden. */
+export async function getTripTrack(tripId) {
+  const snap = await getDocs(collection(db, 'trips', tripId, 'track'));
+  const pts = [];
+  snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => Number(a.id) - Number(b.id))
+    .forEach((c) => {
+      const p = c.p || [];
+      for (let i = 0; i + 2 < p.length; i += 3) pts.push({ lat: p[i], lng: p[i + 1], t: p[i + 2] });
+    });
+  return pts.sort((a, b) => a.t - b.t);
+}
