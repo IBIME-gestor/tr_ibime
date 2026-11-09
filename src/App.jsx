@@ -24,6 +24,7 @@ import MyList from './pages/driver/MyList';
 import ListasAsistencia from './pages/admin/ListasAsistencia';
 import MapasRecorridos from './pages/admin/MapasRecorridos';
 import Planeacion from './pages/admin/Planeacion';
+import RecorridoReal from './pages/admin/RecorridoReal';
 import ListasConsulta from './pages/admin/ListasConsulta';
 import AlumnosCompartidos from './pages/admin/AlumnosCompartidos';
 import ListasModificar from './pages/admin/ListasModificar';
@@ -85,6 +86,7 @@ export default function App() {
         <Route path="listas/asistencia" element={<ListasAsistencia />} />
         <Route path="mapas-ruta" element={<MapasRecorridos />} />
         <Route path="planeacion" element={<Planeacion />} />
+        <Route path="recorrido-real" element={<RecorridoReal />} />
         <Route path="tarifas" element={<Pricing />} />
         <Route path="finanzas" element={<Finance />} />
         <Route path="cobranza" element={<Cobranza />} />
