@@ -81,6 +81,12 @@ service cloud.firestore {
 
     // Viajes especiales (solicitados por dirección/coordinación): el admin los
     // gestiona; el operador asignado solo ve los suyos y registra inicio y cierre.
+    // Agenda personal del admin: cada quien ve y edita solo la suya.
+    match /agenda/{id} {
+      allow read, update, delete: if isAdmin() && resource.data.ownerUid == request.auth.uid;
+      allow create: if isAdmin() && request.resource.data.ownerUid == request.auth.uid;
+    }
+
     match /specialTrips/{id} {
       allow read: if isAdmin() || (isDriver() && resource.data.operatorId == myStaffId());
       allow create, delete: if isAdmin();
