@@ -217,7 +217,7 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   useEffect(() => {
     let cancelled = false;
     setRosterLoading(true);
-    Students.listByRoute(route.id)
+    (route.kind === 'taller' ? Students.listByTallerRoute(route.id) : Students.listByRoute(route.id))
       .then((all) => {
         if (!cancelled) {
           setRosterAll(all);
@@ -259,7 +259,9 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   // Turno "activo" para la previsualización de abajo: el que ya está en
   // curso si hay uno, si no el que toca según la hora del día.
   const activeShift =
-    tripMorning?.status === 'in_progress'
+    route.kind === 'taller'
+      ? 'afternoon'
+      : tripMorning?.status === 'in_progress'
       ? 'morning'
       : tripAfternoon?.status === 'in_progress'
       ? 'afternoon'
@@ -288,16 +290,16 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   const morningStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'morning'))
+        .filter((s) => studentAppliesToday(s, today, 'morning', route))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today]
+    [rosterAll, today, route]
   );
   const afternoonStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'afternoon'))
+        .filter((s) => studentAppliesToday(s, today, 'afternoon', route))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today]
+    [rosterAll, today, route]
   );
   const activeStudents = activeShift === 'morning' ? morningStudents : afternoonStudents;
 
@@ -355,19 +357,21 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
         <p className="font-display font-bold text-lg text-navy-900 truncate">{route.name}</p>
         <p className="text-xs text-navy-400 truncate">
           {school?.name || 'Plantel sin asignar'}
-          {unit?.plate ? ` · Unidad ${unit.plate}` : ''}
+          {route.kind === 'taller' ? ' · Taller (eliges la unidad al iniciar)' : unit?.plate ? ` · Unidad ${unit.plate}` : ''}
         </p>
       </div>
 
       <div className="space-y-2.5">
-        <ShiftCard
-          shift="morning"
-          route={route}
-          trip={tripMorning}
-          stops={stopsMorning}
-          studentsCount={morningStudents.length}
-          navigate={navigate}
-        />
+        {route.kind !== 'taller' && (
+          <ShiftCard
+            shift="morning"
+            route={route}
+            trip={tripMorning}
+            stops={stopsMorning}
+            studentsCount={morningStudents.length}
+            navigate={navigate}
+          />
+        )}
         <ShiftCard
           shift="afternoon"
           route={route}

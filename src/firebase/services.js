@@ -146,6 +146,8 @@ export const Students = {
     listAll('students', [where('schoolId', '==', schoolId), orderBy('name')]),
   listByRoute: (routeId) =>
     listAll('students', [where('routeId', '==', routeId), orderBy('name')]),
+  listByTallerRoute: (routeId) =>
+    listAll('students', [where('tallerRouteId', '==', routeId)]).then((rows) => rows.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))),
   subscribe: (cb) => subscribeAll('students', [orderBy('name')], cb),
   get: (id) => getOne('students', id),
 

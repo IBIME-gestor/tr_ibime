@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { RefreshCw, Search, UserPlus, ListOrdered, CheckCircle2, Undo2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { Routes as RoutesService, Students } from '../../firebase/services';
+import { Routes as RoutesService, Students, Units } from '../../firebase/services';
 import {
   subscribeTodayTrip,
   startTrip,
@@ -164,6 +164,8 @@ export default function TripRunner() {
   const [kmFinalInput, setKmFinalInput] = useState('');
   const [kmError, setKmError] = useState('');
   const [startingTrip, setStartingTrip] = useState(false);
+  const [units, setUnits] = useState([]); // solo en rutas de taller: el operador elige la unidad
+  const [unitIdInput, setUnitIdInput] = useState('');
   const [finishing, setFinishing] = useState(false);
 
   // Aviso de incidente (tráfico, accidente, retraso, otro)
@@ -338,6 +340,14 @@ export default function TripRunner() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [trackingActive]);
 
+  // En rutas de taller el operador elige la unidad que toma ese día.
+  useEffect(() => {
+    if (route?.kind !== 'taller') return;
+    Units.list()
+      .then((rows) => { setUnits(rows || []); setUnitIdInput((cur) => cur || route.unitId || ''); })
+      .catch((err) => console.error('No se pudieron cargar las unidades:', err));
+  }, [route?.id, route?.kind]);
+
   async function handleStartTrip(e) {
     e.preventDefault();
     setKmError('');
@@ -345,7 +355,23 @@ export default function TripRunner() {
     try {
       // Dónde arranca la unidad: ahí se dibuja la banderita de salida.
       const startLoc = (await getCurrentLocation({ timeout: 6000 })) || myLocation;
-      const t = await startTrip(route, shift, profile.staffId, kmInicialInput, startLoc);
+      const isTaller = route.kind === 'taller';
+      if (isTaller && !unitIdInput) throw new Error('Elige la unidad que vas a usar.');
+      let opts = isTaller ? { unitId: unitIdInput } : {};
+      let t = null;
+      for (let i = 0; i < 3 && !t; i += 1) {
+        try {
+          t = await startTrip(route, shift, profile.staffId, kmInicialInput, startLoc, opts);
+        } catch (err) {
+          if (err.code === 'KM_LOWER' && !opts.ignoreKmAlert && window.confirm(`${err.message}\n\n¿Confirmas que el kilometraje es correcto?`)) {
+            opts = { ...opts, ignoreKmAlert: true };
+          } else if (err.code === 'CAPACITY' && !opts.ignoreCapacity && window.confirm(`${err.message}\n\n¿Salir de todos modos?`)) {
+            opts = { ...opts, ignoreCapacity: true };
+          } else {
+            throw err;
+          }
+        }
+      }
       setTrip(t);
     } catch (err) {
       setKmError(err.message);
@@ -700,6 +726,21 @@ export default function TripRunner() {
           Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.
         </p>
         <form onSubmit={handleStartTrip} className="space-y-3">
+          {route.kind === 'taller' && (
+            <select
+              value={unitIdInput}
+              onChange={(e) => setUnitIdInput(e.target.value)}
+              className="w-full rounded-xl border border-navy-100 px-3 py-3 text-base bg-white"
+              required
+            >
+              <option value="">¿Qué unidad vas a usar?</option>
+              {units.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.plate}{u.model ? ` — ${u.model}` : ''}{u.capacity ? ` (${u.capacity} lugares)` : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             value={kmInicialInput}
             onChange={(e) => setKmInicialInput(e.target.value)}

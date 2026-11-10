@@ -144,7 +144,7 @@ function servicioIncluyeTurno(servicio, shift) {
   return servicio === (shift === 'morning' ? 'entrada' : 'salida');
 }
 
-export function studentAppliesToday(student, dateStr, shift) {
+function baseStudentApplies(student, dateStr, shift) {
   const tipoServicio = student.tipoServicio || 'completo';
 
   if (tipoServicio === 'completo') {
@@ -190,6 +190,62 @@ export function studentAppliesToday(student, dateStr, shift) {
  * chofer, ve en vivo el momento en que el chofer registra su kilometraje
  * inicial y arranca el recorrido, sin tener que refrescar.
  */
+/* ------------------------------------------------------------------ */
+/*  Talleres (salida 17:30)                                            */
+/*  Un alumno puede tener un taller asignado (tallerRouteId) en ciertos */
+/*  días de la semana (tallerDias, 1 = lunes … 5 = viernes):            */
+/*   · Si ese día habría salido en su ruta normal, SOLO se mueve su     */
+/*     salida al taller (no sale de la lista normal del operador ni se  */
+/*     cobra nada extra: sigue contando en lo que ya paga).             */
+/*   · Si ese día NO habría salido en su ruta normal (media entrada,    */
+/*     diario solo de entrada, o sin ruta normal), el taller es un viaje*/
+/*     adicional que se cobra como viaje por día.                       */
+/* ------------------------------------------------------------------ */
+const dowOf = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
+
+/** ¿El alumno tiene taller ese día de la semana? */
+export function tallerDayApplies(student, dateStr) {
+  if (!student?.tallerRouteId) return false;
+  return (student.tallerDias || []).map(Number).includes(dowOf(dateStr));
+}
+
+/** ¿Habría salido en su ruta normal ese día, sin contar el taller? */
+export function hasNormalSalida(student, dateStr) {
+  if (!student?.routeId) return false; // «solo taller»: no tiene ruta normal
+  return baseStudentApplies(student, dateStr, 'afternoon');
+}
+
+/**
+ * Reparte las fechas de taller del alumno dentro de `dates`:
+ *  moved    = salida normal movida al taller (sin cobro extra)
+ *  billable = viaje de taller adicional (se cobra por día)
+ */
+export function tallerDatesFor(student, dates) {
+  const moved = [];
+  const billable = [];
+  (dates || []).forEach((d) => {
+    if (!tallerDayApplies(student, d)) return;
+    if (hasNormalSalida(student, d)) moved.push(d);
+    else billable.push(d);
+  });
+  return { moved, billable };
+}
+
+/**
+ * ¿Le toca al alumno ese turno hoy? Con `route` de tipo taller, decide si va
+ * en el recorrido de taller; en una ruta normal, quita su salida los días
+ * en que esa salida se movió a taller.
+ */
+export function studentAppliesToday(student, dateStr, shift, route = null) {
+  if (route?.kind === 'taller') {
+    return shift === 'afternoon'
+      && student.tallerRouteId === route.id
+      && tallerDayApplies(student, dateStr);
+  }
+  if (shift === 'afternoon' && tallerDayApplies(student, dateStr)) return false;
+  return baseStudentApplies(student, dateStr, shift);
+}
+
 export function subscribeTodayTrip(routeId, shift, callback, onError) {
   const id = tripDocId(routeId, todayString(), shift);
   const ref = doc(db, 'trips', id);
@@ -215,7 +271,15 @@ export function subscribeTodayTrip(routeId, shift, callback, onError) {
  * por lo tanto, aparece la lista de alumnos para nadie (ni chofer ni
  * nanny), que es justo el candado que se pidió.
  */
-export async function startTrip(route, shift, driverId, kmInicial, startLocation = null) {
+export const KM_GAP_ALERT = 100; // km sin registrar entre dos recorridos de la misma unidad
+
+/**
+ * opts: { unitId, ignoreCapacity, ignoreKmAlert }
+ *  · unitId: unidad que realmente usa el operador (en talleres la elige él).
+ *  · Valida el odómetro contra el último km final registrado de la unidad y,
+ *    cuando el operador eligió la unidad, que los alumnos quepan en ella.
+ */
+export async function startTrip(route, shift, driverId, kmInicial, startLocation = null, opts = {}) {
   if (kmInicial == null || kmInicial === '' || Number.isNaN(Number(kmInicial))) {
     throw new Error('Se requiere el kilometraje inicial para iniciar el recorrido.');
   }
@@ -228,10 +292,44 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     return { id: tripRef.id, ...existing.data() };
   }
 
-  const allStudents = await Students.listByRoute(route.id);
+  const isTaller = route.kind === 'taller';
+  const chosenUnitId = opts.unitId || '';
+  const unitId = chosenUnitId || route.unitId || '';
+  if (isTaller && !unitId) {
+    throw new Error('Elige la unidad que vas a usar en este recorrido de taller.');
+  }
+
+  const allStudents = isTaller
+    ? await Students.listByTallerRoute(route.id)
+    : await Students.listByRoute(route.id);
   // Solo entran a la lista de hoy los alumnos cuyo servicio/calendario
   // cubre este turno y esta fecha (ver studentAppliesToday arriba).
-  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift));
+  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift, route));
+
+  // Validaciones de la unidad (odómetro y capacidad).
+  let kmAlert = null;
+  if (unitId) {
+    const unitDoc = await getOne('units', unitId);
+    const lastKm = unitDoc?.lastKm === '' || unitDoc?.lastKm == null ? null : Number(unitDoc.lastKm);
+    if (lastKm != null && Number.isFinite(lastKm)) {
+      if (Number(kmInicial) < lastKm) {
+        if (!opts.ignoreKmAlert) {
+          const err = new Error(`El kilometraje inicial (${kmInicial}) es menor al último registrado de esta unidad (${lastKm}). Revisa el odómetro; si es correcto, confirma para continuar.`);
+          err.code = 'KM_LOWER';
+          throw err;
+        }
+        kmAlert = { type: 'menor', lastKm };
+      } else if (Number(kmInicial) - lastKm > KM_GAP_ALERT) {
+        kmAlert = { type: 'salto', lastKm, gap: Number(kmInicial) - lastKm };
+      }
+    }
+    const capacity = Number(unitDoc?.capacity || 0);
+    if ((isTaller || chosenUnitId) && capacity > 0 && students.length > capacity && !opts.ignoreCapacity) {
+      const err = new Error(`La unidad ${unitDoc?.plate || ''} tiene ${capacity} lugares y hoy van ${students.length} alumnos.`);
+      err.code = 'CAPACITY';
+      throw err;
+    }
+  }
   const savedOrder =
     shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
   // Los esporádicos (diario) van al FINAL de la lista del día, después de los fijos.
@@ -246,7 +344,11 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     schoolId: route.schoolId,
     driverId,
     nannyId: route.nannyId || null,
-    unitId: route.unitId,
+    unitId,
+    unitPlannedId: route.unitId || '',
+    unitChosenByOperator: !!chosenUnitId && chosenUnitId !== (route.unitId || ''),
+    kind: isTaller ? 'taller' : 'normal',
+    kmAlert,
     date,
     shift,
     status: 'in_progress',
@@ -691,6 +793,21 @@ export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false,
     { status: 'completed' },
     { merge: true }
   );
+  // Deja el odómetro final como «último km» de la unidad: es contra lo que se
+  // valida el km inicial del siguiente recorrido o viaje de esa unidad.
+  if (trip.unitId) {
+    try {
+      await updateDoc(doc(db, 'units', trip.unitId), {
+        lastKm: Number(kmFinal), lastKmAt: serverTimestamp(), lastKmTripId: tripId,
+      });
+    } catch (e) { console.error('No se pudo actualizar el último km de la unidad:', e); }
+  }
+}
+
+/** Recorridos de una unidad (para su historial y la validación del odómetro). */
+export async function listTripsByUnit(unitId) {
+  const snap = await getDocs(query(collection(db, 'trips'), where('unitId', '==', unitId)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 /* ------------------------------------------------------------------ */

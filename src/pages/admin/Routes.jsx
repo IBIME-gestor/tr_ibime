@@ -8,7 +8,7 @@ import LoadingOverlay from '../../components/LoadingOverlay';
 import { cascadeStyle } from '../../utils/cascade';
 
 const emptyForm = {
-  name: '', schoolId: '', driverId: '', nannyId: '', unitId: '',
+  name: '', kind: 'normal', schoolId: '', driverId: '', nannyId: '', unitId: '',
   pricingConcepts: { completo: '', medio_entrada: '', medio_salida: '', por_dia: '' },
 };
 
@@ -78,6 +78,20 @@ export default function RoutesPage() {
               className="admin-input"
               required
             />
+          </div>
+          <div className="md:col-span-2">
+            <label className="admin-label">Tipo de ruta</label>
+            <select
+              value={form.kind || 'normal'}
+              onChange={(e) => setForm({ ...form, kind: e.target.value })}
+              className="admin-select"
+            >
+              <option value="normal">Ruta normal (entrada y salida)</option>
+              <option value="taller">Ruta de taller (solo salida, la unidad la elige el operador)</option>
+            </select>
+            {form.kind === 'taller' && (
+              <p className="text-[11px] text-navy-400 mt-1">Los alumnos se asignan a esta ruta desde «Talleres». Define aquí los conceptos de cobro (viaje por día) y el operador predeterminado; la unidad puede quedar vacía.</p>
+            )}
           </div>
           <div>
             <label className="admin-label">Plantel</label>
@@ -182,7 +196,7 @@ export default function RoutesPage() {
           <div key={r.id} className="admin-card cascade-item" style={cascadeStyle(i, 60)}>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <p className="font-display font-semibold text-navy-800">{r.name}</p>
+                <p className="font-display font-semibold text-navy-800">{r.name}{r.kind === 'taller' && <span className="ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Taller</span>}</p>
                 <p className="text-sm text-navy-400">
                   {name(schools, r.schoolId)} · {driverName(r.driverId)} · {name(units, r.unitId)}
                 </p>

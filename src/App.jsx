@@ -25,6 +25,10 @@ import ListasAsistencia from './pages/admin/ListasAsistencia';
 import MapasRecorridos from './pages/admin/MapasRecorridos';
 import Planeacion from './pages/admin/Planeacion';
 import RecorridoReal from './pages/admin/RecorridoReal';
+import SpecialTripsAdmin from './pages/admin/SpecialTrips';
+import Talleres from './pages/admin/Talleres';
+import HistorialUnidad from './pages/admin/HistorialUnidad';
+import DriverSpecialTrips from './pages/driver/SpecialTrips';
 import ListasConsulta from './pages/admin/ListasConsulta';
 import AlumnosCompartidos from './pages/admin/AlumnosCompartidos';
 import ListasModificar from './pages/admin/ListasModificar';
@@ -87,6 +91,9 @@ export default function App() {
         <Route path="mapas-ruta" element={<MapasRecorridos />} />
         <Route path="planeacion" element={<Planeacion />} />
         <Route path="recorrido-real" element={<RecorridoReal />} />
+        <Route path="viajes-especiales" element={<SpecialTripsAdmin />} />
+        <Route path="talleres" element={<Talleres />} />
+        <Route path="historial-unidades" element={<HistorialUnidad />} />
         <Route path="tarifas" element={<Pricing />} />
         <Route path="finanzas" element={<Finance />} />
         <Route path="cobranza" element={<Cobranza />} />
@@ -111,6 +118,7 @@ export default function App() {
         <Route path="recorrido/:routeId/:shift" element={<TripRunner />} />
         <Route path="resumen/:tripId" element={<TripSummary />} />
         <Route path="historial" element={<TripHistory />} />
+        <Route path="viajes-especiales" element={<DriverSpecialTrips />} />
         <Route path="lista" element={<MyList />} />
         <Route path="lista/:routeId" element={<MyList />} />
         <Route path="referencia/:routeId/:shift" element={<ReferenceRoute />} />

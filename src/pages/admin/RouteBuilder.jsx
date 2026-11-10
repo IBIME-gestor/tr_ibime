@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, RefreshCw, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
+import { tallerDatesFor } from '../../firebase/trips';
 
 export const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
@@ -156,6 +157,21 @@ export function buildStudentRow(student, dates, concepts, route) {
 
 function hasBothSameDay(row) {
   return Object.values(row.days || {}).some((d) => d.entrada && d.salida);
+}
+
+/**
+ * Fila de lista para una RUTA DE TALLER. Solo se cobran los días en que el taller
+ * es un viaje adicional (el alumno no habría salido en su ruta normal ese día):
+ * van como servicio diario de salida con la tarifa por día de la ruta de taller.
+ * Si solo se movió su salida normal, no genera cobro y no lleva fila.
+ */
+export function buildTallerRow(student, dates, concepts, route) {
+  const { billable } = tallerDatesFor(student, dates);
+  if (!billable.length) return null;
+  const row = buildStudentRow({
+    ...student, routeId: route.id, tipoServicio: 'diario', medioServicio: 'salida', fechasDiarias: billable, diasSemana: [],
+  }, dates, concepts, route);
+  return { ...row, paid: false, paymentId: '', tallerBilling: true };
 }
 
 export function priorityCompare(a, b) {
@@ -575,8 +591,14 @@ export default function RouteBuilder() {
     }
     setSaving(true);
     try {
-      const source = allStudents.filter((s) => s.routeId === route.id);
-      const rows = source.map((s) => ({ ...buildStudentRow(s, dates, concepts, route), paid: false, paymentId: '' })).sort(priorityCompare);
+      const isTaller = route.kind === 'taller';
+      const source = isTaller
+        ? allStudents.filter((s) => s.tallerRouteId === route.id)
+        : allStudents.filter((s) => s.routeId === route.id);
+      const rows = (isTaller
+        ? source.map((s) => buildTallerRow(s, dates, concepts, route)).filter(Boolean)
+        : source.map((s) => ({ ...buildStudentRow(s, dates, concepts, route), paid: false, paymentId: '' }))
+      ).sort(priorityCompare);
       const issues = capacityIssues(rows, dates);
       if (issues.length) {
         window.alert(`No se puede generar la lista porque la unidad está sobre su capacidad.\n\n${capacityMessage(issues)}`);
@@ -610,6 +632,25 @@ export default function RouteBuilder() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // Deja el generador como recién abierto (sin recargar la página) para empezar con otra ruta/lista.
+  function clearGenerator() {
+    setRouteId('');
+    setListId('');
+    setCurrentList(null);
+    setStartDate(localDateString(new Date()));
+    setEndDate(localDateString(new Date()));
+    setOperatorId('');
+    setListName('');
+    setListMonth(localDateString(new Date()).slice(0, 7));
+    setServiceFilters(['todos']);
+    setSelectedDay(null);
+    setMovingRowId(null);
+    setMoveRouteId('');
+    setMoveOperatorId('');
+    setShowExistingLists(false);
+    resetAddFlow();
   }
 
   function openList(id) {
@@ -915,6 +956,7 @@ export default function RouteBuilder() {
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
+          <button type="button" onClick={clearGenerator} className="btn-admin-ghost"><X size={14}/> Limpiar</button>
           <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l.startDate)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
           <div className="relative w-full max-w-lg">
             <button

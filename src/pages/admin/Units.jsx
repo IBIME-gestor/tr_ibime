@@ -15,6 +15,7 @@ const emptyForm = {
   verificationMonth: '',
   stickerColor: '',
   conditions: '',
+  lastKmEdit: '',
 };
 
 export default function UnitsPage() {
@@ -28,17 +29,23 @@ export default function UnitsPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.plate.trim()) return;
+    // El último km (odómetro) lo actualiza el operador al cerrar cada recorrido o viaje:
+    // no se reescribe con el valor viejo del formulario salvo que el admin lo corrija aquí.
+    const { lastKm, lastKmAt, lastKmTripId, lastKmEdit, ...rest } = form;
+    const payload = { ...rest };
+    const typed = lastKmEdit === '' || lastKmEdit == null ? null : Number(lastKmEdit);
+    if (typed != null && Number.isFinite(typed) && (!editingId || typed !== Number(lastKm))) payload.lastKm = typed;
     if (editingId) {
-      await Units.update(editingId, form);
+      await Units.update(editingId, payload);
     } else {
-      await Units.create(form);
+      await Units.create(payload);
     }
     setForm(emptyForm);
     setEditingId(null);
   }
 
   function handleEdit(u) {
-    setForm({ ...emptyForm, ...u });
+    setForm({ ...emptyForm, ...u, lastKmEdit: u.lastKm ?? '' });
     setEditingId(u.id);
   }
 
@@ -90,6 +97,17 @@ export default function UnitsPage() {
                 min="0"
                 className="admin-input"
               />
+            </div>
+            <div>
+              <label className="admin-label">Último km registrado (odómetro)</label>
+              <input
+                value={form.lastKmEdit}
+                onChange={(e) => setForm({ ...form, lastKmEdit: e.target.value })}
+                type="number"
+                min="0"
+                className="admin-input"
+              />
+              <p className="text-[11px] text-navy-400 mt-1">Se actualiza solo al cerrar cada recorrido o viaje; se valida contra el km inicial del siguiente. Corrígelo aquí si hace falta.</p>
             </div>
             <div>
               <label className="admin-label">Costo operativo por km</label>
