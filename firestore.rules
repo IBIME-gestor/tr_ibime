@@ -72,7 +72,24 @@ service cloud.firestore {
 
     match /units/{id} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      // El operador solo puede dejar el último km (odómetro) al cerrar un recorrido o viaje.
+      allow update: if isAdmin() ||
+        (isDriver() && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastKm', 'lastKmAt', 'lastKmTripId']));
+    }
+
+    // Viajes especiales (solicitados por dirección/coordinación): el admin los
+    // gestiona; el operador asignado solo ve los suyos y registra inicio y cierre.
+    match /specialTrips/{id} {
+      allow read: if isAdmin() || (isDriver() && resource.data.operatorId == myStaffId());
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        (isDriver() && resource.data.operatorId == myStaffId() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'startedAt', 'endedAt', 'unitId', 'unitName',
+                      'kmInicial', 'kmFinal', 'studentsStart', 'studentsEnd',
+                      'operatorNotes', 'kmAlert', 'updatedAt']));
     }
 
     // Gasolina y mantenimiento/reparaciones de cada unidad: solo el admin.
