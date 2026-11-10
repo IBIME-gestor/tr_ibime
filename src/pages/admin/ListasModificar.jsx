@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, RefreshCw, Save, Search, Trash2, UserRoundCog, Route as RouteIcon, AlertTriangle, FolderOpen } from 'lucide-react';
 import { Drivers, FinanceRecords, RouteLists, Routes, Schools } from '../../firebase/services';
+import { medioExtras } from './RouteBuilder';
 
 function dateString(date) {
   const d = new Date(date);
@@ -100,7 +101,9 @@ export default function ListasModificar() {
         const days = {};
         nextDates.forEach((date) => {
           const weekday = new Date(`${date}T12:00:00`).getDay();
-          days[date] = { ...(oldDayByWeekday[weekday] || { entrada: false, salida: false, confirmado: false }) };
+          // En medio se respeta el día exacto si ya existía (puede traer un viaje extra puntual).
+          const exact = row.tipoServicio === 'medio' ? row.days?.[date] : null;
+          days[date] = { ...(exact || oldDayByWeekday[weekday] || { entrada: false, salida: false, confirmado: false }) };
         });
         const daysCount = Object.values(days).filter((day) => day.entrada || day.salida).length;
         let estimatedAmount = Number(row.estimatedAmount || 0);
@@ -108,7 +111,14 @@ export default function ListasModificar() {
           const perDay = Number(row.baseAmount || 0);
           estimatedAmount = Object.values(days).reduce((sum, day) => sum + (day.entrada ? 1 : 0) + (day.salida ? 1 : 0), 0) * perDay;
         }
-        return { ...row, days, daysCount, estimatedAmount: Number(estimatedAmount.toFixed(2)) };
+        let extra = {};
+        if (row.tipoServicio === 'medio' && row.perDayAmount != null) {
+          const perDay = Number(row.perDayAmount || 0);
+          const { extraLegs } = medioExtras(row, days);
+          estimatedAmount = Number(row.baseAmount || 0) + extraLegs * perDay;
+          extra = { extraLegs, extraAmount: Number((extraLegs * perDay).toFixed(2)) };
+        }
+        return { ...row, ...extra, days, daysCount, estimatedAmount: Number(estimatedAmount.toFixed(2)) };
       });
       const nextName = listName.trim() || `${startDate} ${endDate} | ${route.name || 'Ruta'} | ${driver?.name || 'SIN-OPERADOR'}`;
       const patch = {

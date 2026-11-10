@@ -28,6 +28,7 @@ import RecorridoReal from './pages/admin/RecorridoReal';
 import SpecialTripsAdmin from './pages/admin/SpecialTrips';
 import Talleres from './pages/admin/Talleres';
 import HistorialUnidad from './pages/admin/HistorialUnidad';
+import AgendaAdmin from './pages/admin/Agenda';
 import DriverSpecialTrips from './pages/driver/SpecialTrips';
 import ListasConsulta from './pages/admin/ListasConsulta';
 import AlumnosCompartidos from './pages/admin/AlumnosCompartidos';
@@ -93,6 +94,7 @@ export default function App() {
         <Route path="recorrido-real" element={<RecorridoReal />} />
         <Route path="viajes-especiales" element={<SpecialTripsAdmin />} />
         <Route path="talleres" element={<Talleres />} />
+        <Route path="agenda" element={<AgendaAdmin />} />
         <Route path="historial-unidades" element={<HistorialUnidad />} />
         <Route path="tarifas" element={<Pricing />} />
         <Route path="finanzas" element={<Finance />} />

@@ -54,9 +54,16 @@ function expectedService(student, date) {
   const weekday = isoWeekday(date);
   if (tipo === 'completo') return 'ambas';
   if (tipo === 'medio') {
-    return (student.diasSemana || []).map(Number).includes(weekday)
-      ? (student.medioServicio || 'entrada')
-      : null;
+    // Servicio contratado (una pierna los días de contrato) + viajes extra por día
+    // (student.viajesExtra[fecha]: la otra pierna, o ambas, solo esa fecha).
+    const legs = new Set();
+    const add = (sv) => {
+      if (sv === 'ambas') { legs.add('entrada'); legs.add('salida'); } else if (sv) legs.add(sv);
+    };
+    if ((student.diasSemana || []).map(Number).includes(weekday)) add(student.medioServicio || 'entrada');
+    add((student.viajesExtra || {})[date]);
+    if (legs.size === 2) return 'ambas';
+    return legs.size === 1 ? [...legs][0] : null;
   }
   if (tipo === 'diario') {
     return (student.fechasDiarias || []).includes(date)
@@ -64,6 +71,24 @@ function expectedService(student, date) {
       : null;
   }
   return null;
+}
+
+/**
+ * Medio servicio con viajes extra: cada pierna que se usa FUERA de lo contratado
+ * (la otra pierna un día, o ir redondo un día puntual) se cobra como viaje por día
+ * y se suma al total del medio. Devuelve cuántas piernas extra hay y en qué fechas.
+ */
+export function medioExtras(row, days = row.days) {
+  const contract = row.medioServicio === 'salida' ? 'salida' : 'entrada';
+  const dias = (row.diasSemana || []).map(Number);
+  let extraLegs = 0;
+  const extraMap = {};
+  Object.entries(days || {}).forEach(([date, d]) => {
+    const contractDay = dias.length ? dias.includes(isoWeekday(date)) : true;
+    const legs = ['entrada', 'salida'].filter((leg) => d?.[leg] && !(contractDay && leg === contract));
+    if (legs.length) { extraLegs += legs.length; extraMap[date] = legs.length === 2 ? 'ambas' : legs[0]; }
+  });
+  return { extraLegs, extraMap };
 }
 
 function conceptFor(route, concepts, key) {
@@ -113,6 +138,7 @@ export function buildStudentRow(student, dates, concepts, route) {
   if (student.tipoServicio === 'diario') conceptKey = 'por_dia';
 
   const concept = conceptFor(route, concepts, conceptKey);
+  const perDayAmount = Number(conceptFor(route, concepts, 'por_dia')?.amount ?? 0);
   const baseAmount = Number(concept?.amount ?? student.billingBaseAmount ?? student.billingAmount ?? 0);
   let estimatedAmount = 0;
 
@@ -120,8 +146,9 @@ export function buildStudentRow(student, dates, concepts, route) {
     estimatedAmount = baseAmount;
   } else if (student.tipoServicio === 'medio') {
     // Medio conserva siempre la cuota configurada para el servicio medio,
-    // aunque se utilice solo un día de la semana o todos.
-    estimatedAmount = baseAmount;
+    // aunque se utilice solo un día de la semana o todos. Si algún día va redondo
+    // (o usa la otra pierna), ese viaje adicional se suma a tarifa por día.
+    estimatedAmount = baseAmount + medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, days).extraLegs * perDayAmount;
   } else {
     // Diario cobra la tarifa diaria de la ruta por cada tramo marcado:
     // Entrada = 1, Salida = 1, Entrada + Salida = 2.
@@ -144,6 +171,11 @@ export function buildStudentRow(student, dates, concepts, route) {
     fechasDiarias: student.fechasDiarias || [],
     estimatedAmount: Number(estimatedAmount.toFixed(2)),
     baseAmount,
+    perDayAmount,
+    ...(student.tipoServicio === 'medio' ? (() => {
+      const { extraLegs } = medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, days);
+      return { extraLegs, extraAmount: Number((extraLegs * perDayAmount).toFixed(2)) };
+    })() : {}),
     daysCount: selectedCount,
     pricingConceptId: concept?.id || student.pricingConceptId || '',
     concept: concept?.name || student.billingConcept || '',
@@ -761,18 +793,28 @@ export default function RouteBuilder() {
 
   async function toggleDay(studentId, date, key) {
     if (!currentList) return;
+    let medioSync = null;
     const rows = (currentList.rows || []).map((row) => {
       if (row.studentId !== studentId) return row;
       const day = row.days?.[date] || { entrada: false, salida: false, confirmado: false };
       const nextDays = { ...row.days, [date]: { ...day, [key]: !day[key] } };
       let estimatedAmount = Number(row.estimatedAmount || 0);
+      let extra = {};
       if (row.tipoServicio === 'diario') {
         const perDay = Number(row.baseAmount || 0);
         estimatedAmount = Object.values(nextDays).reduce(
           (sum, d) => sum + (d.entrada ? 1 : 0) + (d.salida ? 1 : 0), 0
         ) * perDay;
+      } else if (row.tipoServicio === 'medio') {
+        // Medio + viaje(s) redondo(s) por día: el viaje adicional se cobra a tarifa por día.
+        const listRoute = routes.find((r) => r.id === currentList.routeId) || null;
+        const perDay = Number(row.perDayAmount ?? conceptFor(listRoute, concepts, 'por_dia')?.amount ?? 0);
+        const { extraLegs, extraMap } = medioExtras(row, nextDays);
+        estimatedAmount = Number(row.baseAmount || 0) + extraLegs * perDay;
+        extra = { perDayAmount: perDay, extraLegs, extraAmount: Number((extraLegs * perDay).toFixed(2)) };
+        medioSync = { studentId, extraMap, missingPerDay: extraLegs > 0 && !(perDay > 0) };
       }
-      return { ...row, days: nextDays, estimatedAmount: Number(estimatedAmount.toFixed(2)), daysCount: Object.values(nextDays).filter(d => d.entrada || d.salida).length };
+      return { ...row, ...extra, days: nextDays, estimatedAmount: Number(estimatedAmount.toFixed(2)), daysCount: Object.values(nextDays).filter(d => d.entrada || d.salida).length };
     });
     const issues = capacityIssues(rows, currentList.dates || dates);
     if (issues.length) {
@@ -786,6 +828,21 @@ export default function RouteBuilder() {
       const existing = await FinanceRecords.get(financeId);
       await FinanceRecords.upsert(financeId, financePayload(changed, currentList, route, school, existing || {}));
       // Si el diario cambia días, el importe financiero queda inmediatamente sincronizado.
+    }
+    if (medioSync) {
+      // El operador debe ver al alumno en el turno extra de esa fecha: se guarda en su ficha
+      // solo para las fechas de ESTA lista (las de otras listas se conservan).
+      const st = allStudents.find((x) => x.id === medioSync.studentId);
+      const listDates = new Set(currentList.dates || []);
+      const kept = Object.entries(st?.viajesExtra || {}).filter(([d]) => !listDates.has(d));
+      const nextExtra = Object.fromEntries([...kept, ...Object.entries(medioSync.extraMap)].sort(([a], [b]) => a.localeCompare(b)));
+      try {
+        await Students.update(medioSync.studentId, { viajesExtra: nextExtra });
+        setAllStudents((prev) => prev.map((x) => (x.id === medioSync.studentId ? { ...x, viajesExtra: nextExtra } : x)));
+      } catch (err) { console.error('No se pudo guardar el viaje extra en la ficha:', err); }
+      if (medioSync.missingPerDay) {
+        window.alert('Esta ruta no tiene un concepto de cobro «por día» configurado, así que el viaje extra se suma con $0. Configúralo en Tarifas y conceptos / Rutas.');
+      }
     }
   }
 
@@ -1114,7 +1171,7 @@ export default function RouteBuilder() {
                         </div>
                       </td>;
                     })}
-                    <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</td>
+                    <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}{row.extraLegs > 0 && <span className="block text-[10px] font-normal text-amber-700">incl. {row.extraLegs} viaje(s) extra × ${Number(row.perDayAmount || 0)}</span>}</td>
                     <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving} className="w-3.5 h-3.5"/></td>
                     <td className="print:hidden whitespace-nowrap"><button title="Editar" onClick={() => editRow(row)} className="link-action mr-2"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action mr-2 text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 mr-1"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 mr-1"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
                   </tr>;

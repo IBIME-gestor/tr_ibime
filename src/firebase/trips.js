@@ -152,6 +152,9 @@ function baseStudentApplies(student, dateStr, shift) {
   }
 
   if (tipoServicio === 'medio') {
+    // Viaje extra solo esa fecha (la otra pierna o ir redondo): se cobra aparte a tarifa por día.
+    const extra = (student.viajesExtra || {})[dateStr];
+    if (extra && servicioIncluyeTurno(extra, shift)) return true;
     const medioServicio = student.medioServicio || 'entrada';
     // Si el alumno de medio solo va ciertos días (L–V), se respeta; sin días guardados = todos.
     const dias = (student.diasSemana || []).map(Number);

@@ -34,8 +34,10 @@ import {
   Bug,
   ScrollText,
   Pencil,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import useAgendaAlerts from '../../hooks/useAgendaAlerts';
 
 /**
  * Menú agrupado por categorías. Cada grupo es un botón en la barra
@@ -71,6 +73,7 @@ const groups = [
       { to: '/admin/mapas-ruta', label: 'Mapas de recorridos', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/recorrido-real', label: 'Recorrido real (GPS)', icon: MapIcon, roles: ['admin'] },
+      { to: '/admin/agenda', label: 'Mi agenda', icon: Bell, roles: ['admin'] },
       { to: '/admin/talleres', label: 'Talleres (17:30)', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/viajes-especiales', label: 'Viajes especiales', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: MapIcon, roles: ['admin'] },
@@ -132,6 +135,7 @@ function isItemActive(item, pathname) {
 
 export default function AdminLayout() {
   const { logout, profile } = useAuth();
+  const agenda = useAgendaAlerts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroup, setOpenGroup] = useState(null); // desktop: grupo con el menú desplegado
   const [expanded, setExpanded] = useState(null); // móvil: grupo expandido (acordeón)
@@ -294,6 +298,22 @@ export default function AdminLayout() {
           </nav>
 
           <div className="flex-1 lg:hidden" />
+
+          {/* Campana de la agenda (24 / 12 / 6 / 1 h antes) */}
+          {role === 'admin' && (
+            <NavLink
+              to="/admin/agenda"
+              title={agenda.count ? `${agenda.count} pendiente(s) por atender` : 'Mi agenda'}
+              className="relative shrink-0 p-2 rounded-md text-navy-100 hover:text-white hover:bg-navy-700"
+            >
+              <Bell size={18} />
+              {agenda.count > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {agenda.count}
+                </span>
+              )}
+            </NavLink>
+          )}
 
           {/* Usuario (escritorio) */}
           <div className="hidden lg:flex items-center gap-3 shrink-0">
