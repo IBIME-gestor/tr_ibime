@@ -81,6 +81,20 @@ service cloud.firestore {
 
     // Viajes especiales (solicitados por dirección/coordinación): el admin los
     // gestiona; el operador asignado solo ve los suyos y registra inicio y cierre.
+    // Avisos del admin a operadores/nannies: el destinatario solo ve los suyos y los marca como vistos.
+    match /announcements/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /announcementRecipients/{id} {
+      allow read: if isAdmin() ||
+        ((isDriver() || isNanny()) && resource.data.staffId == myStaffId());
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+        ((isDriver() || isNanny()) && resource.data.staffId == myStaffId() &&
+          resource.data.status == 'pendiente' && request.resource.data.status == 'visto' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'ackedAt', 'updatedAt']));
+    }
+
     // Agenda personal del admin: cada quien ve y edita solo la suya.
     match /agenda/{id} {
       allow read, update, delete: if isAdmin() && resource.data.ownerUid == request.auth.uid;
