@@ -74,6 +74,7 @@ const groups = [
       { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/recorrido-real', label: 'Recorrido real (GPS)', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/agenda', label: 'Mi agenda', icon: Bell, roles: ['admin'] },
+      { to: '/admin/avisos', label: 'Avisos a operadores', icon: Bell, roles: ['admin'] },
       { to: '/admin/talleres', label: 'Talleres (17:30)', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/viajes-especiales', label: 'Viajes especiales', icon: MapIcon, roles: ['admin'] },
       { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: MapIcon, roles: ['admin'] },

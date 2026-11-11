@@ -1,6 +1,9 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Home, History, ListChecks, Bus } from 'lucide-react';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Home, History, ListChecks, Bus, Bell } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import useNotices from '../../hooks/useNotices';
+import NoticeGate from '../NoticeGate';
+import OperatorPending from '../OperatorPending';
 
 const navLinkClass = ({ isActive }) =>
   `flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors border-b-2 ${
@@ -10,9 +13,12 @@ const navLinkClass = ({ isActive }) =>
 export default function DriverLayout() {
   const { logout, profile } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { pending, ack } = useNotices();
 
   return (
     <div className="min-h-screen bg-navy-50 flex flex-col">
+      <NoticeGate pending={pending} ack={ack} />
       <header className="bg-navy-800 text-white sticky top-0 z-10">
         <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
           <button
@@ -46,12 +52,17 @@ export default function DriverLayout() {
           <NavLink to="/chofer/viajes-especiales" className={navLinkClass}>
             <Bus size={15} /> Viajes especiales
           </NavLink>
+          <NavLink to="/chofer/avisos" className={navLinkClass}>
+            <Bell size={15} /> Avisos
+            {pending.length > 0 && <span className="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{pending.length}</span>}
+          </NavLink>
           <NavLink to="/chofer/historial" className={navLinkClass}>
             <History size={15} /> Mis recorridos
           </NavLink>
         </nav>
       </header>
       <main className="flex-1 max-w-md w-full mx-auto p-4">
+        {location.pathname === '/chofer' && <OperatorPending pendingNotices={pending.length} />}
         <Outlet />
       </main>
     </div>

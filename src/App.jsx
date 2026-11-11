@@ -30,6 +30,8 @@ import Talleres from './pages/admin/Talleres';
 import HistorialUnidad from './pages/admin/HistorialUnidad';
 import AgendaAdmin from './pages/admin/Agenda';
 import DriverSpecialTrips from './pages/driver/SpecialTrips';
+import DriverNotices from './pages/driver/Notices';
+import AvisosAdmin from './pages/admin/Avisos';
 import ListasConsulta from './pages/admin/ListasConsulta';
 import AlumnosCompartidos from './pages/admin/AlumnosCompartidos';
 import ListasModificar from './pages/admin/ListasModificar';
@@ -95,6 +97,7 @@ export default function App() {
         <Route path="viajes-especiales" element={<SpecialTripsAdmin />} />
         <Route path="talleres" element={<Talleres />} />
         <Route path="agenda" element={<AgendaAdmin />} />
+        <Route path="avisos" element={<AvisosAdmin />} />
         <Route path="historial-unidades" element={<HistorialUnidad />} />
         <Route path="tarifas" element={<Pricing />} />
         <Route path="finanzas" element={<Finance />} />
@@ -121,6 +124,7 @@ export default function App() {
         <Route path="resumen/:tripId" element={<TripSummary />} />
         <Route path="historial" element={<TripHistory />} />
         <Route path="viajes-especiales" element={<DriverSpecialTrips />} />
+        <Route path="avisos" element={<DriverNotices />} />
         <Route path="lista" element={<MyList />} />
         <Route path="lista/:routeId" element={<MyList />} />
         <Route path="referencia/:routeId/:shift" element={<ReferenceRoute />} />
