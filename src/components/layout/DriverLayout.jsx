@@ -1,14 +1,10 @@
-import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Home, History, ListChecks, Bus, Bell } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useNotices from '../../hooks/useNotices';
 import NoticeGate from '../NoticeGate';
 import OperatorPending from '../OperatorPending';
-
-const navLinkClass = ({ isActive }) =>
-  `flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors border-b-2 ${
-    isActive ? 'text-white border-signal-yellow' : 'text-navy-300 border-transparent hover:text-white'
-  }`;
+import OperatorNav from '../OperatorNav';
 
 export default function DriverLayout() {
   const { logout, profile } = useAuth();
@@ -41,25 +37,17 @@ export default function DriverLayout() {
             </button>
           </div>
         </div>
-        {/* Menú del operador: solo consulta bajo demanda, sin listeners en vivo */}
-        <nav className="flex gap-1 px-4 pb-2 overflow-x-auto">
-          <NavLink to="/chofer" end className={navLinkClass}>
-            <Home size={15} /> Inicio
-          </NavLink>
-          <NavLink to="/chofer/lista" className={navLinkClass}>
-            <ListChecks size={15} /> Mi lista
-          </NavLink>
-          <NavLink to="/chofer/viajes-especiales" className={navLinkClass}>
-            <Bus size={15} /> Viajes especiales
-          </NavLink>
-          <NavLink to="/chofer/avisos" className={navLinkClass}>
-            <Bell size={15} /> Avisos
-            {pending.length > 0 && <span className="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{pending.length}</span>}
-          </NavLink>
-          <NavLink to="/chofer/historial" className={navLinkClass}>
-            <History size={15} /> Mis recorridos
-          </NavLink>
-        </nav>
+        {/* Menú del operador: solo íconos; el módulo activo muestra su nombre.
+            Solo consulta bajo demanda, sin listeners en vivo. */}
+        <OperatorNav
+          items={[
+            { to: '/chofer', label: 'Inicio', icon: Home, end: true },
+            { to: '/chofer/lista', label: 'Mi lista', icon: ListChecks },
+            { to: '/chofer/viajes-especiales', label: 'Viajes especiales', icon: Bus },
+            { to: '/chofer/avisos', label: 'Avisos', icon: Bell, badge: pending.length },
+            { to: '/chofer/historial', label: 'Mis recorridos', icon: History },
+          ]}
+        />
       </header>
       <main className="flex-1 max-w-md w-full mx-auto p-4">
         {location.pathname === '/chofer' && <OperatorPending pendingNotices={pending.length} />}
