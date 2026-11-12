@@ -81,6 +81,13 @@ service cloud.firestore {
 
     // Viajes especiales (solicitados por dirección/coordinación): el admin los
     // gestiona; el operador asignado solo ve los suyos y registra inicio y cierre.
+    // Bajas de alumnos de un recorrido: las registra quien los quita; el admin las revisa.
+    match /tripRemovals/{id} {
+      allow read, update, delete: if isAdmin();
+      allow create: if isAdmin() ||
+        ((isDriver() || isNanny()) && request.resource.data.removedByStaffId == myStaffId());
+    }
+
     // Avisos del admin a operadores/nannies: el destinatario solo ve los suyos y los marca como vistos.
     match /announcements/{id} {
       allow read, write: if isAdmin();
@@ -211,6 +218,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       allow create: if isDriver() && request.resource.data.driverId == myStaffId();
+      allow delete: if isAdmin();
 
       allow update: if isAdmin()
         || (isDriver() && resource.data.driverId == myStaffId())
