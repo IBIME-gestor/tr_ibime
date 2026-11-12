@@ -127,6 +127,7 @@ const groups = [
       { to: '/admin/soporte/errores', label: 'Errores de usuarios', icon: Bug, roles: ['admin'] },
       { to: '/admin/soporte/bitacora', label: 'Bitácora de cambios', icon: ScrollText, roles: ['admin'] },
       { to: '/admin/soporte/alumnos', label: 'Editor de alumnos', icon: Pencil, roles: ['admin'] },
+      { to: '/admin/soporte/operador', label: 'Vincular operador', icon: Link2, roles: ['admin'] },
     ],
   },
 ];
