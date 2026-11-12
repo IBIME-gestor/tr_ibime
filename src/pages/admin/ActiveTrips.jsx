@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, ChevronDown, AlertTriangle, CheckCircle2, Sun, Moon, Clock, History } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { RefreshCw, ChevronDown, AlertTriangle, CheckCircle2, Sun, Moon, Clock, History, Trash2 } from 'lucide-react';
 import { Routes, Drivers } from '../../firebase/services';
 import {
   listActiveTrips,
@@ -7,6 +8,7 @@ import {
   markStopManual,
   markStopAbsent,
   completeTrip,
+  deleteTripCascade,
   todayString,
 } from '../../firebase/trips';
 import LoadingOverlay from '../../components/LoadingOverlay';
@@ -243,6 +245,18 @@ function TripRescueCard({ trip, old, today, now, route, operatorName, isOpen, on
     }
   }
 
+  async function handleDelete() {
+    if (!window.confirm('¿Eliminar este recorrido por completo? Se borran su asistencia, kilometraje y huella GPS, y no se puede deshacer. Hazlo solo si la información es errónea.')) return;
+    setClosing(true); setError('');
+    try {
+      await deleteTripCascade(trip);
+      onClosed();
+    } catch (err) {
+      setError(err?.message || 'No se pudo eliminar el recorrido.');
+      setClosing(false);
+    }
+  }
+
   const total = stops?.length ?? null;
   const pendingCount = stops?.filter((s) => s.status === 'pending').length ?? null;
   const doneCount = total != null ? total - pendingCount : null;
@@ -364,6 +378,10 @@ function TripRescueCard({ trip, old, today, now, route, operatorName, isOpen, on
                   </button>
                 </div>
                 {error && <p className="text-stop text-sm">{error}</p>}
+                <div className="flex flex-wrap items-center gap-4 text-xs">
+                  <Link to={`/admin/corregir-recorridos?fecha=${trip.date}`} className="link-action">Corregir asistencia y km</Link>
+                  <button type="button" onClick={handleDelete} disabled={closing} className="link-danger inline-flex items-center gap-1"><Trash2 size={12} /> Eliminar recorrido</button>
+                </div>
                 <p className="text-xs text-navy-400">
                   Los alumnos que queden «Sin marcar» se guardan así tal cual — el sistema no inventa si
                   subieron o no. Puedes corregirlos arriba antes de cerrar si sabes lo que pasó.

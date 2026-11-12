@@ -16,6 +16,7 @@ import {
   markAllBulk,
   addStudentToTrip,
   removeStudentFromTrip,
+  undoStop,
   applyOrderToTrip,
   completeTrip,
   updateLiveLocation,
@@ -607,13 +608,27 @@ export default function TripRunner() {
     return { label: 'De otra ruta', tone: 'text-signal-amber' };
   }
 
+  // Deshacer un marcado hecho por error (No vino / Subió / Bajó) mientras el recorrido sigue en curso.
+  async function handleUndo(stop) {
+    if (!trip || trip.status !== 'in_progress') return;
+    if (!window.confirm(`¿Deshacer el marcado de ${stop.name}? Volverá a quedar como pendiente.`)) return;
+    try {
+      setBusy(true);
+      await undoStop(trip.id, stop.studentId, profile);
+    } catch (err) {
+      setSearchError(err?.message || 'No se pudo deshacer el marcado.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleRemoveFromToday(stop) {
     if (!trip || stop.status !== 'pending') return;
     const ok = window.confirm(`¿Quitar a ${stop.name} únicamente de la lista de este recorrido? Su expediente y asignación permanente no se modificarán.`);
     if (!ok) return;
     try {
       setBusy(true);
-      await removeStudentFromTrip(trip.id, stop.studentId);
+      await removeStudentFromTrip(trip.id, stop.studentId, profile, trip);
     } catch (err) {
       setSearchError(err?.message || 'No se pudo quitar al alumno de este recorrido.');
     } finally {
@@ -1255,6 +1270,14 @@ export default function TripRunner() {
             return (
               <div key={stop.id} className="relative">
                 <StopCard stop={stop} number={number} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
+                {stop.status !== 'pending' && trip.status === 'in_progress' && (
+                  <button
+                    type="button"
+                    onClick={() => handleUndo(stop)}
+                    disabled={busy}
+                    className="ml-3 mb-3 text-xs font-semibold text-navy-600 underline underline-offset-2 inline-flex items-center gap-1"
+                  ><Undo2 size={12} /> Deshacer marcado</button>
+                )}
                 {stop.status === 'pending' && !allResolved && (
                   <button
                     type="button"

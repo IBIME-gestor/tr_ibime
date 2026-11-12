@@ -13,6 +13,8 @@ import {
   serverTimestamp,
   deleteField,
   deleteDoc,
+  addDoc,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db } from './config';
 import { getOne } from './db';
@@ -571,8 +573,12 @@ export async function addStudentToTrip(tripId, student, order, trip, addedByProf
   });
 }
 
-/** Quita un alumno solo de este recorrido; no elimina su expediente ni su ruta permanente. */
-export async function removeStudentFromTrip(tripId, studentId) {
+/**
+ * Quita un alumno solo de este recorrido; no elimina su expediente ni su ruta permanente.
+ * Cada baja queda registrada en `tripRemovals` (quién, cuándo, de qué recorrido) para que
+ * la administración la revise y pueda restaurarlo si fue un error.
+ */
+export async function removeStudentFromTrip(tripId, studentId, by = null, trip = null) {
   const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
   const stopSnap = await getDoc(stopRef);
   if (!stopSnap.exists()) return;
@@ -580,11 +586,61 @@ export async function removeStudentFromTrip(tripId, studentId) {
   if (stop.status && stop.status !== 'pending') {
     throw new Error('No se puede quitar un alumno después de registrar su asistencia.');
   }
+  // Primero la bitácora: si no se puede registrar, no se quita al alumno.
+  await addDoc(collection(db, 'tripRemovals'), {
+    tripId,
+    studentId,
+    name: stop.name || '',
+    matricula: stop.matricula || '',
+    routeId: trip?.routeId || stop.routeId || null,
+    date: trip?.date || stop.date || null,
+    shift: trip?.shift || stop.shift || null,
+    stopOrder: stop.order ?? null,
+    addedManually: !!stop.addedManually,
+    removedByStaffId: by?.staffId || null,
+    removedByName: by?.name || null,
+    removedByRole: by?.role || null,
+    removedAt: serverTimestamp(),
+    reviewed: false,
+    resolution: null,
+  });
   await deleteDoc(stopRef);
   const snap = await getDocs(query(collection(db, 'trips', tripId, 'stops'), orderBy('order')));
   const batch = writeBatch(db);
   snap.docs.forEach((item, index) => batch.update(item.ref, { order: index }));
   await batch.commit();
+}
+
+/**
+ * Deshacer un marcado hecho por error (No vino / Subió / Bajó): el alumno vuelve a
+ * «Pendiente» y se limpian sus horas y ubicaciones. Queda anotado quién y cuándo.
+ */
+export async function undoStop(tripId, studentId, by = null) {
+  const ref = doc(db, 'trips', tripId, 'stops', studentId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const stop = snap.data();
+  if (!stop.status || stop.status === 'pending') return;
+  await updateDoc(ref, {
+    status: 'pending',
+    boardedAt: deleteField(), boardedLocation: deleteField(), boardedMethod: deleteField(),
+    deliveredAt: deleteField(), deliveredLocation: deleteField(), deliveredMethod: deleteField(),
+    arrivedAt: deleteField(),
+    lastUndoAt: serverTimestamp(),
+    lastUndoFrom: stop.status,
+    lastUndoBy: by?.name || null,
+    lastUndoRole: by?.role || null,
+  });
+  // Si ese «bajó» había guardado la ubicación de entrega en el alumno, se limpia.
+  if (stop.status === 'delivered') {
+    try {
+      const stRef = doc(db, 'students', stop.studentId || studentId);
+      const st = await getDoc(stRef);
+      if (st.exists() && st.data().lastDeliveredTripId === tripId) {
+        await updateDoc(stRef, { lastDeliveredLocation: deleteField(), lastDeliveredAt: deleteField(), lastDeliveredTripId: deleteField() });
+      }
+    } catch (e) { console.error('No se pudo limpiar la ubicación de entrega:', e); }
+  }
 }
 
 /**
@@ -1019,4 +1075,154 @@ export async function getTripTrack(tripId) {
       for (let i = 0; i + 2 < p.length; i += 3) pts.push({ lat: p[i], lng: p[i + 1], t: p[i + 2] });
     });
   return pts.sort((a, b) => a.t - b.t);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Correcciones del administrador sobre recorridos                    */
+/* ------------------------------------------------------------------ */
+const nowIso = () => new Date().toISOString();
+
+/** Recalcula los conteos guardados en el trip (historial del operador) tras corregir paradas. */
+export async function recountTrip(tripId) {
+  const snap = await getDocs(collection(db, 'trips', tripId, 'stops'));
+  const stops = snap.docs.map((d) => d.data());
+  await updateDoc(doc(db, 'trips', tripId), {
+    studentsTotal: stops.length,
+    studentsAbsent: stops.filter((x) => x.status === 'absent').length,
+    studentsResolved: stops.filter((x) => x.status !== 'pending' && x.status !== 'absent').length,
+  });
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/** Cambia el pase de lista de un alumno: pending | boarded | delivered | absent. */
+export async function adminSetStopStatus(trip, stop, status, by = null) {
+  const patch = {
+    correctedByAdmin: true,
+    correctedAt: serverTimestamp(),
+    correctedByName: by?.name || null,
+    status,
+  };
+  const clear = (...keys) => keys.forEach((k) => { patch[k] = deleteField(); });
+  if (status === 'pending' || status === 'absent') {
+    clear('boardedAt', 'boardedLocation', 'boardedMethod', 'deliveredAt', 'deliveredLocation', 'deliveredMethod', 'arrivedAt');
+  } else if (status === 'boarded') {
+    patch.boardedAt = stop.boardedAt || serverTimestamp();
+    patch.boardedMethod = stop.boardedMethod || 'admin';
+    clear('deliveredAt', 'deliveredLocation', 'deliveredMethod');
+  } else if (status === 'delivered') {
+    patch.boardedAt = stop.boardedAt || serverTimestamp();
+    patch.deliveredAt = stop.deliveredAt || serverTimestamp();
+    patch.deliveredMethod = stop.deliveredMethod || 'admin';
+  }
+  await updateDoc(doc(db, 'trips', trip.id, 'stops', stop.id), patch);
+  await updateDoc(doc(db, 'trips', trip.id), {
+    correctedByAdmin: true,
+    correctionLog: arrayUnion({ at: nowIso(), by: by?.name || '', what: `${stop.name}: ${stop.status || 'pending'} → ${status}` }),
+  });
+  const stops = await recountTrip(trip.id);
+  await syncPublicTracking(trip, stops);
+  return stops;
+}
+
+/** Corrige el kilometraje inicial y/o final de un recorrido. */
+export async function adminUpdateTripKm(trip, { kmInicial, kmFinal }, by = null) {
+  const ini = Number(kmInicial);
+  if (!Number.isFinite(ini)) throw new Error('El kilometraje inicial no es válido.');
+  const patch = { kmInicial: ini, correctedByAdmin: true };
+  let fin = null;
+  if (kmFinal !== '' && kmFinal != null) {
+    fin = Number(kmFinal);
+    if (!Number.isFinite(fin)) throw new Error('El kilometraje final no es válido.');
+    if (fin < ini) throw new Error('El kilometraje final no puede ser menor al inicial.');
+    patch.kmFinal = fin;
+  }
+  patch.correctionLog = arrayUnion({
+    at: nowIso(), by: by?.name || '',
+    what: `km ${trip.kmInicial ?? '—'}/${trip.kmFinal ?? '—'} → ${ini}/${fin ?? '—'}`,
+  });
+  await updateDoc(doc(db, 'trips', trip.id), patch);
+  // Si este recorrido era el que dejó el «último km» de la unidad, se mantiene al día.
+  if (fin != null && trip.unitId) {
+    try {
+      const unit = await getOne('units', trip.unitId);
+      if (unit?.lastKmTripId === trip.id) await updateDoc(doc(db, 'units', trip.unitId), { lastKm: fin });
+    } catch (e) { console.error(e); }
+  }
+}
+
+/** Reabre un recorrido cerrado para que el operador pueda terminarlo bien. */
+export async function adminReopenTrip(trip, by = null) {
+  await updateDoc(doc(db, 'trips', trip.id), {
+    status: 'in_progress',
+    completedAt: deleteField(),
+    kmFinal: deleteField(),
+    kmFinalAt: deleteField(),
+    closedByAdmin: deleteField(),
+    closedByAdminAt: deleteField(),
+    reopenedByAdmin: true,
+    correctedByAdmin: true,
+    correctionLog: arrayUnion({ at: nowIso(), by: by?.name || '', what: 'Recorrido reabierto' }),
+  });
+  await setDoc(doc(db, 'publicTracking', trip.id), { status: 'in_progress' }, { merge: true });
+}
+
+/**
+ * Elimina un recorrido por completo (paradas, huella GPS, seguimiento público).
+ * Úsalo solo cuando el recorrido tiene información errónea; no se puede deshacer.
+ */
+export async function deleteTripCascade(trip) {
+  const remove = async (colPath) => {
+    const snap = await getDocs(collection(db, ...colPath));
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const batch = writeBatch(db);
+      snap.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+      // eslint-disable-next-line no-await-in-loop
+      await batch.commit();
+    }
+  };
+  await remove(['trips', trip.id, 'stops']);
+  await remove(['trips', trip.id, 'track']);
+  try { await deleteDoc(doc(db, 'publicTracking', trip.id)); } catch (e) { console.error(e); }
+  await deleteDoc(doc(db, 'trips', trip.id));
+  // Si dejó el «último km» de la unidad, regresa al odómetro con el que arrancó ese recorrido.
+  if (trip.unitId) {
+    try {
+      const unit = await getOne('units', trip.unitId);
+      if (unit?.lastKmTripId === trip.id && trip.kmInicial != null) {
+        await updateDoc(doc(db, 'units', trip.unitId), { lastKm: Number(trip.kmInicial), lastKmTripId: deleteField() });
+      }
+    } catch (e) { console.error(e); }
+  }
+}
+
+/** Revisión de alumnos quitados de un recorrido (pantalla del admin). */
+export async function listTripRemovals() {
+  const snap = await getDocs(query(collection(db, 'tripRemovals'), orderBy('removedAt', 'desc')));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+export async function reviewTripRemoval(id, resolution, by = null) {
+  await updateDoc(doc(db, 'tripRemovals', id), {
+    reviewed: true, resolution, reviewedAt: serverTimestamp(), reviewedByName: by?.name || null,
+  });
+}
+/** Devuelve al alumno a la lista de un recorrido que sigue en curso. */
+export async function restoreRemovedStop(removal, by = null) {
+  const trip = await getDoc(doc(db, 'trips', removal.tripId));
+  if (!trip.exists() || trip.data().status !== 'in_progress') {
+    throw new Error('El recorrido ya no está en curso: solo puedes marcar la revisión.');
+  }
+  const stops = await getDocs(collection(db, 'trips', removal.tripId, 'stops'));
+  await setDoc(doc(db, 'trips', removal.tripId, 'stops', removal.studentId), {
+    studentId: removal.studentId,
+    matricula: removal.matricula || '',
+    name: removal.name || '',
+    order: stops.size,
+    status: 'pending',
+    addedManually: true,
+    restoredByAdmin: true,
+    routeId: removal.routeId || null,
+    date: removal.date || null,
+    shift: removal.shift || null,
+  });
+  await reviewTripRemoval(removal.id, 'restaurado', by);
 }
