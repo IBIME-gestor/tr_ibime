@@ -16,11 +16,11 @@ import { setAuditActor } from '../firebase/audit';
  *
  *  1. Si su correo está en la colección `admins` -> se crea como admin.
  *  2. Si su correo coincide con el de algún documento en `drivers` -> se
- *     crea como chofer/nanny, enlazado a ese documento.
+ *     crea como operador/nanny, enlazado a ese documento.
  *  3. Si no coincide con nada -> no se le crea perfil y se cierra su sesión.
  *
  * Así el administrador NUNCA tiene que crear cuentas a mano: solo
- * registra el correo institucional del chofer en el panel, y la
+ * registra el correo institucional del operador en el panel, y la
  * primera vez que esa persona entra con Google, el sistema lo reconoce.
  */
 const AuthContext = createContext(null);
@@ -36,7 +36,7 @@ async function provisionProfile(firebaseUser) {
     return data;
   }
 
-  // 2) ¿Su correo coincide con algún chofer/nanny/cajero dado de alta?
+  // 2) ¿Su correo coincide con algún operador/nanny/cajero dado de alta?
   //    El campo `role` del documento en `drivers` (driver|nanny|cashier)
   //    es el que decide qué permisos recibe.
   const q = query(collection(db, 'drivers'), where('email', '==', email));

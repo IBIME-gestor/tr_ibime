@@ -31,7 +31,7 @@ import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActua
  *
  * publicTracking/{tripId}
  *    routeId, shift, date, status
- *    liveLocation { lat, lng, updatedAt }   // posición actual del camión
+ *    liveLocation { lat, lng, updatedAt }   // posición actual del transporte
  *    avgStopMinutes: [ ... ]                // minutos promedio históricos
  *                                            // entre parada y parada (misma
  *                                            // ruta/turno), copiados de
@@ -46,7 +46,7 @@ import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActua
  *    routeId, schoolId, driverId, nannyId, unitId, date ('YYYY-MM-DD'), shift ('morning'|'afternoon')
  *    status: 'in_progress' | 'completed'
  *    startedAt, completedAt
- *    kmInicial, kmInicialAt   // obligatorio para crear el recorrido (lo pide el chofer)
+ *    kmInicial, kmInicialAt   // obligatorio para crear el recorrido (lo pide el operador)
  *    kmFinal, kmFinalAt       // obligatorio para poder cerrarlo (Finalizar recorrido)
  *    startLocation, endLocation  // {lat,lng} donde se inició / donde se cerró (banderitas del mapa)
  *    bulkEventAt, bulkEventLocation   // el clic de "Llegamos al colegio" / "Todos abordaron"
@@ -59,7 +59,7 @@ import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActua
  *
  * En el turno de la MAÑANA:  boarded = se sube en su domicilio (manual, uno por uno)
  *                             delivered = llega al plantel (bulk, un botón para todos)
- * En el turno de la TARDE:   boarded = sube al camión en el plantel (bulk, un botón para todos)
+ * En el turno de la TARDE:   boarded = sube al transporte en el plantel (bulk, un botón para todos)
  *                             delivered = baja en su domicilio (manual, uno por uno)
  *
  * Además, en cualquier parada individual (domicilio): al llegar, el
@@ -71,9 +71,9 @@ import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActua
 /** Segundos de espera tras marcar "Llegué" antes de que la app sugiera continuar. */
 export const ARRIVAL_WAIT_SECONDS = 120;
 
-/** Cada cuánto se publica la ubicación del camión (operador → admin y padres). */
+/** Cada cuánto se publica la ubicación del transporte (operador → admin y padres). */
 export const LIVE_LOCATION_INTERVAL_MS = 5000;
-// Para ahorrar escrituras: solo se publica si el camión se movió al menos
+// Para ahorrar escrituras: solo se publica si el transporte se movió al menos
 // esta distancia desde la última posición publicada...
 export const LIVE_LOCATION_MIN_MOVE_M = 15;
 // ...pero si lleva parado, se manda una señal de vida cada tanto para que
@@ -192,7 +192,7 @@ function baseStudentApplies(student, dateStr, shift) {
 /**
  * Se suscribe en tiempo real al recorrido de HOY para una ruta/turno,
  * exista o no todavía. Así, si una nanny abre la pantalla antes que el
- * chofer, ve en vivo el momento en que el chofer registra su kilometraje
+ * operador, ve en vivo el momento en que el operador registra su kilometraje
  * inicial y arranca el recorrido, sin tener que refrescar.
  */
 /* ------------------------------------------------------------------ */
@@ -270,10 +270,10 @@ export function subscribeTodayTrip(routeId, shift, callback, onError) {
 }
 
 /**
- * Arranca formalmente el recorrido de hoy. SOLO el chofer puede llamarla
+ * Arranca formalmente el recorrido de hoy. SOLO el operador puede llamarla
  * (así lo exigen las reglas de Firestore), y requiere el kilometraje
  * inicial del vehículo: sin este dato no se crea el recorrido ni,
- * por lo tanto, aparece la lista de alumnos para nadie (ni chofer ni
+ * por lo tanto, aparece la lista de alumnos para nadie (ni operador ni
  * nanny), que es justo el candado que se pidió.
  */
 export const KM_GAP_ALERT = 100; // km sin registrar entre dos recorridos de la misma unidad
@@ -433,7 +433,7 @@ export async function listActiveTrips() {
  * A diferencia de listActiveTrips (consulta puntual), esta SÍ es un
  * listener en vivo (onSnapshot) — a propósito: es para el mapa de flota
  * en tiempo real del admin, donde el punto es ver la posición de los
- * camiones actualizarse sola. El número de recorridos "en_progress" al
+ * transportes actualizarse sola. El número de recorridos "en_progress" al
  * mismo tiempo es chico (uno por ruta activa), así que el costo de
  * lecturas es marginal comparado con listas grandes como Alumnos.
  */
@@ -456,7 +456,7 @@ export async function getTrip(tripId) {
 
 /**
  * Guarda en el propio expediente del alumno (students/{id}) la última
- * ubicación en la que se le entregó (bajó del camión). Así, el panel de
+ * ubicación en la que se le entregó (bajó del transporte). Así, el panel de
  * Alumnos puede mostrar "última ubicación de entrega" con un solo campo
  * en el propio documento, sin tener que hacer consultas cruzadas contra
  * todos los recorridos históricos. Solo se llama cuando field === 'delivered'
@@ -474,7 +474,7 @@ async function saveLastDeliveredLocationOnStudent(studentId, location, tripId) {
 
 /**
  * Marca a UN alumno como abordado (mañana: lo recogieron en su domicilio)
- * o como entregado (tarde: bajó del camión), guardando hora + ubicación.
+ * o como entregado (tarde: bajó del transporte), guardando hora + ubicación.
  */
 export async function markStopManual(tripId, studentId, field, location) {
   const stopRef = doc(db, 'trips', tripId, 'stops', studentId);
@@ -683,7 +683,7 @@ export async function updateLiveLocation(tripId, location) {
 
 /**
  * Reescribe el resumen público de paradas (matrícula, nombre, orden,
- * estado) cada vez que el chofer marca a un alumno. Se manda solo lo
+ * estado) cada vez que el operador marca a un alumno. Se manda solo lo
  * indispensable para el mapa del padre — nunca el documento completo
  * del alumno ni datos de otras rutas.
  */
@@ -724,7 +724,7 @@ export async function syncPublicTracking(trip, stops) {
       : route?.avgStopMinutesAfternoon) || [];
 
   // Puntos que se pueden mostrar sin riesgo en la vista pública: donde
-  // arrancó el camión y, en la ida, el plantel (destino). El destino de la
+  // arrancó el transporte y, en la ida, el plantel (destino). El destino de la
   // vuelta es el domicilio de un alumno, así que NO se publica.
   const schoolLoc = school?.geocodedLocation;
   const destination =
@@ -777,7 +777,7 @@ async function updateAvgStopMinutes(trip, stops, savedOrder) {
     const minutes = (curMs - prevMs) / 60000;
     const position = positionOf.get(finished[i].studentId);
     if (position != null && minutes > 0 && minutes < 60) {
-      // ignora saltos absurdos (ej. chofer corrigió una hora a mano)
+      // ignora saltos absurdos (ej. operador corrigió una hora a mano)
       deltasByOrder[position] = minutes;
     }
   }
@@ -808,7 +808,7 @@ async function updateAvgStopMinutes(trip, stops, savedOrder) {
 
 /**
  * Cierra el recorrido y guarda el orden real en la ruta para que
- * mañana la lista del chofer ya venga pre-ordenada. Requiere el
+ * mañana la lista del operador ya venga pre-ordenada. Requiere el
  * kilometraje final: sin él no se marca como completado ni se genera
  * el mapa final del recorrido (Reportes) para ese día.
  */
@@ -844,7 +844,7 @@ export async function completeTrip(tripId, trip, kmFinal, closedByAdmin = false,
     studentsResolved: stops.filter((s) => s.status !== 'pending' && s.status !== 'absent').length,
     // Si lo cerró el admin (operador se quedó sin datos, etc.) queda
     // marcado para que quede claro en reportes que no lo cerró el propio
-    // operador desde el camión.
+    // operador desde el transporte.
     ...(closedByAdmin ? { closedByAdmin: true, closedByAdminAt: serverTimestamp() } : {}),
   });
   await setDoc(
@@ -881,7 +881,7 @@ export const TRIP_ALERT_TYPES = {
 };
 
 /**
- * El chofer o la nanny publican un aviso corto para que los padres lo vean
+ * El operador o la nanny publican un aviso corto para que los padres lo vean
  * de inmediato en /seguimiento (por ejemplo "tráfico pesado en la avenida,
  * vamos ~15 min tarde"). Se guarda en el trip y se refleja en el espejo
  * público.
@@ -1022,10 +1022,10 @@ export async function listTripsByRouteBetween(routeId, startDate, endDate) {
 
 /* ------------------------------------------------------------------ */
 /*  Huella GPS del recorrido (trips/{tripId}/track/{chunk})            */
-/*  Guarda POR DÓNDE pasó el camión para medir distancia y comparar    */
+/*  Guarda POR DÓNDE pasó el transporte para medir distancia y comparar    */
 /*  semanas. Es independiente de liveLocation (que solo guarda el      */
 /*  último punto). Para gastar poco: se anota un punto solo si el      */
-/*  camión avanzó ≥ TRACK_MIN_MOVE_M y se sube en lotes.               */
+/*  transporte avanzó ≥ TRACK_MIN_MOVE_M y se sube en lotes.               */
 /* ------------------------------------------------------------------ */
 export const TRACK_MIN_MOVE_M = 12;
 export const TRACK_MAX_ACCURACY_M = 60;

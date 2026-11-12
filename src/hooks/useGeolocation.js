@@ -17,14 +17,14 @@ export function getCurrentLocation(options = {}) {
           accuracy: pos.coords.accuracy,
         });
       },
-      () => resolve(null), // si el chofer niega el permiso, seguimos sin bloquear el flujo
+      () => resolve(null), // si el operador niega el permiso, seguimos sin bloquear el flujo
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0, ...options }
     );
   });
 }
 
 /**
- * Sigue la posición del chofer en segundo plano MIENTRAS el recorrido está
+ * Sigue la posición del operador en segundo plano MIENTRAS el recorrido está
  * activo (para el mapa en vivo del padre de familia). A diferencia de
  * getCurrentLocation, este SÍ corre de forma continua con watchPosition,
  * pero el llamador debe throttlear cada cuánto se escribe a Firestore

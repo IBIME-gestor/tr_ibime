@@ -125,8 +125,8 @@ const SHIFT_CONFIG = {
     title: 'Recorrido de vuelta',
     boardedBulk: true,
     deliveredBulk: false,
-    bulkBoardLabel: '🚌  Todos abordaron el camión',
-    bulkBoardConfirm: '¿Confirmas que ya subieron todos al camión? Se registrará la hora para todos.',
+    bulkBoardLabel: '🚌  Todos abordaron el transporte',
+    bulkBoardConfirm: '¿Confirmas que ya subieron todos al transporte? Se registrará la hora para todos.',
     boardPhaseTitle: 'Alumnos a bordo',
     deliverAction: 'Bajó',
     deliverPhaseTitle: 'Ve marcando a cada alumno al bajarlo',
@@ -277,7 +277,7 @@ export default function TripRunner() {
     syncPublicTracking({ id: t.id, ...t }, stops);
   }, [trip?.id, trip?.routeId, trip?.shift, trip?.date, trip?.status, trip?.startLocation?.lat, trip?.startLocation?.lng, stops]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Ubicación en vivo del camión mientras el recorrido está en curso
+  // Ubicación en vivo del transporte mientras el recorrido está en curso
   // (solo el operador la transmite; la nanny no necesita duplicarla).
   useEffect(() => {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
@@ -301,7 +301,7 @@ export default function TripRunner() {
       if (!lastSent) publish(location);
     }, { onError: () => setGpsError(true) });
     // Cada 5 s se revisa la ÚLTIMA lectura del GPS (así no se pierde si llega entre
-    // intervalos), pero solo se publica si el camión se movió ≥ 15 m o si lleva
+    // intervalos), pero solo se publica si el transporte se movió ≥ 15 m o si lleva
     // 30 s sin publicar (señal de vida). Parado en un semáforo o en una parada
     // no se escribe nada de más.
     const timer = setInterval(() => {
@@ -319,7 +319,7 @@ export default function TripRunner() {
   }, [isDriver, trip?.id, trip?.status]);
 
   // Pantalla encendida mientras el recorrido está en curso: si se apaga o se
-  // sale de la app, el navegador corta el GPS y el camión "desaparece" para
+  // sale de la app, el navegador corta el GPS y el transporte "desaparece" para
   // el admin y para los padres.
   const trackingActive = isDriver && trip?.status === 'in_progress';
   const wakeLock = useWakeLock(trackingActive);
@@ -801,7 +801,7 @@ export default function TripRunner() {
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 flex items-start justify-between gap-3">
               <span>
                 <b>Tu ubicación se pausó unos {signalGap.minutes} min</b> porque la pantalla se apagó o saliste de la
-                app. Ya se reanudó; durante ese tiempo el admin y los padres no vieron el camión.
+                app. Ya se reanudó; durante ese tiempo el admin y los padres no vieron el transporte.
               </span>
               <button type="button" onClick={() => setSignalGap(null)} className="shrink-0 text-xs font-semibold underline">
                 Entendido

@@ -1,5 +1,5 @@
 /**
- * Pequeños detalles de calidez para el operador (chofer/nanny): un saludo
+ * Pequeños detalles de calidez para el operador (operador/nanny): un saludo
  * según la hora real del día al entrar, y una despedida acorde al turno
  * que acaba de terminar. La idea es que la app se sienta humana, no solo
  * funcional.
@@ -20,7 +20,7 @@ export function getFirstName(fullName) {
 
 /**
  * Despedida al cerrar el recorrido: por turno, no por hora del reloj
- * (un chofer podría cerrar su vuelta un poco después de la hora "normal"
+ * (un operador podría cerrar su vuelta un poco después de la hora "normal"
  * y el mensaje debe seguir correspondiendo a que ya volvió a casa).
  */
 export function getFarewellMessage(shift) {

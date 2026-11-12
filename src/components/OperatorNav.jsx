@@ -54,7 +54,7 @@ export default function OperatorNav({ items }) {
     'absolute top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full flex items-center justify-center text-white shadow-panel transition-opacity duration-200 motion-reduce:transition-none';
 
   return (
-    <div className="relative mx-4 mb-3 rounded-full bg-navy-50 p-1.5">
+    <div className="relative mx-4 mb-3 rounded-full bg-navy-50 px-1.5 py-3">
       <button
         type="button"
         onClick={() => scrollBy(-1)}
@@ -69,7 +69,7 @@ export default function OperatorNav({ items }) {
         ref={scrollerRef}
         onScroll={updateArrows}
         aria-label="Módulos del operador"
-        className="flex items-center gap-2 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex items-center gap-2 overflow-x-auto px-1 py-1.5 -my-1.5 scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {items.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink
@@ -108,7 +108,7 @@ export default function OperatorNav({ items }) {
                 </span>
 
                 {badge > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-navy-50">
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-navy-50">
                     {badge}
                   </span>
                 )}

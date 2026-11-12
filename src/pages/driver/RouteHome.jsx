@@ -199,7 +199,7 @@ function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
  * Tarjeta completa de UNA ruta asignada al operador: sus dos turnos con
  * estado real, la vista previa de la ruta de hoy (lista + mapa) y su
  * actividad reciente. La mayoría de los operadores solo tiene una ruta,
- * pero se soporta más de una (choferes que cubren dos unidades, etc.).
+ * pero se soporta más de una (operadores que cubren dos unidades, etc.).
  */
 function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, index }) {
   const [rosterAll, setRosterAll] = useState([]);
@@ -588,7 +588,7 @@ export default function RouteHome() {
             </h1>
             <p className="text-navy-300 text-xs mt-0.5">
               {routes.length} ruta{routes.length === 1 ? '' : 's'} asignada{routes.length === 1 ? '' : 's'} ·{' '}
-              {profile?.role === 'nanny' ? 'Nanny' : 'Chofer'}
+              {profile?.role === 'nanny' ? 'Nanny' : 'Operador'}
             </p>
           </div>
           <p className="text-navy-300 text-xs font-display tabular-nums text-right shrink-0 pt-0.5">

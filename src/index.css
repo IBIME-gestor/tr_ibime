@@ -48,7 +48,7 @@ h1, h2, h3 {
 /* ------------------------------------------------------------------ */
 /* Panel administrativo: densidad compacta, pensado para escritorio    */
 /* pero responsivo. Deliberadamente MÁS COMPACTO que los .btn-huge/    */
-/* .card de arriba, que son para la app del chofer en el celular.      */
+/* .card de arriba, que son para la app del operador en el celular.      */
 /*                                                                      */
 /* Lenguaje visual: "bitácora de despacho" — bordes finos tipo         */
 /* ticket/manifiesto en vez de sombra difusa gris de tarjeta de SaaS;  */
@@ -336,7 +336,7 @@ main { scrollbar-width: thin; scrollbar-color: #d5dce8 transparent; }
 }
 
 /* ------------------------------------------------------------------ */
-/* Camioncito del mapa: anillo suave que late alrededor del camión     */
+/* Camioncito del mapa: anillo suave que late alrededor del transporte     */
 /* mientras el recorrido está en curso.                                */
 /* ------------------------------------------------------------------ */
 .bus-marker {

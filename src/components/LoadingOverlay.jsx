@@ -1,6 +1,6 @@
 /**
  * Overlay de carga con el escudo de IBIME "rellenándose" de color.
- * Se usa en toda la app (admin, chofer/nanny, y la pantalla del padre)
+ * Se usa en toda la app (admin, operador/nanny, y la pantalla del padre)
  * para cualquier carga que bloquee la pantalla un momento.
  *
  * Uso:

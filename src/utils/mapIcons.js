@@ -103,7 +103,7 @@ const SHADOW = 'filter:drop-shadow(0 2px 3px rgba(14,22,38,.4));';
 
 /**
  * Camioncito escolar para el mapa del padre de familia y la flota en vivo
- * — de un vistazo se entiende que es el camión, no un lugar.
+ * — de un vistazo se entiende que es el transporte, no un lugar.
  */
 export function busIcon() {
   return L.divIcon({

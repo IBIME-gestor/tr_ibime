@@ -90,7 +90,7 @@ const defaultShift = () => (new Date().getHours() < 12 ? 'morning' : 'afternoon'
 /* ------------------------------------------------------------------ */
 
 /**
- * El camión se mueve entre lecturas del GPS (cada ~5 s) deslizando el
+ * El transporte se mueve entre lecturas del GPS (cada ~5 s) deslizando el
  * marcador de Leaflet directamente — sin pasar por el estado de React, que
  * volvería a pintar toda la página en cada cuadro de la animación.
  */
@@ -151,13 +151,13 @@ function AnimatedBus({ position, at, follow }) {
   );
 }
 
-/** Si la persona mueve el mapa con el dedo, dejamos de seguir al camión. */
+/** Si la persona mueve el mapa con el dedo, dejamos de seguir al transporte. */
 function StopFollowOnDrag({ onDrag }) {
   useMapEvents({ dragstart: onDrag });
   return null;
 }
 
-/** Encuadra el camión y las banderas la primera vez que hay datos. */
+/** Encuadra el transporte y las banderas la primera vez que hay datos. */
 function FitOnce({ points }) {
   const map = useMap();
   const done = useRef(false);
@@ -357,7 +357,7 @@ export default function PublicTrack() {
     ? sortedStops.slice(0, myIndex).filter((s) => !isResolved(s) && s.status !== 'absent').length
     : 0;
 
-  // Posición del camión sobre la línea (0 = salida, 1 = meta).
+  // Posición del transporte sobre la línea (0 = salida, 1 = meta).
   const busX = (() => {
     if (!total) return 0;
     if (completed) return 1;
@@ -422,7 +422,7 @@ export default function PublicTrack() {
         tone: 'idle',
         pill: 'Aún no sale',
         headline: `El recorrido de ${shiftName} todavía no inicia`,
-        sub: 'No necesitas recargar: esta pantalla se actualiza sola en cuanto el camión salga.',
+        sub: 'No necesitas recargar: esta pantalla se actualiza sola en cuanto el transporte salga.',
       };
     }
     if (!myStop) {
@@ -437,7 +437,7 @@ export default function PublicTrack() {
       return {
         tone: 'idle',
         pill: 'No abordó',
-        headline: `Hoy ${childName} no abordó el camión`,
+        headline: `Hoy ${childName} no abordó el transporte`,
         sub: 'El operador lo marcó como ausente. Si crees que es un error, comunícate con el plantel.',
       };
     }
@@ -456,7 +456,7 @@ export default function PublicTrack() {
         tone: 'done',
         pill: 'En el plantel',
         headline: `${childName} ya llegó al plantel`,
-        sub: at ? `Llegaron a las ${fmtClock(at)}.` : 'El camión ya llegó al plantel.',
+        sub: at ? `Llegaron a las ${fmtClock(at)}.` : 'El transporte ya llegó al plantel.',
       };
     }
     if (shift === 'morning' && myStop.status === 'boarded') {
@@ -464,8 +464,8 @@ export default function PublicTrack() {
       return {
         tone: 'go',
         pill: 'A bordo',
-        headline: `${childName} ya va en el camión`,
-        sub: `${at ? `Subió a las ${fmtClock(at)}. ` : ''}El camión sigue su recorrido rumbo al plantel.`,
+        headline: `${childName} ya va en el transporte`,
+        sub: `${at ? `Subió a las ${fmtClock(at)}. ` : ''}El transporte sigue su recorrido rumbo al plantel.`,
       };
     }
     if (waitingForMe) {
@@ -475,11 +475,11 @@ export default function PublicTrack() {
         headline:
           shift === 'morning'
             ? arrivalTimeUp
-              ? 'El camión ya no puede esperar más'
-              : '¡El camión ya llegó a tu parada!'
+              ? 'El transporte ya no puede esperar más'
+              : '¡El transporte ya llegó a tu parada!'
             : arrivalTimeUp
-            ? 'El camión ya no puede esperar más'
-            : '¡El camión ya llegó a tu casa!',
+            ? 'El transporte ya no puede esperar más'
+            : '¡El transporte ya llegó a tu casa!',
         sub: arrivalTimeUp
           ? 'Va a continuar para no atrasar a los demás alumnos.'
           : shift === 'morning'
@@ -506,7 +506,7 @@ export default function PublicTrack() {
       tone: 'go',
       pill: 'En camino',
       headline: 'Debe llegar en cualquier momento',
-      sub: `${beforeText} Es un estimado: el camión puede traer un poco de retraso.`,
+      sub: `${beforeText} Es un estimado: el transporte puede traer un poco de retraso.`,
     };
   })();
 
@@ -583,7 +583,7 @@ export default function PublicTrack() {
               </button>
             )}
             <div>
-              <h1 className="font-display font-bold text-lg text-navy-900">¿Dónde va el camión?</h1>
+              <h1 className="font-display font-bold text-lg text-navy-900">¿Dónde va el transporte?</h1>
               <p className="text-sm text-navy-400 mt-0.5">
                 Escribe la matrícula de tu hijo(a) para ver su recorrido en vivo.
               </p>
@@ -691,7 +691,7 @@ export default function PublicTrack() {
                   {completed
                     ? 'El recorrido ya terminó.'
                     : lastDoneIdx < 0
-                    ? `${total} paradas en este recorrido. El camión aún no atiende la primera.`
+                    ? `${total} paradas en este recorrido. El transporte aún no atiende la primera.`
                     : `${sortedStops.filter(isResolved).length} de ${total} paradas atendidas.`}
                 </p>
               )}
@@ -751,7 +751,7 @@ export default function PublicTrack() {
                         }}
                         className="absolute bottom-3 right-3 z-[1000] rounded-full bg-navy-800 text-white shadow px-3.5 py-2 text-xs font-semibold flex items-center gap-1.5"
                       >
-                        <Navigation size={13} /> Seguir al camión
+                        <Navigation size={13} /> Seguir al transporte
                       </button>
                     )}
                   </div>
@@ -761,14 +761,14 @@ export default function PublicTrack() {
                       className="inline-block opacity-60"
                       dangerouslySetInnerHTML={{ __html: busSvg(64) }}
                     />
-                    <p className="text-sm text-navy-600 mt-2">El camión todavía no comparte su ubicación.</p>
+                    <p className="text-sm text-navy-600 mt-2">El transporte todavía no comparte su ubicación.</p>
                     <p className="text-xs text-navy-400 mt-0.5">En cuanto la comparta, lo verás moverse aquí.</p>
                   </div>
                 )}
 
                 {liveIsStale && !completed && (
                   <p className="text-xs text-navy-600 bg-white border border-navy-100 rounded-xl px-3 py-2 mt-2">
-                    El camión no ha enviado su ubicación desde las {fmtClock(liveMs)} (hace {Math.round((now - liveMs) / 60000)} min).
+                    El transporte no ha enviado su ubicación desde las {fmtClock(liveMs)} (hace {Math.round((now - liveMs) / 60000)} min).
                     Puede ser una zona sin señal o que el teléfono del operador esté con la pantalla apagada; el
                     mapa se actualiza solo cuando regrese. Lo último registrado de {childName || 'tu hijo(a)'} es lo
                     que ves arriba.

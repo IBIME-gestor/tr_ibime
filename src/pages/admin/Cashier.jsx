@@ -679,7 +679,7 @@ export default function Cashier() {
         <div className="cascade-item">
           <p className="text-sm text-navy-400 mb-4">
             Cruza qué alumnos tomaron el servicio ese día contra su estatus de pago — útil para
-            detectar a alguien que subió al camión sin estar al corriente.
+            detectar a alguien que subió al transporte sin estar al corriente.
           </p>
           <div className="flex flex-wrap items-end gap-3 mb-4">
             <div>

@@ -102,7 +102,7 @@ export const Units = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Choferes / nannies (drivers)                                       */
+/*  Operadores / nannies (drivers)                                       */
 /* ------------------------------------------------------------------ */
 export const Drivers = {
   list: () => listAll('drivers', [orderBy('name')]),
@@ -310,7 +310,7 @@ export const Students = {
   },
 
   /**
-   * Búsqueda por matrícula exacta. Se usa cuando el chofer digita
+   * Búsqueda por matrícula exacta. Se usa cuando el operador digita
    * la matrícula del alumno el primer día (antes de tener orden de ruta).
    */
   async findByMatricula(matricula) {
@@ -465,7 +465,7 @@ export const RouteLists = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Rutas (routes) — asigna chofer + nanny + unidad + plantel + turno   */
+/*  Rutas (routes) — asigna operador + nanny + unidad + plantel + turno   */
 /* ------------------------------------------------------------------ */
 export const FinanceRecords = {
   /**

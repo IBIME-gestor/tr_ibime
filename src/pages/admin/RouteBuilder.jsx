@@ -1064,7 +1064,7 @@ export default function RouteBuilder() {
               </div>
             )}
           </div>
-          <select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador / chofer…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
+          <select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
         </div>
       </div>
 

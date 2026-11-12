@@ -7,7 +7,7 @@ export default function Login() {
   const { loginWithGoogle, authError, loading, user, profile } = useAuth();
   const navigate = useNavigate();
 
-  // En cuanto haya sesión + perfil (admin o chofer), redirige solo.
+  // En cuanto haya sesión + perfil (admin o operador), redirige solo.
   useEffect(() => {
     if (user && profile) {
       navigate(profile.role === 'driver' || profile.role === 'nanny' ? '/chofer' : '/admin', { replace: true });

@@ -34,7 +34,7 @@ function fmtTime(ts) {
  *
  * A propósito solo reacciona cuando ENTRA o SALE un operador (la key es
  * la lista de ids, no las coordenadas) — si reencuadrara en cada
- * actualización de posición (cada ~5 s por camión), sería molesto estar
+ * actualización de posición (cada ~5 s por transporte), sería molesto estar
  * "regresando" el mapa mientras el admin lo está viendo o moviendo.
  */
 function FitBounds({ points }) {
@@ -142,7 +142,7 @@ export default function FleetLive() {
       <div>
         <h1 className="admin-h1 mb-1">Flota en vivo</h1>
         <p className="text-sm text-navy-500">
-          Dónde va cada camión <b>hoy</b>. Se actualiza sola, no hace falta refrescar.
+          Dónde va cada transporte <b>hoy</b>. Se actualiza sola, no hace falta refrescar.
         </p>
       </div>
 
@@ -158,7 +158,7 @@ export default function FleetLive() {
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 space-y-2">
           <p className="flex items-center gap-2 font-semibold">
             <AlertTriangle size={18} className="shrink-0" />
-            {lostTrips.length === 1 ? '1 camión sin señal' : `${lostTrips.length} camiones sin señal`}: llama al operador para confirmar
+            {lostTrips.length === 1 ? '1 transporte sin señal' : `${lostTrips.length} transportes sin señal`}: llama al operador para confirmar
           </p>
           <ul className="space-y-1.5">
             {lostTrips.map(({ trip, since }) => {
@@ -270,7 +270,7 @@ export default function FleetLive() {
           </MapContainer>
           {todayTrips.length > 0 && withLocation.length === 0 && (
             <div className="absolute inset-x-0 top-3 mx-auto w-fit z-[500] rounded-full bg-white/95 shadow px-4 py-1.5 text-xs text-navy-600">
-              Esperando la primera ubicación de los camiones…
+              Esperando la primera ubicación de los transportes…
             </div>
           )}
         </div>

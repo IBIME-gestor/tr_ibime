@@ -10,7 +10,7 @@ import { numberedIcon } from '../../utils/mapIcons';
 
 /**
  * Recorrido real (GPS) · solo admin
- * Dibuja por dónde pasó el camión en cada recorrido de la semana, mide la
+ * Dibuja por dónde pasó el transporte en cada recorrido de la semana, mide la
  * distancia y el tiempo y compara contra la semana anterior y entre días,
  * para juzgar si la ruta es eficiente. Usa la huella que el operador guarda
  * durante el recorrido (trips/{id}/track).
@@ -144,7 +144,7 @@ export default function RecorridoReal() {
       <div>
         <h1 className="font-display text-2xl font-bold text-navy-900 flex items-center gap-2"><RouteIcon size={22} /> Recorrido real (GPS)</h1>
         <p className="text-sm text-navy-500 mt-1 max-w-3xl">
-          Por dónde pasó el camión en cada recorrido, con distancia y tiempo, para comparar días y semanas. La huella se graba solo mientras el operador
+          Por dónde pasó el transporte en cada recorrido, con distancia y tiempo, para comparar días y semanas. La huella se graba solo mientras el operador
           tiene el recorrido abierto y la pantalla encendida; los recorridos anteriores a esta función no tienen huella.
         </p>
       </div>

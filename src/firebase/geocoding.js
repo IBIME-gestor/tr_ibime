@@ -57,7 +57,7 @@ export async function geocodeAddress(address) {
  * Resuelve la mejor ubicación disponible para un alumno, en este orden
  * de preferencia:
  *   1. Ubicación real ya capturada en un recorrido anterior (la más
- *      confiable: es donde el chofer realmente lo subió/bajó).
+ *      confiable: es donde el operador realmente lo subió/bajó).
  *   2. Ubicación geocodificada y cacheada previamente en el alumno.
  *   3. Geocodificar su dirección de texto ahora mismo (y cachearla).
  */
