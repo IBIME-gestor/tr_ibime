@@ -49,7 +49,7 @@ import OperatorRouteView from './pages/admin/OperatorRouteView';
 import ErroresUsuarios from './pages/admin/soporte/ErroresUsuarios';
 import BitacoraCambios from './pages/admin/soporte/BitacoraCambios';
 import EditorAlumnos from './pages/admin/soporte/EditorAlumnos';
-import VincularOperador from './pages/admin/soporte/VincularOperador';
+import DiagnosticoOperador from './pages/admin/soporte/DiagnosticoOperador';
 
 import RouteHome from './pages/driver/RouteHome';
 import TripRunner from './pages/driver/TripRunner';
@@ -114,7 +114,7 @@ export default function App() {
         <Route path="soporte/errores" element={<ErroresUsuarios />} />
         <Route path="soporte/bitacora" element={<BitacoraCambios />} />
         <Route path="soporte/alumnos" element={<EditorAlumnos />} />
-        <Route path="soporte/operador" element={<VincularOperador />} />
+        <Route path="soporte/operador" element={<DiagnosticoOperador />} />
       </Route>
 
       <Route
