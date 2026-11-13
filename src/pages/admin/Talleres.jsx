@@ -9,12 +9,12 @@ import { tallerDatesFor } from '../../firebase/trips';
  * unidad/zona es una ruta con su propia lista, operador y tarifa) y los días de
  * la semana en que van.
  *
- *  · Si ese día habría salido en su ruta normal → SOLO se mueve su salida al
- *    taller: ya no aparece en la lista de salida normal del operador y no se
- *    cobra nada extra (sigue contando en lo que ya paga).
- *  · Si ese día NO habría salido (media entrada, diario solo de entrada, o sin
- *    ruta normal) → el taller es un viaje adicional que se cobra como viaje por
- *    día, en la lista de la ruta de taller (se genera en «Listas de alumnos»).
+ *  · Si tiene registro en una ruta normal (completo, medio o diario) → SOLO se
+ *    mueve su salida al taller: ya no aparece en la salida normal del operador,
+ *    se cuenta en el taller y no cambia lo que paga.
+ *  · Si NO tiene registro en ruta normal (solo taller) → el taller es un viaje
+ *    que se cobra por día, en la lista de la ruta de taller (se genera en
+ *    «Listas de alumnos»).
  */
 
 const DAYS = [
@@ -113,8 +113,8 @@ export default function Talleres() {
         <div>
           <h1 className="admin-h1 mb-1 flex items-center gap-2"><GraduationCap size={22} /> Talleres (salida 17:30)</h1>
           <p className="text-sm text-navy-400 max-w-3xl">
-            Asigna alumnos a una ruta de taller y los días que van. Si ese día ya salían en su ruta normal, solo se mueve su salida (sin cobro extra);
-            si no, el taller se cobra como viaje por día en la lista de la ruta de taller.
+            Asigna alumnos a una ruta de taller y los días que van. Si ya tienen registro en una ruta normal (completo o medio), solo se mueve su salida (sin cobro extra);
+            si no tienen registro, el taller se cobra como viaje por día en la lista de la ruta de taller.
           </p>
         </div>
         <button type="button" className="btn-admin-ghost" onClick={load} disabled={loading}><RefreshCw size={14} className="inline mr-1" />Actualizar</button>

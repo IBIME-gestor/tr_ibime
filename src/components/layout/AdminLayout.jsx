@@ -13,6 +13,7 @@ import {
   Wallet,
   ClipboardList,
   UserCog,
+  RefreshCw,
   ListOrdered,
   CircleDollarSign,
   Landmark,
@@ -128,6 +129,7 @@ const groups = [
       { to: '/admin/soporte/bitacora', label: 'Bitácora de cambios', icon: ScrollText, roles: ['admin'] },
       { to: '/admin/soporte/alumnos', label: 'Editor de alumnos', icon: Pencil, roles: ['admin'] },
       { to: '/admin/soporte/operador', label: 'Diagnóstico de operador', icon: UserCog, roles: ['admin'] },
+      { to: '/admin/soporte/sincronizar', label: 'Sincronizar operador con lista', icon: RefreshCw, roles: ['admin'] },
     ],
   },
 ];

@@ -470,8 +470,52 @@ export default function RouteBuilder() {
     setAddForm({ ...addForm, fechasDiarias });
   }
 
+  // Lista de una RUTA DE TALLER: el alumno conserva su ruta normal. Solo se le
+  // asigna el taller (tallerRouteId + días), igual que en el módulo «Talleres».
+  async function saveTallerStudentToRoster() {
+    const days = addForm.tipoServicio === 'medio' && addForm.diasSemana.length
+      ? addForm.diasSemana.map(Number).filter((d) => d >= 1 && d <= 5)
+      : (lookupStudent.tallerRouteId === route.id && lookupStudent.tallerDias?.length
+        ? lookupStudent.tallerDias.map(Number) : [1, 2, 3, 4, 5]);
+    const data = { tallerRouteId: route.id, tallerDias: days };
+    setSaving(true);
+    try {
+      await Students.update(lookupStudent.id, data);
+      const refreshed = { ...lookupStudent, ...data };
+      setAllStudents((prev) => prev.map((s) => (s.id === refreshed.id ? refreshed : s)));
+      if (currentList && currentList.routeId === route.id) {
+        const built = buildTallerRow(refreshed, currentList.dates || dates, concepts, route);
+        const previousRow = (currentList.rows || []).find((x) => x.studentId === refreshed.id);
+        const others = (currentList.rows || []).filter((x) => x.studentId !== refreshed.id);
+        const rows = built
+          ? [...others, { ...built, paid: !!previousRow?.paid, paymentId: previousRow?.paymentId || '' }].sort(priorityCompare)
+          : others;
+        const reviewReset = invalidateListReviewPatch();
+        await RouteLists.update(currentList.id, { rows, ...reviewReset });
+        if (built) {
+          const financeId = `${currentList.id}_${refreshed.id}`;
+          const existingFinance = await FinanceRecords.get(financeId);
+          await FinanceRecords.upsert(financeId, financePayload(built, currentList, route, school, existingFinance || {}));
+        }
+        const updated = { ...currentList, rows, ...reviewReset };
+        setCurrentList(updated);
+        setLists((prev) => prev.map((x) => (x.id === currentList.id ? updated : x)));
+        if (!built) {
+          window.alert(`${lookupStudent.name} ya tiene registro en una ruta normal: su salida de las 17:30 se movió al taller y NO genera cobro extra, por eso no lleva fila en esta lista. Ya aparece en el módulo Talleres y en el viaje del operador de taller.`);
+        }
+      }
+      resetAddFlow();
+    } catch (err) {
+      console.error(err);
+      setLookupError(err?.message || 'No se pudo guardar el alumno.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveStudentToRoster() {
     if (!lookupStudent || !route) return;
+    if (route.kind === 'taller') { await saveTallerStudentToRoster(); return; }
     if (addForm.tipoServicio === 'medio' && !addForm.diasSemana.length) {
       window.alert('Selecciona al menos un día de lunes a viernes.');
       return;
@@ -856,6 +900,23 @@ export default function RouteBuilder() {
   async function removeRow(row) {
     if (!window.confirm(`¿Quitar a ${row.name} de esta lista? El alumno no se elimina.`)) return;
     await updateRows((currentList.rows || []).filter((x) => x.studentId !== row.studentId));
+
+    // La lista de cobro y la lista que ve el operador son distintas: la del
+    // operador sale de la ruta/taller que tiene guardado el alumno. Si no se
+    // actualiza también, el alumno sigue apareciendo en sus viajes.
+    const student = allStudents.find((x) => x.id === row.studentId);
+    const listRoute = routes.find((r) => r.id === currentList.routeId);
+    if (!student || !listRoute) return;
+    const isTaller = listRoute.kind === 'taller';
+    const linked = isTaller ? student.tallerRouteId === listRoute.id : student.routeId === listRoute.id;
+    if (!linked) return;
+    const alsoOperator = window.confirm(
+      `¿Quitarlo también de la lista del operador?\n\nAceptar: ${row.name} ya no aparecerá en los viajes de ${isTaller ? 'este taller' : 'esta ruta'}.\nCancelar: solo se quita de esta lista de cobro y el operador lo seguirá viendo.`
+    );
+    if (!alsoOperator) return;
+    const patch = isTaller ? { tallerRouteId: '', tallerDias: [] } : { routeId: '' };
+    await Students.update(student.id, patch);
+    setAllStudents((prev) => prev.map((x) => (x.id === student.id ? { ...x, ...patch } : x)));
   }
 
   async function moveStudent(row) {

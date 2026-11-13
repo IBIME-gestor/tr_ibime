@@ -202,9 +202,9 @@ function baseStudentApplies(student, dateStr, shift) {
 /*   · Si ese día habría salido en su ruta normal, SOLO se mueve su     */
 /*     salida al taller (no sale de la lista normal del operador ni se  */
 /*     cobra nada extra: sigue contando en lo que ya paga).             */
-/*   · Si ese día NO habría salido en su ruta normal (media entrada,    */
-/*     diario solo de entrada, o sin ruta normal), el taller es un viaje*/
-/*     adicional que se cobra como viaje por día.                       */
+/*   · Solo si NO tiene registro en una ruta normal («solo taller»), el  */
+/*     taller es un viaje que se cobra como viaje por día. Con servicio */
+/*     completo, medio o diario NO se cobra nada extra.                 */
 /* ------------------------------------------------------------------ */
 const dowOf = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
 
@@ -214,10 +214,14 @@ export function tallerDayApplies(student, dateStr) {
   return (student.tallerDias || []).map(Number).includes(dowOf(dateStr));
 }
 
-/** ¿Habría salido en su ruta normal ese día, sin contar el taller? */
-export function hasNormalSalida(student, dateStr) {
-  if (!student?.routeId) return false; // «solo taller»: no tiene ruta normal
-  return baseStudentApplies(student, dateStr, 'afternoon');
+/**
+ * ¿El alumno tiene registro en una ruta normal? (completo, medio o diario)
+ * Si lo tiene, el taller solo MUEVE su salida de las 17:30: no sale en el
+ * viaje normal, se cuenta en el taller y NO cambia lo que paga.
+ * Sin ruta normal («solo taller») el taller sí es un viaje que se cobra.
+ */
+export function hasNormalSalida(student) {
+  return Boolean(student?.routeId);
 }
 
 /**
@@ -230,7 +234,7 @@ export function tallerDatesFor(student, dates) {
   const billable = [];
   (dates || []).forEach((d) => {
     if (!tallerDayApplies(student, d)) return;
-    if (hasNormalSalida(student, d)) moved.push(d);
+    if (hasNormalSalida(student)) moved.push(d);
     else billable.push(d);
   });
   return { moved, billable };
