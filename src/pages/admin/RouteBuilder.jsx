@@ -901,20 +901,17 @@ export default function RouteBuilder() {
     if (!window.confirm(`¿Quitar a ${row.name} de esta lista? El alumno no se elimina.`)) return;
     await updateRows((currentList.rows || []).filter((x) => x.studentId !== row.studentId));
 
-    // La lista de cobro y la lista que ve el operador son distintas: la del
-    // operador sale de la ruta/taller que tiene guardado el alumno. Si no se
-    // actualiza también, el alumno sigue apareciendo en sus viajes.
+    // En rutas normales el operador ya lee esta misma lista, así que quitarlo
+    // aquí basta. En talleres el operador sigue usando el taller asignado al
+    // alumno: se pregunta si también se le quita.
     const student = allStudents.find((x) => x.id === row.studentId);
     const listRoute = routes.find((r) => r.id === currentList.routeId);
-    if (!student || !listRoute) return;
-    const isTaller = listRoute.kind === 'taller';
-    const linked = isTaller ? student.tallerRouteId === listRoute.id : student.routeId === listRoute.id;
-    if (!linked) return;
+    if (!student || listRoute?.kind !== 'taller' || student.tallerRouteId !== listRoute.id) return;
     const alsoOperator = window.confirm(
-      `¿Quitarlo también de la lista del operador?\n\nAceptar: ${row.name} ya no aparecerá en los viajes de ${isTaller ? 'este taller' : 'esta ruta'}.\nCancelar: solo se quita de esta lista de cobro y el operador lo seguirá viendo.`
+      `¿Quitarlo también del taller?\n\nAceptar: ${row.name} ya no aparecerá en el viaje de este taller.\nCancelar: solo se quita de esta lista de cobro.`
     );
     if (!alsoOperator) return;
-    const patch = isTaller ? { tallerRouteId: '', tallerDias: [] } : { routeId: '' };
+    const patch = { tallerRouteId: '', tallerDias: [] };
     await Students.update(student.id, patch);
     setAllStudents((prev) => prev.map((x) => (x.id === student.id ? { ...x, ...patch } : x)));
   }

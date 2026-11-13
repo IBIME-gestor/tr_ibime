@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Routes, Students, Schools, Units } from '../../firebase/services';
 import {
   studentAppliesToday,
+  loadRoster,
   todayString,
   subscribeTodayTrip,
   subscribeTripStops,
@@ -203,6 +204,7 @@ function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
  */
 function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, index }) {
   const [rosterAll, setRosterAll] = useState([]);
+  const [listRows, setListRows] = useState(null); // filas de la lista del periodo (null = sin lista)
   const [rosterLoading, setRosterLoading] = useState(true);
   const [tripMorning, setTripMorning] = useState(null);
   const [tripAfternoon, setTripAfternoon] = useState(null);
@@ -214,13 +216,17 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   // Roster completo de la ruta: UNA sola consulta, reutilizada para
   // calcular a quién le toca hoy en cada turno (antes se volvía a pedir
   // cada vez que se abría el desplegable de "Lista matutino/vespertino").
+  // «Hoy» cambia a las 19:30 (ya cuenta como el día siguiente): si la pantalla
+  // queda abierta, se vuelve a leer la lista para la nueva fecha.
+  const rosterDate = todayString();
   useEffect(() => {
     let cancelled = false;
     setRosterLoading(true);
-    (route.kind === 'taller' ? Students.listByTallerRoute(route.id) : Students.listByRoute(route.id))
-      .then((all) => {
+    loadRoster(route, rosterDate, route.driverId)
+      .then(({ students: all, listRows: rows }) => {
         if (!cancelled) {
           setRosterAll(all);
+          setListRows(rows);
           setRosterLoading(false);
         }
       })
@@ -230,7 +236,7 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
     return () => {
       cancelled = true;
     };
-  }, [route.id]);
+  }, [route.id, rosterDate]);
 
   // Estado real del recorrido de HOY, en vivo — para que el botón diga
   // "Iniciar" / "Continuar" / "Ver resumen" según lo que ya pasó, no
@@ -290,16 +296,16 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   const morningStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'morning', route))
+        .filter((s) => studentAppliesToday(s, today, 'morning', route, listRows))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today, route]
+    [rosterAll, today, route, listRows]
   );
   const afternoonStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'afternoon', route))
+        .filter((s) => studentAppliesToday(s, today, 'afternoon', route, listRows))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today, route]
+    [rosterAll, today, route, listRows]
   );
   const activeStudents = activeShift === 'morning' ? morningStudents : afternoonStudents;
 

@@ -15,10 +15,11 @@ import {
   deleteDoc,
   addDoc,
   arrayUnion,
+  documentId,
 } from 'firebase/firestore';
 import { db } from './config';
 import { getOne } from './db';
-import { Routes, Students } from './services';
+import { Routes, Students, RouteLists } from './services';
 import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActualOrder } from '../utils/tripOrder';
 
 /**
@@ -245,14 +246,69 @@ export function tallerDatesFor(student, dates) {
  * en el recorrido de taller; en una ruta normal, quita su salida los días
  * en que esa salida se movió a taller.
  */
-export function studentAppliesToday(student, dateStr, shift, route = null) {
+export function studentAppliesToday(student, dateStr, shift, route = null, listRows = null) {
   if (route?.kind === 'taller') {
     return shift === 'afternoon'
       && student.tallerRouteId === route.id
       && tallerDayApplies(student, dateStr);
   }
   if (shift === 'afternoon' && tallerDayApplies(student, dateStr)) return false;
+  // Con lista del periodo: manda lo que está marcado en «Listas de alumnos»
+  // (entrada / salida de ese día). Sin lista, se usa el servicio del alumno.
+  if (listRows) {
+    const day = listRows[student.id]?.days?.[dateStr];
+    return Boolean(day && (shift === 'morning' ? day.entrada : day.salida));
+  }
   return baseStudentApplies(student, dateStr, shift);
+}
+
+/**
+ * Lista de «Listas de alumnos» que rige HOY para una ruta: solo cuenta la que
+ * tiene la fecha dentro de su periodo (las de meses anteriores se ignoran).
+ * Si hay varias para el mismo periodo, gana la del operador que arranca el
+ * viaje y, después, la más reciente.
+ */
+export function pickListForDate(lists, date, driverId = '') {
+  const inPeriod = (lists || []).filter((l) =>
+    l.status !== 'eliminada' && l.startDate && l.endDate && l.startDate <= date && date <= l.endDate);
+  if (!inPeriod.length) return null;
+  const stamp = (l) => tsMs(l.updatedAt) || tsMs(l.createdAt) || 0;
+  return [...inPeriod].sort((a, b) => {
+    const mineA = driverId && a.operatorId === driverId ? 1 : 0;
+    const mineB = driverId && b.operatorId === driverId ? 1 : 0;
+    if (mineA !== mineB) return mineB - mineA;
+    return stamp(b) - stamp(a);
+  })[0];
+}
+
+async function fetchStudentsByIds(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const snap = await getDocs(query(collection(db, 'students'), where(documentId(), 'in', chunk)));
+    snap.docs.forEach((d) => out.push({ id: d.id, ...d.data() }));
+  }
+  return out;
+}
+
+/**
+ * Alumnos de una ruta para una fecha. Ruta normal: sale de la lista del
+ * periodo (si existe). Taller, o ruta sin lista del periodo: de los alumnos.
+ * Devuelve { students, listRows (studentId → fila) | null, listId }.
+ */
+export async function loadRoster(route, date, driverId = '') {
+  if (route.kind === 'taller') {
+    return { students: await Students.listByTallerRoute(route.id), listRows: null, listId: '' };
+  }
+  const lists = await RouteLists.listByRoute(route.id);
+  const list = pickListForDate(lists, date, driverId || route.driverId || '');
+  if (!list) {
+    return { students: await Students.listByRoute(route.id), listRows: null, listId: '' };
+  }
+  const listRows = {};
+  (list.rows || []).forEach((r) => { if (r.studentId) listRows[r.studentId] = r; });
+  const students = await fetchStudentsByIds(Object.keys(listRows));
+  return { students, listRows, listId: list.id };
 }
 
 export function subscribeTodayTrip(routeId, shift, callback, onError) {
@@ -308,12 +364,11 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     throw new Error('Elige la unidad que vas a usar en este recorrido de taller.');
   }
 
-  const allStudents = isTaller
-    ? await Students.listByTallerRoute(route.id)
-    : await Students.listByRoute(route.id);
-  // Solo entran a la lista de hoy los alumnos cuyo servicio/calendario
-  // cubre este turno y esta fecha (ver studentAppliesToday arriba).
-  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift, route));
+  const roster = await loadRoster(route, date, driverId);
+  const allStudents = roster.students;
+  // Solo entran a la lista de hoy los alumnos que la lista del periodo marca
+  // para este turno y esta fecha (o, sin lista, su servicio/calendario).
+  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift, route, roster.listRows));
 
   // Validaciones de la unidad (odómetro y capacidad).
   let kmAlert = null;
@@ -357,6 +412,7 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     unitPlannedId: route.unitId || '',
     unitChosenByOperator: !!chosenUnitId && chosenUnitId !== (route.unitId || ''),
     kind: isTaller ? 'taller' : 'normal',
+    rosterListId: roster.listId || '',
     kmAlert,
     date,
     shift,
