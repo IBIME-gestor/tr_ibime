@@ -61,7 +61,7 @@ export default function HistorialUnidad() {
         operator: driverName(t.driverId), label: routeName(t.routeId),
         kmIni: t.kmInicial ?? null, kmFin: t.kmFinal ?? null,
         students: t.studentsResolved ?? t.studentsTotal ?? null,
-        changed: !!t.unitChosenByOperator, flag: t.kmAlert,
+        changed: !!t.unitChosenByOperator, flag: t.kmAlert, shared: !!t.kmShared,
       });
     });
     specials.forEach((t) => {
@@ -77,6 +77,7 @@ export default function HistorialUnidad() {
     let prevFin = null;
     out.forEach((e) => {
       e.issues = [];
+      if (e.shared) return; // salida combinada: mismo odómetro que el recorrido líder
       if (e.kmIni != null && e.kmFin != null && Number(e.kmFin) < Number(e.kmIni)) e.issues.push('Km final menor al inicial');
       if (e.kmIni != null && prevFin != null) {
         if (Number(e.kmIni) < prevFin) e.issues.push(`Km inicial menor al último registrado (${prevFin})`);

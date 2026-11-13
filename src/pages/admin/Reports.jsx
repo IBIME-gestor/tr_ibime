@@ -107,7 +107,7 @@ export default function Reports() {
         const unitTrips = trips.filter((t) => routeIds.has(t.routeId) || t.unitId === unit.id);
 
         const km = unitTrips.reduce((sum, t) => {
-          if (t.kmInicial == null || t.kmFinal == null) return sum;
+          if (t.kmShared || t.kmInicial == null || t.kmFinal == null) return sum; // kmShared: salida combinada, el km ya cuenta en el recorrido líder
           return sum + Math.max(0, Number(t.kmFinal) - Number(t.kmInicial));
         }, 0);
 

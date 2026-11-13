@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -8,6 +8,9 @@ import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students, Units } from '../../firebase/services';
 import {
   subscribeTodayTrip,
+  subscribeTripById,
+  startTripGroup,
+  completeTripGroup,
   startTrip,
   subscribeTripStops,
   markStopManual,
@@ -135,6 +138,9 @@ const SHIFT_CONFIG = {
 
 export default function TripRunner() {
   const { routeId, shift } = useParams();
+  const [searchParams] = useSearchParams();
+  // ?juntas=idA,idB → el operador eligió iniciar varias rutas a la vez
+  const groupParam = (searchParams.get('juntas') || '').split(',').filter(Boolean);
   const config = SHIFT_CONFIG[shift];
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -144,7 +150,10 @@ export default function TripRunner() {
   const [trip, setTrip] = useState(null); // null mientras carga, undefined... (ver tripLoaded)
   const [tripLoaded, setTripLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [stops, setStops] = useState([]);
+  const [ownStops, setOwnStops] = useState([]); // paradas del recorrido abierto
+  const [siblingTrips, setSiblingTrips] = useState({}); // salida combinada: tripId -> recorrido
+  const [siblingStops, setSiblingStops] = useState({}); // salida combinada: tripId -> paradas
+  const [groupStartRoutes, setGroupStartRoutes] = useState([]); // rutas por iniciar juntas
   const [busy, setBusy] = useState(false);
   const [matricula, setMatricula] = useState('');
   const [found, setFound] = useState(null);
@@ -152,7 +161,7 @@ export default function TripRunner() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [bankNotice, setBankNotice] = useState('');
-  const [reference, setReference] = useState(null); // último recorrido completado de esta ruta/turno
+  const [referenceRaw, setReference] = useState(null); // último recorrido completado de esta ruta/turno
   const [proposalDismissed, setProposalDismissed] = useState(false);
   const [applyingProposal, setApplyingProposal] = useState(false);
   const [proposalExpanded, setProposalExpanded] = useState(false);
@@ -254,12 +263,94 @@ export default function TripRunner() {
   }, [routeId, shift]);
 
   useEffect(() => {
-    if (!trip?.id) { setStops([]); return undefined; }
-    const unsub = subscribeTripStops(trip.id, setStops, (err) => {
+    if (!trip?.id) { setOwnStops([]); return undefined; }
+    const unsub = subscribeTripStops(trip.id, setOwnStops, (err) => {
       setLoadError(err.message || 'No se pudieron cargar los alumnos de este recorrido.');
     });
     return unsub;
   }, [trip?.id]);
+
+  // ------------------------------------------------------------------
+  // Salida combinada: se escuchan también los recorridos hermanos y sus
+  // paradas, y todo se muestra como UNA sola lista ordenada.
+  // ------------------------------------------------------------------
+  const groupTripIdsKey = (trip?.groupTripIds || []).join(',');
+  useEffect(() => {
+    const others = (trip?.groupTripIds || []).filter((id) => id !== trip?.id);
+    if (!others.length) { setSiblingTrips({}); setSiblingStops({}); return undefined; }
+    const unsubs = [];
+    others.forEach((id) => {
+      unsubs.push(subscribeTripById(id, (t) => setSiblingTrips((prev) => ({ ...prev, [id]: t }))));
+      unsubs.push(subscribeTripStops(id, (list) => setSiblingStops((prev) => ({ ...prev, [id]: list }))));
+    });
+    return () => unsubs.forEach((u) => u && u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trip?.id, groupTripIdsKey]);
+
+  // Recorridos de la salida (el abierto + hermanos) y lista fusionada de paradas.
+  const allTrips = useMemo(() => {
+    if (!trip) return [];
+    if (!trip.groupId) return [trip];
+    const rest = (trip.groupTripIds || [])
+      .filter((id) => id !== trip.id)
+      .map((id) => siblingTrips[id])
+      .filter(Boolean);
+    return [trip, ...rest];
+  }, [trip, siblingTrips]);
+  const isGroup = Boolean(trip?.groupId);
+
+  const stops = useMemo(() => {
+    const own = ownStops.map((st) => ({ ...st, tripId: trip?.id }));
+    if (!isGroup) return own;
+    const others = Object.entries(siblingStops).flatMap(([tid, list]) => (list || []).map((st) => ({ ...st, tripId: tid })));
+    return [...own, ...others].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [ownStops, siblingStops, isGroup, trip?.id]);
+
+  const tripIdOf = (stop) => stop?.tripId || trip.id;
+  const tripDocOf = (tripId) => allTrips.find((t) => t.id === tripId) || trip;
+  const routeLabelOf = (stop) => {
+    if (!isGroup) return null;
+    const rid = tripDocOf(stop.tripId)?.routeId;
+    return (trip.groupRoutes || []).find((r) => r.id === rid)?.name || null;
+  };
+  // La propuesta de orden por historial es de UNA ruta: no aplica a la lista fusionada.
+  const reference = isGroup ? null : referenceRaw;
+
+  // Destinos y teléfonos de las demás rutas de la salida combinada.
+  useEffect(() => {
+    const ids = (trip?.groupRouteIds || []).filter((id) => id !== routeId);
+    if (!ids.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const extraDest = {};
+      const extraPhones = {};
+      for (const rid of ids) {
+        const [ref, studs] = await Promise.all([getReferenceTrip(rid, shift), Students.listByRoute(rid)]);
+        studs.forEach((st) => {
+          if (st.address) extraDest[st.id] = st.address;
+          if (st.parentContact) extraPhones[st.id] = st.parentContact;
+        });
+        ref?.stops.forEach((st) => { if (st.referenceLocation?.lat) extraDest[st.studentId] = st.referenceLocation; });
+      }
+      if (!cancelled) {
+        setDestinations((prev) => ({ ...extraDest, ...prev }));
+        setPhones((prev) => ({ ...extraPhones, ...prev }));
+      }
+    })().catch((err) => console.error('No se pudieron cargar las otras rutas de la salida:', err));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupTripIdsKey, routeId, shift]);
+
+  // Para iniciar juntas: se traen las rutas elegidas (la primera es la líder).
+  useEffect(() => {
+    if (groupParam.length < 2) { setGroupStartRoutes([]); return undefined; }
+    let cancelled = false;
+    Promise.all(groupParam.map((id) => RoutesService.get(id)))
+      .then((list) => { if (!cancelled) setGroupStartRoutes(list.filter(Boolean)); })
+      .catch((err) => console.error('No se pudieron cargar las rutas elegidas:', err));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupParam.join(',')]);
 
   // Mantiene el espejo público (publicTracking/{tripId}) al día cada vez
   // que cambian las paradas, para que la vista del padre de familia
@@ -269,16 +360,23 @@ export default function TripRunner() {
   // trips/{id}.liveLocation y, si dependiera de `trip`, volvería a disparar
   // esta sincronización (una escritura de más cada 5 s). Solo se vuelve a
   // sincronizar cuando cambia algo que de verdad se publica.
-  const tripRef = useRef(trip);
-  tripRef.current = trip;
+  const tripsRef = useRef(allTrips);
+  tripsRef.current = allTrips;
+  const publicKey = allTrips.map((t) => `${t.id}:${t.status}:${t.startLocation?.lat}:${t.startLocation?.lng}`).join('|');
   useEffect(() => {
-    const t = tripRef.current;
-    if (!t?.id || stops.length === 0) return;
-    syncPublicTracking({ id: t.id, ...t }, stops);
-  }, [trip?.id, trip?.routeId, trip?.shift, trip?.date, trip?.status, trip?.startLocation?.lat, trip?.startLocation?.lng, stops]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (stops.length === 0) return;
+    tripsRef.current.forEach((t) => {
+      const own = stops.filter((st) => st.tripId === t.id);
+      if (!t?.id || own.length === 0) return;
+      // Con rutas hermanas puede no haber permiso en todas (p. ej. otra nanny): se ignora.
+      syncPublicTracking({ id: t.id, ...t }, own).catch((err) => console.warn('syncPublicTracking:', err?.message));
+    });
+  }, [publicKey, stops]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ubicación en vivo del transporte mientras el recorrido está en curso
   // (solo el operador la transmite; la nanny no necesita duplicarla).
+  const liveIdsRef = useRef([]);
+  liveIdsRef.current = allTrips.map((t) => t.id);
   useEffect(() => {
     if (!isDriver || !trip?.id || trip.status !== 'in_progress') return undefined;
     let latest = null;
@@ -291,7 +389,8 @@ export default function TripRunner() {
     const publish = (loc) => {
       lastSent = loc;
       lastSentAtRef.current = Date.now();
-      updateLiveLocation(trip.id, loc);
+      // En salida combinada la misma posición se publica en todas las rutas (los padres de cada una ven la unidad).
+      (liveIdsRef.current.length ? liveIdsRef.current : [trip.id]).forEach((id) => updateLiveLocation(id, loc));
     };
     const stopWatch = watchLocation((location) => {
       latest = location;
@@ -359,10 +458,16 @@ export default function TripRunner() {
       const isTaller = route.kind === 'taller';
       if (isTaller && !unitIdInput) throw new Error('Elige la unidad que vas a usar.');
       let opts = isTaller ? { unitId: unitIdInput } : {};
+      const startingGroup = !isTaller && groupStartRoutes.length >= 2;
       let t = null;
       for (let i = 0; i < 3 && !t; i += 1) {
         try {
-          t = await startTrip(route, shift, profile.staffId, kmInicialInput, startLoc, opts);
+          if (startingGroup) {
+            const created = await startTripGroup(groupStartRoutes, shift, profile.staffId, kmInicialInput, startLoc, opts);
+            t = created[0];
+          } else {
+            t = await startTrip(route, shift, profile.staffId, kmInicialInput, startLoc, opts);
+          }
         } catch (err) {
           if (err.code === 'KM_LOWER' && !opts.ignoreKmAlert && window.confirm(`${err.message}\n\n¿Confirmas que el kilometraje es correcto?`)) {
             opts = { ...opts, ignoreKmAlert: true };
@@ -383,14 +488,15 @@ export default function TripRunner() {
   async function handleSendAlert(e) {
     e.preventDefault();
     setSendingAlert(true);
-    await setTripAlert(trip.id, alertType, alertMessage);
+    // En salida combinada el aviso llega a los padres de todas las rutas (si alguna no se puede, se omite).
+    await Promise.all(allTrips.map((t) => setTripAlert(t.id, alertType, alertMessage).catch(() => null)));
     setSendingAlert(false);
     setAlertOpen(false);
     setAlertMessage('');
   }
 
   async function handleClearAlert() {
-    await clearTripAlert(trip.id);
+    await Promise.all(allTrips.map((t) => clearTripAlert(t.id).catch(() => null)));
   }
 
   const pendingBoarding = useMemo(() => stops.filter((s) => s.status === 'pending'), [stops]);
@@ -513,15 +619,23 @@ export default function TripRunner() {
   async function handleIndividualBoard(stop) {
     setBusy(true);
     const location = await getCurrentLocation();
-    await markStopManual(trip.id, stop.studentId, 'boarded', location);
+    await markStopManual(tripIdOf(stop), stop.studentId, 'boarded', location);
     setBusy(false);
+  }
+
+  // Marcado masivo: en salida combinada se aplica a las paradas de cada recorrido.
+  async function bulkMark(field, location) {
+    const ids = [...new Set(stops.map((st) => st.tripId))];
+    for (const id of ids) {
+      await markAllBulk(id, field, location, stops.filter((st) => st.tripId === id));
+    }
   }
 
   async function handleBulkBoard() {
     if (!window.confirm(config.bulkBoardConfirm)) return;
     setBusy(true);
     const location = await getCurrentLocation();
-    await markAllBulk(trip.id, 'boarded', location, stops);
+    await bulkMark('boarded', location);
     setBusy(false);
   }
 
@@ -532,19 +646,19 @@ export default function TripRunner() {
     if (!window.confirm(config.bulkDeliverConfirm)) return;
     setBusy(true);
     const location = await getCurrentLocation();
-    await markAllBulk(trip.id, 'delivered', location, stops);
+    await bulkMark('delivered', location);
     setBusy(false);
   }
 
   async function handleIndividualDeliver(stop) {
     setBusy(true);
     const location = await getCurrentLocation();
-    await markStopManual(trip.id, stop.studentId, 'delivered', location);
+    await markStopManual(tripIdOf(stop), stop.studentId, 'delivered', location);
     setBusy(false);
   }
 
   async function handleAbsent(stop) {
-    await markStopAbsent(trip.id, stop.studentId);
+    await markStopAbsent(tripIdOf(stop), stop.studentId);
   }
 
   // "Llegué" al domicilio: no bloquea la pantalla con el overlay grande
@@ -552,7 +666,7 @@ export default function TripRunner() {
   // es una acción rápida y de bajo riesgo si falla, no hace falta tapar
   // la pantalla para ella.
   async function handleArrive(stop) {
-    await markArrived(trip.id, stop.studentId);
+    await markArrived(tripIdOf(stop), stop.studentId);
   }
 
   // ------------------------------------------------------------------
@@ -604,7 +718,7 @@ export default function TripRunner() {
   function studentSituation(student) {
     if (findInTrip(student)) return { label: 'Ya está en la lista de hoy', tone: 'text-go' };
     if (!student.routeId) return { label: 'Sin ruta asignada', tone: 'text-signal-amber' };
-    if (student.routeId === routeId) return { label: 'De esta ruta · hoy no le toca', tone: 'text-navy-400' };
+    if (student.routeId === routeId || (trip?.groupRouteIds || []).includes(student.routeId)) return { label: 'De esta salida · hoy no le toca', tone: 'text-navy-400' };
     return { label: 'De otra ruta', tone: 'text-signal-amber' };
   }
 
@@ -614,7 +728,7 @@ export default function TripRunner() {
     if (!window.confirm(`¿Deshacer el marcado de ${stop.name}? Volverá a quedar como pendiente.`)) return;
     try {
       setBusy(true);
-      await undoStop(trip.id, stop.studentId, profile);
+      await undoStop(tripIdOf(stop), stop.studentId, profile);
     } catch (err) {
       setSearchError(err?.message || 'No se pudo deshacer el marcado.');
     } finally {
@@ -628,7 +742,7 @@ export default function TripRunner() {
     if (!ok) return;
     try {
       setBusy(true);
-      await removeStudentFromTrip(trip.id, stop.studentId, profile, trip);
+      await removeStudentFromTrip(tripIdOf(stop), stop.studentId, profile, tripDocOf(tripIdOf(stop)));
     } catch (err) {
       setSearchError(err?.message || 'No se pudo quitar al alumno de este recorrido.');
     } finally {
@@ -641,16 +755,18 @@ export default function TripRunner() {
     try {
       const location = await getCurrentLocation();
       const action = shift === 'morning' ? 'boarded' : 'delivered';
+      // En salida combinada se agrega al recorrido de SU ruta (o al abierto si no es de ninguna).
+      const targetTrip = allTrips.find((t) => t.routeId === found.student.routeId) || trip;
       if (found.alreadyInTrip) {
-        await markStopManual(trip.id, found.student.id, action, location);
+        await markStopManual(tripIdOf(found.alreadyInTrip), found.student.id, action, location);
       } else {
-        await addStudentToTrip(trip.id, found.student, stops.length, trip, profile);
-        await markStopManual(trip.id, found.student.id, action, location);
+        await addStudentToTrip(targetTrip.id, found.student, stops.length, targetTrip, profile);
+        await markStopManual(targetTrip.id, found.student.id, action, location);
         // Alta de último momento: además de subirlo hoy, queda en el banco
         // de alumnos por asignar para que administración lo configure. Si
         // esto falla no se interrumpe el recorrido.
         try {
-          await addToAssignmentBank({ student: found.student, trip, route, profile });
+          await addToAssignmentBank({ student: found.student, trip: targetTrip, route, profile });
           setBankNotice(`${found.student.name} se agregó al recorrido y quedó en el banco de alumnos por asignar.`);
         } catch (err) {
           console.error('No se pudo registrar en el banco por asignar:', err);
@@ -688,7 +804,11 @@ export default function TripRunner() {
     try {
       // Dónde se cierra el viaje: ahí se dibuja la bandera de meta.
       const endLoc = (await getCurrentLocation({ timeout: 6000 })) || myLocation;
-      await completeTrip(trip.id, trip, kmFinalInput, false, endLoc);
+      if (isGroup) {
+        await completeTripGroup(allTrips, kmFinalInput, endLoc);
+      } else {
+        await completeTrip(trip.id, trip, kmFinalInput, false, endLoc);
+      }
       navigate(`/chofer/resumen/${trip.id}`);
     } catch (err) {
       setKmError(err.message);
@@ -735,10 +855,17 @@ export default function TripRunner() {
         <LoadingOverlay show={startingTrip} label="Iniciando recorrido…" />
         <p className="text-3xl mb-2 text-center">🚚</p>
         <h1 className="font-display font-bold text-lg text-center mb-1">
-          {config.title} · {route.name}
+          {config.title} · {groupStartRoutes.length >= 2 ? 'Salida combinada' : route.name}
         </h1>
+        {groupStartRoutes.length >= 2 && (
+          <p className="text-sm text-center text-navy-600 font-medium mb-1">
+            {groupStartRoutes.map((r) => r.name).join(' + ')}
+          </p>
+        )}
         <p className="text-navy-400 text-sm text-center mb-4">
-          Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.
+          {groupStartRoutes.length >= 2
+            ? 'Registra UN solo kilometraje inicial: se usa para todas las rutas y verás una sola lista fusionada.'
+            : 'Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.'}
         </p>
         <form onSubmit={handleStartTrip} className="space-y-3">
           {route.kind === 'taller' && (
@@ -766,8 +893,8 @@ export default function TripRunner() {
             required
           />
           {kmError && <p className="text-stop text-sm text-center">{kmError}</p>}
-          <button type="submit" disabled={startingTrip} className="btn-go w-full">
-            {startingTrip ? 'Iniciando…' : 'Iniciar recorrido'}
+          <button type="submit" disabled={startingTrip || (groupParam.length >= 2 && groupStartRoutes.length < 2)} className="btn-go w-full">
+            {startingTrip ? 'Iniciando…' : groupStartRoutes.length >= 2 ? `Iniciar ${groupStartRoutes.length} rutas juntas` : 'Iniciar recorrido'}
           </button>
         </form>
       </div>
@@ -788,6 +915,13 @@ export default function TripRunner() {
           {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
         </h1>
       </div>
+
+      {isGroup && (
+        <div className="rounded-xl border border-navy-100 bg-navy-50 px-3 py-2.5 text-sm text-navy-700 cascade-item">
+          <b>Salida combinada:</b> {(trip.groupRoutes || []).map((r) => r.name).join(' + ')}. Una sola lista, un solo
+          kilometraje (inicial {trip.kmInicial}); cada alumno lleva el nombre de su ruta.
+        </div>
+      )}
 
       {trackingActive && (
         <div className="space-y-2 cascade-item">
@@ -1190,6 +1324,7 @@ export default function TripRunner() {
           ) : (
             applyRecalcOrder(pendingBoarding).map((stop, i) => (
               <StopCard
+                routeLabel={routeLabelOf(stop)}
                 key={stop.id}
                 stop={stop}
                 number={doneCount + i + 1}
@@ -1235,6 +1370,7 @@ export default function TripRunner() {
           ) : (
             applyRecalcOrder(boardedWaitingDelivery).map((stop, i) => (
               <StopCard
+                routeLabel={routeLabelOf(stop)}
                 key={stop.id}
                 stop={stop}
                 number={doneCount + i + 1}
@@ -1269,7 +1405,7 @@ export default function TripRunner() {
             }
             return (
               <div key={stop.id} className="relative">
-                <StopCard stop={stop} number={number} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
+                <StopCard routeLabel={routeLabelOf(stop)} stop={stop} number={number} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
                 {stop.status !== 'pending' && trip.status === 'in_progress' && (
                   <button
                     type="button"

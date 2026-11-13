@@ -191,7 +191,7 @@ export default function MapasRecorridos() {
       const w = mondayOf(t.date);
       const cur = map.get(w) || { week: w, morning: 0, afternoon: 0, km: 0, durMin: [] };
       cur[t.shift] += 1;
-      if (t.kmInicial != null && t.kmFinal != null) cur.km += Math.max(0, Number(t.kmFinal) - Number(t.kmInicial));
+      if (!t.kmShared && t.kmInicial != null && t.kmFinal != null) cur.km += Math.max(0, Number(t.kmFinal) - Number(t.kmInicial));
       const a = tsMs(t.startedAt); const b = tsMs(t.completedAt);
       if (a && b && b > a) cur.durMin.push((b - a) / 60000);
       map.set(w, cur);

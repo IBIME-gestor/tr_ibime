@@ -20,6 +20,7 @@ import {
 import { db } from './config';
 import { getOne } from './db';
 import { Routes, Students, RouteLists } from './services';
+import { optimizeStopOrder } from '../utils/routeOptimizer';
 import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActualOrder } from '../utils/tripOrder';
 
 /**
@@ -459,6 +460,206 @@ function orderStudents(students, savedOrder = []) {
   // alumnos nuevos que no estaban en el orden guardado van al final
   const rest = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   return [...ordered, ...rest];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Salida combinada: varias rutas del MISMO operador a la misma hora  */
+/* ------------------------------------------------------------------ */
+// Se crea un recorrido por ruta (así cobro, asistencia y seguimiento de los
+// padres siguen funcionando por ruta), pero con UN solo km inicial/final, una
+// sola unidad y UNA lista fusionada: el `order` de cada parada es global.
+// Los recorridos comparten `groupId`; los que no llevan el km «real» quedan
+// marcados con kmShared para que los reportes no sumen los kilómetros dos veces.
+
+/** Id del recorrido de una ruta/turno/fecha. */
+export function getTripIdFor(routeId, shift, date = todayString()) {
+  return tripDocId(routeId, date, shift);
+}
+
+/** Escucha UN recorrido por su id (para ver los recorridos hermanos de una salida combinada). */
+export function subscribeTripById(tripId, callback, onError) {
+  return onSnapshot(
+    doc(db, 'trips', tripId),
+    (snap) => callback(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    (err) => { console.error('subscribeTripById error:', err); if (onError) onError(err); }
+  );
+}
+
+function studentKnownLocation(student) {
+  const a = student.lastDeliveredLocation;
+  if (a?.lat != null && a?.lng != null) return { lat: Number(a.lat), lng: Number(a.lng) };
+  const b = student.geocodedLocation;
+  if (b?.lat != null && b?.lng != null) return { lat: Number(b.lat), lng: Number(b.lng) };
+  return null;
+}
+
+/**
+ * Lista fusionada de varias rutas. Usa las ubicaciones reales de las últimas
+ * entregas de cada alumno (estadística real) y, si no hay, su dirección ya
+ * geocodificada; con eso acomoda todas las paradas por cercanía, partiendo
+ * del plantel (vuelta) o terminando en él (ida). Quien no tiene ubicación y los
+ * esporádicos van al final, respetando el orden propio de su ruta.
+ */
+async function mergeGroupOrder(plans, shift, startLocation) {
+  // Orden propio de cada ruta (el de siempre)
+  const perRoute = plans.map(({ route, students }) => {
+    const saved = shift === 'morning' ? route.studentOrderMorning : route.studentOrderAfternoon;
+    const isSporadic = (s) => s.tipoServicio === 'diario';
+    return [
+      ...orderStudents(students.filter((s) => !isSporadic(s)), saved),
+      ...orderStudents(students.filter(isSporadic), []),
+    ].map((student) => ({ route, student, sporadic: isSporadic(student) }));
+  });
+  const all = perRoute.flat();
+
+  const located = all.filter((x) => !x.sporadic && studentKnownLocation(x.student));
+  const rest = [];
+  // Reparte «lo que no se pudo ubicar» intercalando rutas, conservando su orden
+  const maxLen = Math.max(0, ...perRoute.map((l) => l.length));
+  for (let i = 0; i < maxLen; i += 1) {
+    perRoute.forEach((l) => {
+      const item = l[i];
+      if (item && !located.includes(item)) rest.push(item);
+    });
+  }
+  const restOrdered = [...rest.filter((x) => !x.sporadic), ...rest.filter((x) => x.sporadic)];
+
+  let orderedLocated = located;
+  if (located.length > 1) {
+    let anchor = startLocation || null;
+    try {
+      const school = plans[0]?.route?.schoolId ? await getOne('schools', plans[0].route.schoolId) : null;
+      if (school?.geocodedLocation?.lat != null) anchor = school.geocodedLocation;
+    } catch { /* sin plantel: se usa donde arranca la unidad */ }
+    if (anchor?.lat != null) {
+      const byId = new Map(located.map((x) => [x.student.id, x]));
+      const points = located.map((x) => ({ id: x.student.id, ...studentKnownLocation(x.student) }));
+      const { order } = optimizeStopOrder(points, anchor, shift === 'morning' ? 'end' : 'start');
+      orderedLocated = order.map((id) => byId.get(id)).filter(Boolean);
+    }
+  }
+  return [...orderedLocated, ...restOrdered];
+}
+
+/**
+ * Inicia varias rutas juntas con un solo kilometraje inicial.
+ * routes[0] es la ruta «líder». Devuelve los recorridos creados (el líder primero).
+ * opts: { unitId, ignoreCapacity, ignoreKmAlert }
+ */
+export async function startTripGroup(routes, shift, driverId, kmInicial, startLocation = null, opts = {}) {
+  if (kmInicial == null || kmInicial === '' || Number.isNaN(Number(kmInicial))) {
+    throw new Error('Se requiere el kilometraje inicial para iniciar el recorrido.');
+  }
+  if (!routes || routes.length < 2) throw new Error('Elige al menos dos rutas para iniciarlas juntas.');
+  if (routes.some((r) => r.kind === 'taller')) throw new Error('Las rutas de taller no se combinan: se inician solas.');
+
+  const date = todayString();
+  const refs = routes.map((r) => doc(db, 'trips', tripDocId(r.id, date, shift)));
+  const existing = await Promise.all(refs.map((ref) => getDoc(ref)));
+  const started = routes.filter((_, i) => existing[i].exists());
+  if (started.length) {
+    throw new Error(`Ya hay un recorrido iniciado hoy en este turno para: ${started.map((r) => r.name).join(', ')}. Inicia solo las que faltan.`);
+  }
+
+  const unitId = opts.unitId || routes.find((r) => r.unitId)?.unitId || '';
+
+  const plans = [];
+  for (const route of routes) {
+    const roster = await loadRoster(route, date, driverId);
+    const students = roster.students.filter((s) => studentAppliesToday(s, date, shift, route, roster.listRows));
+    plans.push({ route, roster, students });
+  }
+  const totalStudents = plans.reduce((n, p) => n + p.students.length, 0);
+
+  let kmAlert = null;
+  if (unitId) {
+    const unitDoc = await getOne('units', unitId);
+    const lastKm = unitDoc?.lastKm === '' || unitDoc?.lastKm == null ? null : Number(unitDoc.lastKm);
+    if (lastKm != null && Number.isFinite(lastKm)) {
+      if (Number(kmInicial) < lastKm) {
+        if (!opts.ignoreKmAlert) {
+          const err = new Error(`El kilometraje inicial (${kmInicial}) es menor al último registrado de esta unidad (${lastKm}). Revisa el odómetro; si es correcto, confirma para continuar.`);
+          err.code = 'KM_LOWER';
+          throw err;
+        }
+        kmAlert = { type: 'menor', lastKm };
+      } else if (Number(kmInicial) - lastKm > KM_GAP_ALERT) {
+        kmAlert = { type: 'salto', lastKm, gap: Number(kmInicial) - lastKm };
+      }
+    }
+    const capacity = Number(unitDoc?.capacity || 0);
+    if (capacity > 0 && totalStudents > capacity && !opts.ignoreCapacity) {
+      const err = new Error(`La unidad ${unitDoc?.plate || ''} tiene ${capacity} lugares y entre las rutas juntas hoy van ${totalStudents} alumnos.`);
+      err.code = 'CAPACITY';
+      throw err;
+    }
+  }
+
+  const merged = await mergeGroupOrder(plans, shift, startLocation);
+  const orderIndex = new Map(merged.map((x, i) => [`${x.route.id}:${x.student.id}`, i]));
+
+  const groupId = `${date}_${shift}_${routes[0].id}`;
+  const groupRouteIds = routes.map((r) => r.id);
+  const groupTripIds = refs.map((ref) => ref.id);
+  const groupRoutes = routes.map((r) => ({ id: r.id, name: r.name || '' }));
+
+  const created = [];
+  for (let i = 0; i < plans.length; i += 1) {
+    const { route, roster, students } = plans[i];
+    const tripData = {
+      routeId: route.id,
+      schoolId: route.schoolId,
+      driverId,
+      nannyId: route.nannyId || null,
+      unitId,
+      unitPlannedId: route.unitId || '',
+      unitChosenByOperator: !!unitId && unitId !== (route.unitId || ''),
+      kind: 'normal',
+      rosterListId: roster.listId || '',
+      kmAlert,
+      date,
+      shift,
+      status: 'in_progress',
+      startedAt: serverTimestamp(),
+      kmInicial: Number(kmInicial),
+      kmInicialAt: serverTimestamp(),
+      startLocation: startLocation ? { lat: startLocation.lat, lng: startLocation.lng } : null,
+      // --- salida combinada ---
+      groupId,
+      groupRouteIds,
+      groupTripIds,
+      groupRoutes,
+      groupLeadRouteId: routes[0].id,
+      kmShared: i > 0, // los kilómetros se cuentan una sola vez (en el líder)
+    };
+    await setDoc(refs[i], tripData);
+    const batch = writeBatch(db);
+    students.forEach((student) => {
+      batch.set(doc(db, 'trips', refs[i].id, 'stops', student.id), {
+        studentId: student.id,
+        matricula: student.matricula,
+        name: student.name,
+        order: orderIndex.get(`${route.id}:${student.id}`) ?? 9999,
+        addedManually: false,
+        sporadic: student.tipoServicio === 'diario',
+        status: 'pending',
+      });
+    });
+    await batch.commit();
+    created.push({ id: refs[i].id, ...tripData });
+  }
+  return created;
+}
+
+/** Cierra todos los recorridos de una salida combinada con el mismo km final. */
+export async function completeTripGroup(groupTrips, kmFinal, endLocation = null) {
+  if (kmFinal == null || kmFinal === '' || Number.isNaN(Number(kmFinal))) {
+    throw new Error('Se requiere el kilometraje final para cerrar el recorrido.');
+  }
+  for (const t of groupTrips) {
+    if (t.status === 'completed') continue;
+    await completeTrip(t.id, t, kmFinal, false, endLocation);
+  }
 }
 
 export function subscribeTripStops(tripId, callback, onError) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Sun, Sunset, History, Users, ChevronDown, ChevronRight, Clock, MapPin } from 'lucide-react';
+import { Sun, Sunset, History, Users, ChevronDown, ChevronRight, Clock, MapPin, Layers } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes, Students, Schools, Units } from '../../firebase/services';
 import {
@@ -156,6 +156,11 @@ function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
           <div className="min-w-0">
             <p className="font-display font-semibold text-navy-900 leading-tight">{title}</p>
             <p className="text-xs text-navy-400">{subtitle}</p>
+            {trip?.groupId && (
+              <p className="text-[0.65rem] font-semibold text-navy-600 mt-0.5 flex items-center gap-1">
+                <Layers size={11} /> Salida combinada · {trip.groupRouteIds?.length || 2} rutas
+              </p>
+            )}
           </div>
         </div>
         <span className={`${badge.className} shrink-0`}>{badge.label}</span>
@@ -202,7 +207,9 @@ function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
  * actividad reciente. La mayoría de los operadores solo tiene una ruta,
  * pero se soporta más de una (operadores que cubren dos unidades, etc.).
  */
-function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, index }) {
+function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, index, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [everOpen, setEverOpen] = useState(defaultOpen); // el mapa y la lista se pintan hasta que se abre
   const [rosterAll, setRosterAll] = useState([]);
   const [listRows, setListRows] = useState(null); // filas de la lista del periodo (null = sin lista)
   const [rosterLoading, setRosterLoading] = useState(true);
@@ -274,6 +281,23 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
       : now.getHours() < 13
       ? 'morning'
       : 'afternoon';
+
+  // Estado general de la ruta, para el rótulo del encabezado:
+  //  · No iniciada (blanco) · En ruta (verde) · Por finalizar (amarillo:
+  //    todos resueltos, falta el km final) · Finalizada (gris).
+  const runningShift =
+    tripMorning?.status === 'in_progress' ? 'morning' : tripAfternoon?.status === 'in_progress' ? 'afternoon' : null;
+  const runningStops = runningShift === 'morning' ? stopsMorning : stopsAfternoon;
+  const closing =
+    !!runningShift && runningStops.length > 0 && runningStops.every((s) => s.status === 'delivered' || s.status === 'absent');
+  const shownTrip = activeShift === 'morning' ? tripMorning : tripAfternoon;
+  const routeStatus = runningShift ? (closing ? 'closing' : 'running') : shownTrip?.status === 'completed' ? 'done' : 'idle';
+  const STATUS_BADGE = {
+    idle: { label: 'No iniciada', cls: 'bg-white border border-navy-200 text-navy-600', dot: 'bg-navy-300' },
+    running: { label: 'En ruta', cls: 'bg-go text-white', dot: 'bg-white animate-pulse' },
+    closing: { label: 'Por finalizar', cls: 'bg-signal-yellow text-navy-900', dot: 'bg-navy-900' },
+    done: { label: 'Finalizada', cls: 'bg-navy-100 text-navy-500', dot: 'bg-go' },
+  }[routeStatus];
 
   // Último recorrido COMPLETADO de este turno: de ahí sacamos el orden
   // real y las ubicaciones reales capturadas, sin geocodificar nada en
@@ -358,15 +382,36 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
 
   return (
     <div className="card cascade-item" style={cascadeStyle(index + 1, 60)}>
-      <div className="mb-3">
-        <p className="text-xs font-semibold text-navy-400 uppercase tracking-wide mb-0.5">Tu ruta</p>
-        <p className="font-display font-bold text-lg text-navy-900 truncate">{route.name}</p>
-        <p className="text-xs text-navy-400 truncate">
-          {school?.name || 'Plantel sin asignar'}
-          {route.kind === 'taller' ? ' · Taller (eliges la unidad al iniciar)' : unit?.plate ? ` · Unidad ${unit.plate}` : ''}
-        </p>
-      </div>
+      <button
+        type="button"
+        onClick={() => { setOpen((v) => !v); setEverOpen(true); }}
+        aria-expanded={open}
+        className="w-full flex items-center gap-3 text-left active:scale-[0.99] transition-transform"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-navy-400 uppercase tracking-wide mb-0.5">Tu ruta</p>
+          <p className="font-display font-bold text-lg text-navy-900 truncate">{route.name}</p>
+          <p className="text-xs text-navy-400 truncate">
+            {school?.name || 'Plantel sin asignar'}
+            {route.kind === 'taller' ? ' · Taller (eliges la unidad al iniciar)' : unit?.plate ? ` · Unidad ${unit.plate}` : ''}
+          </p>
+        </div>
+        <span className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_BADGE.cls}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_BADGE.dot}`} />
+          {STATUS_BADGE.label}
+        </span>
+        <ChevronDown size={18} className={`shrink-0 text-navy-400 transition-transform duration-300 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
+      </button>
 
+      {/* Contenido desplegable: se abre con un deslizamiento suave */}
+      <div
+        className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-out motion-reduce:transition-none ${
+          open ? 'grid-rows-[1fr] opacity-100 mt-3' : 'grid-rows-[0fr] opacity-0 mt-0'
+        }`}
+      >
+        <div className="overflow-hidden min-h-0">
+          {everOpen && (
+            <div>
       <div className="space-y-2.5">
         {route.kind !== 'taller' && (
           <ShiftCard
@@ -498,6 +543,121 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
           ver vuelta
         </button>
       </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Rutas del mismo operador a la misma hora: se eligen las que salen juntas y se
+ * inician con UN solo km inicial. El recorrido muestra una sola lista fusionada.
+ */
+function GroupStartPanel({ routes, now, navigate }) {
+  const eligible = useMemo(() => routes.filter((r) => r.kind !== 'taller'), [routes]);
+  const [shift, setShift] = useState(now.getHours() < 13 ? 'morning' : 'afternoon');
+  const [tripsByRoute, setTripsByRoute] = useState({});
+  const [picked, setPicked] = useState({}); // routeId -> false si la quitó; por omisión van todas
+
+  const key = eligible.map((r) => r.id).join(',');
+  useEffect(() => {
+    setTripsByRoute({});
+    const unsubs = eligible.map((r) =>
+      subscribeTodayTrip(r.id, shift, (t) => setTripsByRoute((prev) => ({ ...prev, [r.id]: t || null })))
+    );
+    return () => unsubs.forEach((u) => u && u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, shift]);
+
+  if (eligible.length < 2) return null;
+
+  const loaded = eligible.every((r) => r.id in tripsByRoute);
+  const available = eligible.filter((r) => tripsByRoute[r.id] === null);
+  const selected = available.filter((r) => picked[r.id] !== false);
+  const activeGroupTrip = eligible.map((r) => tripsByRoute[r.id]).find((t) => t?.groupId && t.status === 'in_progress');
+
+  if (!loaded) return null;
+  if (available.length < 2 && !activeGroupTrip) return null;
+
+  return (
+    <div className="card cascade-item border-2 border-navy-800/10">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-navy-800 text-white flex items-center justify-center shrink-0">
+          <Layers size={17} />
+        </div>
+        <div className="min-w-0">
+          <p className="font-display font-semibold text-navy-900 leading-tight">Rutas a la misma hora</p>
+          <p className="text-xs text-navy-400">
+            Inícialas juntas: un solo kilometraje inicial y una lista fusionada de entrega.
+          </p>
+        </div>
+      </div>
+
+      {activeGroupTrip ? (
+        <button
+          onClick={() => navigate(`/chofer/recorrido/${activeGroupTrip.routeId}/${activeGroupTrip.shift}`)}
+          className="w-full mt-3 flex items-center justify-between rounded-xl bg-signal-yellow/20 border-2 border-signal-yellow px-4 py-3 text-left"
+        >
+          <span className="text-sm font-semibold text-navy-900">Salida combinada en curso · Continuar</span>
+          <ChevronRight size={16} />
+        </button>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            {[['morning', 'Ida', Sun], ['afternoon', 'Vuelta', Sunset]].map(([k, label, Icon]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setShift(k)}
+                className={`flex items-center justify-center gap-1.5 rounded-xl border-2 py-2 text-sm font-semibold ${
+                  shift === k ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100 text-navy-600'
+                }`}
+              >
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            {eligible.map((r) => {
+              const t = tripsByRoute[r.id];
+              const disabled = t !== null;
+              const checked = !disabled && picked[r.id] !== false;
+              return (
+                <label
+                  key={r.id}
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm ${
+                    disabled ? 'border-navy-100 bg-navy-50 text-navy-400' : checked ? 'border-navy-800 bg-white' : 'border-navy-100 bg-white'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={disabled}
+                    checked={checked}
+                    onChange={() => setPicked((p) => ({ ...p, [r.id]: !checked }))}
+                    className="w-4 h-4 accent-navy-800"
+                  />
+                  <span className="flex-1 min-w-0 truncate font-medium">{r.name}</span>
+                  {disabled && <span className="text-xs shrink-0">{t.status === 'completed' ? 'Ya finalizó' : 'Ya iniciada'}</span>}
+                </label>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            disabled={selected.length < 2}
+            onClick={() =>
+              navigate(`/chofer/recorrido/${selected[0].id}/${shift}?juntas=${selected.map((r) => r.id).join(',')}`)
+            }
+            className="btn-go w-full mt-3 disabled:opacity-40"
+          >
+            {selected.length < 2 ? 'Elige al menos 2 rutas' : `Iniciar ${selected.length} rutas juntas`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -603,6 +763,8 @@ export default function RouteHome() {
         </div>
       </div>
 
+      {profile?.role === 'driver' && <GroupStartPanel routes={routes} now={now} navigate={navigate} />}
+
       {routes.map((route, i) => (
         <RouteCard
           key={route.id}
@@ -613,6 +775,7 @@ export default function RouteHome() {
           unitsById={unitsById}
           allTrips={allTrips}
           index={i}
+          defaultOpen={routes.length === 1}
         />
       ))}
 

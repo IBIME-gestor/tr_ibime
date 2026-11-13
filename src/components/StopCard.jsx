@@ -43,6 +43,7 @@ export default function StopCard({
   nav,
   phone,
   number,
+  routeLabel = null, // en salida combinada: de qué ruta es el alumno
   className = '',
   style,
 }) {
@@ -68,6 +69,11 @@ export default function StopCard({
             {shownNumber != null ? `${shownNumber}. ` : ''}
             {stop.name}
           </p>
+          {routeLabel && (
+            <span className="inline-block text-[0.65rem] font-semibold uppercase tracking-wide rounded-md bg-navy-800/90 text-white px-1.5 py-0.5 mb-0.5 max-w-full truncate align-middle">
+              {routeLabel}
+            </span>
+          )}
           <p className="text-sm text-navy-400">
             Matrícula {stop.matricula} · {STATUS_LABEL[stop.status] || 'Pendiente'}{stop.sporadic ? ' · Esporádico' : ''}
           </p>
