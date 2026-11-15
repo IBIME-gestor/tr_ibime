@@ -25,9 +25,11 @@ function haversineKm(a, b) {
 
 function totalDistance(order, points, anchor, anchorPosition) {
   const seq = anchorPosition === 'start' ? [anchor, ...order] : [...order, anchor];
+  // El punto fijo (escuela) llega como objeto {lat,lng}; las paradas, como id.
+  const at = (x) => (x && typeof x === 'object' ? x : points[x]);
   let sum = 0;
   for (let i = 1; i < seq.length; i++) {
-    sum += haversineKm(points[seq[i - 1]], points[seq[i]]);
+    sum += haversineKm(at(seq[i - 1]), at(seq[i]));
   }
   return sum;
 }

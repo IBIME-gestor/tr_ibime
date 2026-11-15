@@ -69,7 +69,7 @@ export default function OperatorNav({ items }) {
         ref={scrollerRef}
         onScroll={updateArrows}
         aria-label="Módulos del operador"
-        className="flex items-center gap-2 overflow-x-auto px-1 py-1.5 -my-1.5 scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex items-center justify-between gap-2 overflow-x-auto px-1 py-1.5 -my-1.5 scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {items.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink

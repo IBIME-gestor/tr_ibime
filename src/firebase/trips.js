@@ -534,8 +534,13 @@ async function mergeGroupOrder(plans, shift, startLocation) {
     if (anchor?.lat != null) {
       const byId = new Map(located.map((x) => [x.student.id, x]));
       const points = located.map((x) => ({ id: x.student.id, ...studentKnownLocation(x.student) }));
-      const { order } = optimizeStopOrder(points, anchor, shift === 'morning' ? 'end' : 'start');
-      orderedLocated = order.map((id) => byId.get(id)).filter(Boolean);
+      try {
+        const { order } = optimizeStopOrder(points, anchor, shift === 'morning' ? 'end' : 'start');
+        orderedLocated = order.map((id) => byId.get(id)).filter(Boolean);
+      } catch (err) {
+        // Si el cálculo falla, la salida NO se bloquea: se queda el orden propio de cada ruta.
+        console.warn('No se pudo optimizar el orden fusionado:', err);
+      }
     }
   }
   return [...orderedLocated, ...restOrdered];
