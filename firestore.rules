@@ -33,6 +33,14 @@ service cloud.firestore {
       return hasUserProfile() && userDoc().data.role == 'nanny';
     }
 
+    // Personal con perfil (admin, operador, nanny o cajero). Las familias que
+    // entran al seguimiento con su correo NO tienen perfil en `users`, así que
+    // no pasan por aquí: solo leen lo de SU hijo(a) (ver `students`).
+    function isStaff() {
+      return hasUserProfile() &&
+        userDoc().data.role in ['admin', 'driver', 'nanny', 'cashier'];
+    }
+
     function isCashier() {
       return hasUserProfile() && userDoc().data.role == 'cashier';
     }
@@ -66,12 +74,12 @@ service cloud.firestore {
     }
 
     match /schools/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
     match /units/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow create, delete: if isAdmin();
       // El operador solo puede dejar el último km (odómetro) al cerrar un recorrido o viaje.
       allow update: if isAdmin() ||
@@ -137,18 +145,18 @@ service cloud.firestore {
 
 
     match /pricingConcepts/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
     // Compatibilidad con registros antiguos; ya no se crean desde la app.
     match /pricing/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
     match /routeLists/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
@@ -161,7 +169,7 @@ service cloud.firestore {
     }
 
     match /routes/{id} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
       allow update: if isAdmin() ||
         (isDriver() && resource.data.driverId == myStaffId() &&
           request.resource.data.diff(resource.data).affectedKeys()
@@ -171,7 +179,14 @@ service cloud.firestore {
     }
 
     match /students/{id} {
-      allow read: if isSignedIn();
+      // Personal: todo. Familias: solo el/la alumno(a) cuyo correo de alumno o de
+      // tutor coincide con el de su sesión de Google (verificado). Van en reglas
+      // separadas para que la consulta por correo se autorice por sí sola.
+      allow read: if isStaff();
+      allow read: if isSignedIn() && request.auth.token.email_verified == true &&
+        resource.data.parentEmail == request.auth.token.email.lower();
+      allow read: if isSignedIn() && request.auth.token.email_verified == true &&
+        resource.data.studentEmail == request.auth.token.email.lower();
       // El admin puede modificar cualquier campo. El cajero SOLO puede
       // tocar lo relacionado con el cobro (estatus, vencimiento, montos),
       // nunca datos del alumno (nombre, domicilio, ruta, etc). El
@@ -186,7 +201,15 @@ service cloud.firestore {
                       'billingAmount', 'billingMode'])) ||
         ((isDriver() || isNanny()) &&
           request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId']));
+            .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId'])) ||
+        // Familia (cuenta del alumno o del tutor): solo puede corregir los datos del
+        // tutor — nombre, parentesco y teléfono —; nunca ruta, cobro ni nada más.
+        (isSignedIn() && request.auth.token.email_verified == true &&
+          (resource.data.get('parentEmail', '') == request.auth.token.email.lower() ||
+           resource.data.get('studentEmail', '') == request.auth.token.email.lower()) &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['familiarResponsable', 'parentesco', 'telefono', 'parentContact',
+                      'familyUpdatedAt', 'familyUpdatedByEmail']));
       allow create, delete: if isAdmin();
 
       // Bitácora de cobranza (folio, monto, método, quién y cuándo).
@@ -215,7 +238,7 @@ service cloud.firestore {
     // "Missing or insufficient permissions", aunque el operador sí tenga
     // derecho a ver esos datos.
     match /trips/{tripId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff();
 
       allow create: if isDriver() && request.resource.data.driverId == myStaffId();
       allow delete: if isAdmin();
@@ -227,7 +250,7 @@ service cloud.firestore {
               .hasOnly(['liveLocation', 'bulkEventAt', 'bulkEventLocation', 'alert', 'updatedAt']));
 
       match /stops/{studentId} {
-        allow read: if isSignedIn();
+        allow read: if isStaff();
         allow write: if isAdmin() || isDriver() || isNanny();
       }
 
