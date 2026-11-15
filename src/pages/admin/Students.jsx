@@ -224,11 +224,17 @@ export default function StudentsPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.matricula.trim() || !form.name.trim() || !form.schoolId) return;
+    // Los correos van en minúsculas: con ellos entran las familias al seguimiento.
+    const clean = {
+      ...form,
+      studentEmail: String(form.studentEmail || '').trim().toLowerCase(),
+      parentEmail: String(form.parentEmail || '').trim().toLowerCase(),
+    };
     if (mode === 'edit' && selectedId) {
-      await Students.update(selectedId, form);
+      await Students.update(selectedId, clean);
       setMode('view');
     } else {
-      const newId = await Students.create(form);
+      const newId = await Students.create(clean);
       setSelectedId(newId);
       setMode('view');
     }

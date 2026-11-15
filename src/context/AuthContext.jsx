@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import {
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
@@ -55,6 +56,25 @@ async function provisionProfile(firebaseUser) {
     return data;
   }
 
+  // 3) ¿Es la cuenta de un alumno o de su tutor (correo registrado en el alumno)?
+  //    Entran SOLO al seguimiento. No se les crea perfil en `users`: sus permisos
+  //    salen de que su correo verificado coincida con el del alumno (reglas).
+  try {
+    const [byStudent, byParent] = await Promise.all([
+      getDocs(query(collection(db, 'students'), where('studentEmail', '==', email))),
+      getDocs(query(collection(db, 'students'), where('parentEmail', '==', email))),
+    ]);
+    const seen = new Set();
+    const students = [...byStudent.docs, ...byParent.docs]
+      .filter((d) => !seen.has(d.id) && seen.add(d.id))
+      .map((d) => ({ id: d.id, ...d.data() }));
+    if (students.length) {
+      return { role: 'family', name: firebaseUser.displayName || email, email, students, _ephemeral: true };
+    }
+  } catch (err) {
+    console.error('No se pudo revisar el correo de familia:', err);
+  }
+
   return null; // no autorizado
 }
 
@@ -91,7 +111,7 @@ export function AuthProvider({ children }) {
 
         if (!profileData) {
           setAuthError(
-            'Tu cuenta de Google no tiene acceso todavía. Pide al administrador que registre tu correo institucional en la app.'
+            'Este correo no está registrado. Entra con el correo del alumno o con el del tutor tal como se dio de alta en el plantel; si no funciona, pide que lo registren o lo corrijan.'
           );
           await signOut(auth);
           setUser(null);
@@ -131,10 +151,36 @@ export function AuthProvider({ children }) {
     await signInWithPopup(auth, provider);
   }
 
+  // Familias: cualquier cuenta de Google (el correo del alumno o el del tutor),
+  // por eso NO se limita al dominio institucional. Si el navegador bloquea la
+  // ventana emergente (p. ej. al abrir el enlace desde WhatsApp), se usa redirección.
+  async function loginWithGoogleFamily() {
+    setAuthError('');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/operation-not-supported-in-this-environment') {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      if (err?.code === 'auth/popup-closed-by-user' || err?.code === 'auth/cancelled-popup-request') return;
+      throw err;
+    }
+  }
+
+  // Después de que la familia corrige sus datos, se refleja en su sesión sin recargar.
+  function patchFamilyStudent(studentId, patch) {
+    setProfile((prev) => (prev?.role === 'family'
+      ? { ...prev, students: (prev.students || []).map((x) => (x.id === studentId ? { ...x, ...patch } : x)) }
+      : prev));
+  }
+
   const logout = () => signOut(auth);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, authError, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, authError, loginWithGoogle, loginWithGoogleFamily, patchFamilyStudent, logout }}>
       {children}
     </AuthContext.Provider>
   );

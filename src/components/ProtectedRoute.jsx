@@ -25,7 +25,7 @@ export default function ProtectedRoute({ role, children }) {
   // para pantallas compartidas por operador y nanny.
   const allowedRoles = Array.isArray(role) ? role : [role];
   if (role && !allowedRoles.includes(profile?.role)) {
-    return <Navigate to={profile?.role === 'admin' ? '/admin' : '/chofer'} replace />;
+    return <Navigate to={profile?.role === 'admin' ? '/admin' : profile?.role === 'family' ? '/seguimiento' : '/chofer'} replace />;
   }
 
   return children;

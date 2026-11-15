@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Search, Home, Navigation, Sun, Sunset, ChevronLeft, Plus } from 'lucide-react';
+import { Home, Navigation, Sun, Sunset, Pencil, LogOut, Check } from 'lucide-react';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../firebase/config';
+import { useAuth } from '../context/AuthContext';
+import { normalizePhone } from '../utils/phone';
 import {
-  getPublicStudentIndex,
   subscribePublicTracking,
   TRIP_ALERT_TYPES,
   ARRIVAL_WAIT_SECONDS,
@@ -29,42 +32,6 @@ const FALLBACK_MINUTES_PER_STOP = 3;
 const STALE_MS = 3 * 60 * 1000;
 
 /* ------------------------------------------------------------------ */
-/*  Recuerdo de alumnos consultados (solo en este dispositivo)          */
-/* ------------------------------------------------------------------ */
-const SAVED_KEY = 'ibime_seguimiento_alumnos';
-const MAX_SAVED = 4;
-
-function readSavedStudents() {
-  try {
-    const raw = localStorage.getItem(SAVED_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function rememberStudent(entry) {
-  try {
-    const current = readSavedStudents().filter((s) => s.matricula !== entry.matricula);
-    const next = [entry, ...current].slice(0, MAX_SAVED);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(next));
-    return next;
-  } catch {
-    return readSavedStudents();
-  }
-}
-
-function forgetStudent(matricula) {
-  try {
-    const next = readSavedStudents().filter((s) => s.matricula !== matricula);
-    localStorage.setItem(SAVED_KEY, JSON.stringify(next));
-    return next;
-  } catch {
-    return readSavedStudents();
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /*  Utilidades de texto                                                 */
 /* ------------------------------------------------------------------ */
 const titleCase = (name) =>
@@ -83,7 +50,27 @@ function fmtAgo(ms, now) {
   return `hace ${min} min`;
 }
 
-const defaultShift = () => (new Date().getHours() < 12 ? 'morning' : 'afternoon');
+// Turno según la hora: de 5:00 a 8:30 «Camino a IBIME» y de 13:30 a 19:25
+// «Camino a casa». Fuera de esas horas se deja el más cercano (y se puede cambiar a mano).
+const SHIFT_TITLE = { morning: 'Camino a IBIME', afternoon: 'Camino a casa' };
+function autoShift(d = new Date()) {
+  const m = d.getHours() * 60 + d.getMinutes();
+  if (m >= 5 * 60 && m <= 8 * 60 + 30) return 'morning';
+  if (m >= 13 * 60 + 30 && m <= 19 * 60 + 25) return 'afternoon';
+  return null;
+}
+const defaultShift = () => autoShift() || (new Date().getHours() < 12 ? 'morning' : 'afternoon');
+
+// Si hoy el alumno va a taller (salida de las 17:30), su recorrido de la tarde es el del taller.
+function routeForShift(kid, shift) {
+  if (!kid) return '';
+  const hoy = new Date().getDay();
+  if (shift === 'afternoon' && kid.tallerRouteId && (kid.tallerDias || []).map(Number).includes(hoy)) return kid.tallerRouteId;
+  return kid.routeId || '';
+}
+
+const PARENTESCOS = ['Madre', 'Padre', 'Tutor(a)', 'Abuelo(a)', 'Tío(a)', 'Hermano(a)', 'Otro'];
+const firstName = (n) => titleCase(n).split(' ')[0] || '';
 
 /* ------------------------------------------------------------------ */
 /*  Mapa                                                                */
@@ -264,20 +251,29 @@ function RouteTrack({ stopsCount, myIndex, busX, progress, shift, completed }) {
 /*  Página                                                              */
 /* ------------------------------------------------------------------ */
 export default function PublicTrack() {
-  const [matriculaInput, setMatriculaInput] = useState('');
+  const { user, profile, loading, authError, loginWithGoogleFamily, patchFamilyStudent, logout } = useAuth();
+  const isFamily = profile?.role === 'family';
+  const myEmail = (user?.email || '').toLowerCase();
+
+  const [kidId, setKidId] = useState('');
   const [shift, setShift] = useState(defaultShift);
-  const [student, setStudent] = useState(null); // { matricula, name, routeId }
   const [tracking, setTracking] = useState(null);
   const [trackingLoaded, setTrackingLoaded] = useState(false);
   const [firstSeenMs, setFirstSeenMs] = useState(null);
-  const [error, setError] = useState('');
-  const [searching, setSearching] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [follow, setFollow] = useState(true);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const mapRef = useRef(null);
 
-  const [savedStudents, setSavedStudents] = useState(readSavedStudents);
-  const [showForm, setShowForm] = useState(() => readSavedStudents().length === 0);
+  // Hijos(as) ligados al correo con el que entró (cuenta del alumno o del tutor).
+  const kids = useMemo(
+    () => [...(isFamily ? profile.students || [] : [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+    [isFamily, profile]
+  );
+  const kid = kids.find((k) => k.id === kidId) || kids[0] || null;
+  const trackingRouteId = routeForShift(kid, shift);
+  const student = kid ? { matricula: kid.matricula, name: kid.name || '', routeId: trackingRouteId } : null;
 
   // Reloj ligero: refresca "actualizado hace…" y las estimaciones sin
   // tocar la red.
@@ -286,55 +282,95 @@ export default function PublicTrack() {
     return () => clearInterval(id);
   }, []);
 
+  // El turno cambia solo en las horas de cada recorrido (5:00 y 13:30), sin pisar
+  // lo que la persona eligió a mano mientras no cambie la franja.
+  const lastAuto = useRef(autoShift());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const a = autoShift();
+      if (a !== lastAuto.current) {
+        lastAuto.current = a;
+        if (a) setShift(a);
+      }
+    }, 30000);
+    return () => clearInterval(id);
+  }, []);
+
   // Se suscribe al recorrido de hoy de la ruta del alumno, en el turno elegido.
   // Cambiar de turno cambia la suscripción al instante.
   useEffect(() => {
-    if (!student) return undefined;
     setTracking(null);
-    setTrackingLoaded(false);
     setFirstSeenMs(null);
     setFollow(true);
-    return subscribePublicTracking(student.routeId, shift, (t) => {
+    if (!kid || !trackingRouteId) { setTrackingLoaded(true); return undefined; }
+    setTrackingLoaded(false);
+    return subscribePublicTracking(trackingRouteId, shift, (t) => {
       setTracking(t);
       setTrackingLoaded(true);
       setFirstSeenMs((prev) => prev ?? Date.now());
     });
-  }, [student?.routeId, student?.matricula, shift]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trackingRouteId, kid?.matricula, shift]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function openStudent(matriculaValue) {
-    const value = String(matriculaValue || '').trim();
-    setError('');
-    if (!value) return;
-    setSearching(true);
+  async function handleLogin() {
+    setLoginBusy(true); setLoginError('');
+    try { await loginWithGoogleFamily(); } catch (err) {
+      console.error(err);
+      setLoginError('No pudimos abrir el inicio de sesión de Google. Intenta de nuevo o abre esta página en tu navegador (Chrome o Safari).');
+    }
+    setLoginBusy(false);
+  }
+
+  // Edición de los datos del tutor (solo se guarda en Ruta Segura).
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', parentesco: '', phone: '' });
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState('');
+
+  function openEdit() {
+    setForm({
+      name: titleCase(kid?.familiarResponsable),
+      parentesco: kid?.parentesco || '',
+      phone: String(kid?.telefono || kid?.parentContact || '').replace(/^\+52/, ''),
+    });
+    setFormError(''); setSavedMsg(''); setEditing(true);
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    const name = form.name.trim();
+    if (name.length < 3) { setFormError('Escribe el nombre completo del tutor.'); return; }
+    let phone = '';
+    if (form.phone.trim()) {
+      const tel = normalizePhone(form.phone);
+      if (tel.status !== 'ok') { setFormError('El teléfono debe tener 10 dígitos.'); return; }
+      phone = tel.phone;
+    }
+    setSaving(true); setFormError('');
     try {
-      const idx = await getPublicStudentIndex(value);
-      if (!idx) {
-        setError('No encontramos ningún alumno con esa matrícula. Revisa que esté completa.');
-        return;
-      }
-      setStudent({ matricula: value, name: idx.name || '', routeId: idx.routeId });
-      setSavedStudents(rememberStudent({ matricula: value, name: idx.name || '' }));
-      setShowForm(false);
-      setMatriculaInput('');
+      await updateDoc(doc(db, 'students', kid.id), {
+        familiarResponsable: name,
+        parentesco: form.parentesco,
+        telefono: phone,
+        parentContact: phone,
+        familyUpdatedAt: serverTimestamp(),
+        familyUpdatedByEmail: myEmail,
+      });
+      patchFamilyStudent(kid.id, { familiarResponsable: name, parentesco: form.parentesco, telefono: phone, parentContact: phone });
+      setEditing(false);
+      setSavedMsg('Listo, tus datos quedaron actualizados en Ruta Segura.');
     } catch (err) {
       console.error(err);
-      setError('No pudimos consultar en este momento. Revisa tu conexión e intenta de nuevo.');
-    } finally {
-      setSearching(false);
+      setFormError('No se pudo guardar. Revisa tu conexión e intenta de nuevo.');
     }
+    setSaving(false);
   }
 
-  // Si ya consultó antes, abre directo al primer alumno guardado.
-  useEffect(() => {
-    const saved = readSavedStudents();
-    if (saved.length) openStudent(saved[0].matricula);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    openStudent(matriculaInput);
-  }
+  // Quién es quien entró y cómo saludarle.
+  const isParentAccount = !!kid && String(kid.parentEmail || '').toLowerCase() === myEmail;
+  const isStudentAccount = !!kid && String(kid.studentEmail || '').toLowerCase() === myEmail;
+  const tutorName = titleCase(kid?.familiarResponsable);
+  const missingInfo = !!kid && (!tutorName || !kid.parentesco || !(kid.telefono || kid.parentContact));
 
   /* ------------------------- datos derivados ------------------------- */
   const sortedStops = useMemo(
@@ -411,17 +447,25 @@ export default function PublicTrack() {
   }, [liveLoc?.lat != null, tracking?.startLocation?.lat, tracking?.destination?.lat]);
 
   /* ------------------------- mensaje principal ------------------------ */
-  const shiftName = shift === 'morning' ? 'ida' : 'vuelta';
+  const shiftTitle = SHIFT_TITLE[shift];
   const childName = titleCase(student?.name);
 
   const status = (() => {
     if (!trackingLoaded) return { tone: 'idle', pill: 'Consultando…', headline: 'Un momento…', sub: '' };
+    if (student && !student.routeId) {
+      return {
+        tone: 'idle',
+        pill: 'Sin ruta',
+        headline: `${childName} aún no tiene una ruta asignada`,
+        sub: 'Comunícate con el plantel para que le asignen su ruta de transporte.',
+      };
+    }
 
     if (!tracking) {
       return {
         tone: 'idle',
         pill: 'Aún no sale',
-        headline: `El recorrido de ${shiftName} todavía no inicia`,
+        headline: `El recorrido «${shiftTitle}» todavía no inicia`,
         sub: 'No necesitas recargar: esta pantalla se actualiza sola en cuanto el transporte salga.',
       };
     }
@@ -429,7 +473,7 @@ export default function PublicTrack() {
       return {
         tone: 'idle',
         pill: 'Sin parada hoy',
-        headline: `${childName} no aparece en el recorrido de ${shiftName} de hoy`,
+        headline: `${childName} no aparece en el recorrido «${shiftTitle}» de hoy`,
         sub: 'Puede que hoy no tenga servicio en este turno. Prueba con el otro turno o confirma con el plantel.',
       };
     }
@@ -523,102 +567,164 @@ export default function PublicTrack() {
   /* ---------------------------- render ---------------------------- */
   return (
     <div className="min-h-screen bg-navy-50">
-      <LoadingOverlay show={searching} label="Buscando…" />
+      <LoadingOverlay show={loading || loginBusy} label={loginBusy ? 'Abriendo Google…' : 'Cargando…'} />
 
       <header className="bg-navy-800 text-white">
         <div className="max-w-md mx-auto px-4 py-3 flex items-center gap-3">
           <img src="/ibime-shield.png" alt="" className="w-9 h-9" />
-          <div className="leading-tight">
+          <div className="leading-tight flex-1 min-w-0">
             <p className="font-display font-semibold">Ruta Segura</p>
             <p className="text-navy-100 text-xs">Seguimiento del transporte escolar</p>
           </div>
+          {user && (
+            <button type="button" onClick={logout} className="flex items-center gap-1.5 text-xs text-navy-100 border border-white/20 rounded-full px-3 py-1.5">
+              <LogOut size={13} /> Salir
+            </button>
+          )}
         </div>
       </header>
 
       <main className="max-w-md mx-auto px-4 py-5 space-y-4">
-        {/* Alumnos guardados */}
-        {savedStudents.length > 0 && !showForm && (
-          <div className="flex flex-wrap items-center gap-2">
-            {savedStudents.map((s) => {
-              const active = student?.matricula === s.matricula;
-              return (
-                <button
-                  key={s.matricula}
-                  type="button"
-                  onClick={() => openStudent(s.matricula)}
-                  className={`flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-full border-2 text-sm font-medium transition-colors ${
-                    active ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100 bg-white text-navy-700'
-                  }`}
-                >
-                  <span
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-display font-bold ${
-                      active ? 'bg-signal-yellow text-navy-900' : 'bg-navy-50 text-navy-600'
-                    }`}
-                  >
-                    {titleCase(s.name).charAt(0) || '?'}
-                  </span>
-                  <span className="truncate max-w-[9rem]">{titleCase(s.name) || s.matricula}</span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full border-2 border-dashed border-navy-100 text-sm font-medium text-navy-400"
-            >
-              <Plus size={14} /> Otro alumno
-            </button>
-          </div>
-        )}
-
-        {showForm && (
-          <form onSubmit={handleSubmit} className="card space-y-3">
-            {savedStudents.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="flex items-center gap-1 text-xs text-navy-400"
-              >
-                <ChevronLeft size={14} /> Volver a mis alumnos
-              </button>
-            )}
+        {/* Sin sesión: entrar con el correo del alumno o del tutor */}
+        {!loading && !user && (
+          <section className="card space-y-3">
             <div>
               <h1 className="font-display font-bold text-lg text-navy-900">¿Dónde va el transporte?</h1>
               <p className="text-sm text-navy-400 mt-0.5">
-                Escribe la matrícula de tu hijo(a) para ver su recorrido en vivo.
+                Entra con el correo de tu hijo(a) o con el tuyo, el que registraron en el plantel, y verás su recorrido en vivo.
               </p>
             </div>
-            <input
-              value={matriculaInput}
-              onChange={(e) => setMatriculaInput(e.target.value)}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="Matrícula"
-              aria-label="Matrícula"
-              autoFocus={savedStudents.length > 0}
-              className="w-full rounded-xl border border-navy-100 px-3 py-3 text-lg"
-            />
-            {error && <p className="text-stop text-sm">{error}</p>}
             <button
-              type="submit"
-              disabled={searching || !matriculaInput.trim()}
-              className="w-full py-3 rounded-xl bg-navy-800 text-white font-display font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+              type="button"
+              onClick={handleLogin}
+              disabled={loginBusy}
+              className="w-full flex items-center justify-center gap-3 rounded-xl border-2 border-navy-100 px-6 py-3.5 font-display font-semibold text-navy-800 active:scale-[0.98] hover:border-navy-600 disabled:opacity-50"
             >
-              <Search size={17} /> Ver seguimiento
+              <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l6-6C34.9 5.5 29.7 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5 44.5 35.3 44.5 24c0-1.2-.1-2.4-.3-3.5z" />
+                <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13.5 24 13.5c3.1 0 5.9 1.2 8 3.1l6-6C34.9 6.5 29.7 4.5 24 4.5c-7.4 0-13.8 4.2-17 10.3z" />
+                <path fill="#4CAF50" d="M24 44.5c5.6 0 10.7-1.9 14.6-5.2l-6.7-5.7c-2 1.5-4.7 2.4-7.9 2.4-5.3 0-9.7-3.1-11.3-7.5l-6.6 5.1C9.9 40.3 16.4 44.5 24 44.5z" />
+                <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6.7 5.7C41.5 36 44.5 30.6 44.5 24c0-1.2-.1-2.4-.3-3.5z" />
+              </svg>
+              Entrar con Google
             </button>
+            {(authError || loginError) && <p className="text-stop text-sm">{authError || loginError}</p>}
             <p className="text-xs text-navy-400">
-              La matrícula se guarda solo en este teléfono para que la próxima vez entres directo.
+              Puedes usar el correo del alumno o el del tutor. Si tu correo no funciona, pide en el plantel que lo registren o lo corrijan.
             </p>
-          </form>
+          </section>
         )}
 
-        {student && !showForm && (
+        {/* Sesión del personal: esta pantalla es para familias */}
+        {user && profile && !isFamily && (
+          <section className="card space-y-2 text-sm text-navy-600">
+            <p>Entraste con una cuenta del personal. El seguimiento es para familias.</p>
+            <a href={profile.role === 'admin' ? '/admin' : '/chofer'} className="underline text-navy-800 font-medium">Ir a mi panel</a>
+          </section>
+        )}
+
+        {isFamily && kid && (
+          <>
+            {/* Varios hijos ligados al mismo correo */}
+            {kids.length > 1 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {kids.map((k) => {
+                  const active = k.id === kid.id;
+                  return (
+                    <button
+                      key={k.id}
+                      type="button"
+                      onClick={() => { setKidId(k.id); setEditing(false); setSavedMsg(''); }}
+                      className={`flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-full border-2 text-sm font-medium transition-colors ${
+                        active ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100 bg-white text-navy-700'
+                      }`}
+                    >
+                      <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-display font-bold ${active ? 'bg-signal-yellow text-navy-900' : 'bg-navy-50 text-navy-600'}`}>
+                        {titleCase(k.name).charAt(0) || '?'}
+                      </span>
+                      <span className="truncate max-w-[9rem]">{firstName(k.name) || k.matricula}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Saludo */}
+            <section className="card space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  {isParentAccount ? (
+                    tutorName ? (
+                      <>
+                        <p className="font-display font-bold text-lg text-navy-900">¡Hola, {firstName(tutorName)}!</p>
+                        <p className="text-sm text-navy-500">
+                          {kid.parentesco ? `${kid.parentesco} de ` : 'Tutor(a) de '}{firstName(kid.name)}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-display font-bold text-lg text-navy-900">¡Hola!</p>
+                        <p className="text-sm text-navy-500">Aún no tenemos registrado tu nombre como tutor(a) de {firstName(kid.name)}.</p>
+                      </>
+                    )
+                  ) : (
+                    <>
+                      <p className="font-display font-bold text-lg text-navy-900">¡Hola, {firstName(kid.name)}!</p>
+                      <p className="text-sm text-navy-500">
+                        {tutorName ? `Tutor(a) registrado(a): ${tutorName}${kid.parentesco ? ` (${kid.parentesco})` : ''}` : 'Aún no hay un tutor(a) registrado(a).'}
+                      </p>
+                    </>
+                  )}
+                </div>
+                {!editing && (
+                  <button type="button" onClick={openEdit} className="shrink-0 flex items-center gap-1.5 text-xs font-medium text-navy-600 border border-navy-100 rounded-full px-3 py-1.5">
+                    <Pencil size={12} /> Editar información
+                  </button>
+                )}
+              </div>
+
+              {missingInfo && !editing && (
+                <p className="text-xs rounded-lg bg-signal-yellow/20 border border-signal-yellow px-3 py-2 text-navy-800">
+                  Falta información del tutor(a). Si algo está mal o incompleto, tócalo en «Editar información» para corregirlo.
+                </p>
+              )}
+              {savedMsg && !editing && (
+                <p className="text-xs rounded-lg bg-go/10 border border-go px-3 py-2 text-navy-800 flex items-center gap-1.5"><Check size={13} /> {savedMsg}</p>
+              )}
+
+              {editing && (
+                <form onSubmit={saveEdit} className="space-y-3 pt-1">
+                  <label className="block text-xs text-navy-500">Nombre del tutor(a)
+                    <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full mt-1 rounded-xl border border-navy-100 px-3 py-2.5 text-base text-navy-900" autoComplete="name" />
+                  </label>
+                  <label className="block text-xs text-navy-500">Parentesco
+                    <select value={form.parentesco} onChange={(e) => setForm({ ...form, parentesco: e.target.value })} className="w-full mt-1 rounded-xl border border-navy-100 px-3 py-2.5 text-base text-navy-900 bg-white">
+                      <option value="">Elige…</option>
+                      {PARENTESCOS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-xs text-navy-500">Teléfono de contacto (10 dígitos)
+                    <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="tel" autoComplete="tel" placeholder="55 1234 5678" className="w-full mt-1 rounded-xl border border-navy-100 px-3 py-2.5 text-base text-navy-900" />
+                  </label>
+                  {formError && <p className="text-stop text-sm">{formError}</p>}
+                  <p className="text-xs text-navy-400">Estos cambios solo se actualizan en Ruta Segura; no modifican tus datos en el plantel ni en otros sistemas.</p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setEditing(false)} className="flex-1 py-2.5 rounded-xl border border-navy-100 text-navy-600 font-medium">Cancelar</button>
+                    <button type="submit" disabled={saving} className="flex-1 py-2.5 rounded-xl bg-navy-800 text-white font-display font-semibold disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar'}</button>
+                  </div>
+                </form>
+              )}
+            </section>
+          </>
+        )}
+
+        {isFamily && student && (
           <>
             {/* Turno */}
             <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white border border-navy-100" role="tablist" aria-label="Turno">
               {[
-                { k: 'morning', label: 'Ida a la escuela', Icon: Sun },
-                { k: 'afternoon', label: 'Regreso a casa', Icon: Sunset },
+                { k: 'morning', label: 'Camino a IBIME', Icon: Sun },
+                { k: 'afternoon', label: 'Camino a casa', Icon: Sunset },
               ].map(({ k, label, Icon }) => (
                 <button
                   key={k}
@@ -784,7 +890,7 @@ export default function PublicTrack() {
                 <dl className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
                   <div>
                     <dt className="text-navy-400 text-xs">Recorrido</dt>
-                    <dd className="font-medium text-navy-800">{shift === 'morning' ? 'Ida a la escuela' : 'Regreso a casa'}</dd>
+                    <dd className="font-medium text-navy-800">{shiftTitle}</dd>
                   </div>
                   <div>
                     <dt className="text-navy-400 text-xs">Parada de tu hijo(a)</dt>
@@ -801,17 +907,6 @@ export default function PublicTrack() {
             )}
 
             <div className="text-center space-y-1 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setSavedStudents(forgetStudent(student.matricula));
-                  setStudent(null);
-                  setShowForm(true);
-                }}
-                className="text-xs text-navy-400 underline"
-              >
-                Dejar de seguir a {childName || 'este alumno'} en este teléfono
-              </button>
               <p className="text-xs text-navy-400">
                 Esta página se actualiza sola. Las horas son estimadas y pueden variar por tráfico.
               </p>
