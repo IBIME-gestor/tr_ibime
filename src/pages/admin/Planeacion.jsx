@@ -34,7 +34,17 @@ const schoolLoc = (s) => {
   const lat = num(s?.latitude); const lng = num(s?.longitude);
   return lat != null && lng != null ? { lat, lng } : null;
 };
-const studentLoc = (s) => (s?.geocodedLocation?.lat != null ? { lat: Number(s.geocodedLocation.lat), lng: Number(s.geocodedLocation.lng) } : null);
+// Prioridad: ubicación fijada/geocodificada → ubicación REAL de su última entrega en un recorrido.
+const studentLoc = (s) => {
+  if (s?.geocodedLocation?.lat != null) return { lat: Number(s.geocodedLocation.lat), lng: Number(s.geocodedLocation.lng) };
+  if (s?.lastDeliveredLocation?.lat != null) return { lat: Number(s.lastDeliveredLocation.lat), lng: Number(s.lastDeliveredLocation.lng) };
+  return null;
+};
+const locSource = (s) => {
+  if (s?.geocodedLocation?.lat != null) return s.locationSource === 'manual' ? 'fijada a mano' : 'por domicilio';
+  if (s?.lastDeliveredLocation?.lat != null) return 'real (última entrega)';
+  return '';
+};
 function meters(a, b) {
   const R = 6371000; const rad = (x) => (x * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat); const dLng = rad(b.lng - a.lng);
@@ -97,16 +107,19 @@ export default function Planeacion() {
   const [geoBusy, setGeoBusy] = useState(false);
   const [geoDone, setGeoDone] = useState(0);
   const stopGeo = useRef(false);
-  const pending = useMemo(() => students.filter((s) => !studentLoc(s) && (s.address || '').trim()), [students]);
+  const [geoFailed, setGeoFailed] = useState([]); // ids cuyo domicilio no se encontró (se ubican a mano)
+  const pending = useMemo(() => students.filter((s) => !studentLoc(s) && (s.address || '').trim() && !geoFailed.includes(s.id)), [students, geoFailed]);
   const noAddress = useMemo(() => students.filter((s) => !studentLoc(s) && !(s.address || '').trim()).length, [students]);
-  async function geocodePending() {
+  async function geocodePending(only = null) {
+    const list = only ? pending.filter((s) => only.includes(s.id)) : pending;
     stopGeo.current = false; setGeoBusy(true); setGeoDone(0);
     let n = 0;
-    for (const s of pending) {
+    for (const s of list) {
       if (stopGeo.current) break;
       const loc = await resolveStudentLocation(s, null);
       n += 1; setGeoDone(n);
       if (loc?.lat) setStudents((prev) => prev.map((x) => (x.id === s.id ? { ...x, geocodedLocation: loc } : x)));
+      else setGeoFailed((prev) => [...prev, s.id]);
     }
     setGeoBusy(false);
   }
@@ -128,6 +141,16 @@ export default function Planeacion() {
       setPlacingId('');
     } catch (e) { setError(e?.message || 'No se pudo guardar la ubicación del plantel.'); }
   }
+  async function placeStudent(latlng) {
+    if (!placingStudent) return;
+    const lat = Number(latlng.lat.toFixed(6)); const lng = Number(latlng.lng.toFixed(6));
+    try {
+      await Students.update(placingStudent, { geocodedLocation: { lat, lng }, locationSource: 'manual' });
+      setStudents((prev) => prev.map((x) => (x.id === placingStudent ? { ...x, geocodedLocation: { lat, lng }, locationSource: 'manual' } : x)));
+      setPlacingStudent('');
+    } catch (e) { setError(e?.message || 'No se pudo guardar la ubicación del alumno.'); }
+  }
+  function onMapPick(latlng) { if (placingId) placeSchool(latlng); else if (placingStudent) placeStudent(latlng); }
   async function checkAddress() {
     if (!addr.trim()) return;
     setAddrBusy(true); setAddrRes(null);
@@ -163,12 +186,38 @@ export default function Planeacion() {
   const [msg, setMsg] = useState('');
   const [plan, setPlan] = useState(null);
   const [running, setRunning] = useState(false);
+  const [placingStudent, setPlacingStudent] = useState(''); // alumno al que se le fija la ubicación con un clic en el mapa
+  const [schoolFilter, setSchoolFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [bulkSel, setBulkSel] = useState({});
+  const [bulkTo, setBulkTo] = useState('');
 
   const effRoute = (s) => (changes[s.id] ? changes[s.id].to : s.routeId || '');
   const routeStudents = useMemo(() => students.filter((s) => {
     if (!s.routeId && !changes[s.id]) return showUnrouted;
     return selRoutes.includes(s.routeId) || (changes[s.id] && selRoutes.includes(changes[s.id].to));
   }), [students, selRoutes, changes, showUnrouted]);
+  const visibleRoutes = useMemo(
+    () => routes.filter((r) => r.kind !== 'taller' && (!schoolFilter || r.schoolId === schoolFilter)),
+    [routes, schoolFilter]
+  );
+  const routeCounts = useMemo(() => {
+    const m = {};
+    students.forEach((s) => {
+      if (!s.routeId) return;
+      m[s.routeId] = m[s.routeId] || { total: 0, located: 0 };
+      m[s.routeId].total += 1;
+      if (studentLoc(s)) m[s.routeId].located += 1;
+    });
+    return m;
+  }, [students]);
+  const listStudents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return routeStudents
+      .filter((s) => !q || `${s.name} ${s.matricula || ''}`.toLowerCase().includes(q))
+      .sort((a, b) => (routeById[effRoute(a)]?.name || '~').localeCompare(routeById[effRoute(b)]?.name || '~') || (a.name || '').localeCompare(b.name || ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeStudents, search, routeById, changes]);
   const shownWithLoc = routeStudents.filter((s) => studentLoc(s));
   const shownNoLoc = routeStudents.length - shownWithLoc.length;
 
@@ -347,21 +396,26 @@ export default function Planeacion() {
       <div className="flex gap-2">{tabBtn('cobertura', 'Cobertura de planteles')}{tabBtn('rutas', 'Rutas y borradores')}</div>
       {error && <p className="rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm px-3 py-2">{error}</p>}
 
+      {geoFailed.length > 0 && !geoBusy && (
+        <div className="rounded-lg border border-slate-300 bg-slate-50 text-slate-700 text-xs px-3 py-2">
+          {geoFailed.length} domicilio(s) no se encontraron en el mapa. Ubícalos a mano con el botón «Ubicar» de la lista de alumnos.
+        </div>
+      )}
       {(pending.length > 0 || geoBusy) && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-xs px-3 py-2 flex flex-wrap items-center gap-3">
           <span>{pending.length} alumno(s) con domicilio aún sin ubicar en el mapa{noAddress ? ` · ${noAddress} sin domicilio capturado` : ''}. Ubicarlos toma ~1 segundo por alumno.</span>
           {!geoBusy
-            ? <button type="button" className="btn-admin-ghost" onClick={geocodePending}>Ubicar pendientes</button>
+            ? <button type="button" className="btn-admin-ghost" onClick={() => geocodePending()}>Ubicar pendientes</button>
             : <><span>Ubicando… {geoDone}/{pending.length + geoDone}</span><button type="button" className="btn-admin-ghost" onClick={() => { stopGeo.current = true; }}>Detener</button></>}
         </div>
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
         <div className="admin-card p-0 overflow-hidden" style={{ height: '72vh' }}>
-          <MapContainer center={MEXICO_CITY} zoom={11} style={{ height: '100%', width: '100%', cursor: placingId ? 'crosshair' : undefined }}>
+          <MapContainer center={MEXICO_CITY} zoom={11} style={{ height: '100%', width: '100%', cursor: placingId || placingStudent ? 'crosshair' : undefined }}>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <Fit points={mapPts} keyId={mapKey} />
-            <ClickCatcher active={!!placingId} onPick={placeSchool} />
+            <ClickCatcher active={!!placingId || !!placingStudent} onPick={onMapPick} />
 
             {(tab === 'cobertura' || showRings) && schoolsWithLoc.map((s) => (
               <Circle key={`ring-${s.id}`} center={[s.loc.lat, s.loc.lng]} radius={radiusKm * 1000}
@@ -397,7 +451,9 @@ export default function Planeacion() {
                     <div style={{ minWidth: 190 }}>
                       <b>{s.name}</b><br />{s.matricula || 'sin matrícula'}<br />
                       <span style={{ fontSize: 11 }}>{s.address || 'sin domicilio'}</span><br />
-                      <span style={{ fontSize: 11 }}>Ruta actual: {routeById[s.routeId]?.name || 'sin ruta'}</span>
+                      <span style={{ fontSize: 11 }}>Ruta actual: {routeById[s.routeId]?.name || 'sin ruta'}</span><br />
+                      <span style={{ fontSize: 11, color: '#64748b' }}>Ubicación: {locSource(s)}</span>
+                      <button type="button" style={{ display: 'block', fontSize: 11, textDecoration: 'underline', marginTop: 2 }} onClick={() => setPlacingStudent(s.id)}>Corregir ubicación en el mapa</button>
                       <select style={{ display: 'block', width: '100%', marginTop: 6 }} value={changes[s.id]?.to || ''}
                         onChange={(e) => setMove(s, e.target.value)}>
                         <option value="">Sin cambio</option>
@@ -467,18 +523,83 @@ export default function Planeacion() {
           ) : (
             <>
               <div className="admin-card space-y-2 text-sm">
-                <p className="font-semibold text-navy-800">Rutas a mostrar</p>
-                <div className="max-h-44 overflow-y-auto space-y-1">
-                  {routes.map((r) => (
-                    <label key={r.id} className="flex items-center gap-2 text-xs">
-                      <input type="checkbox" checked={selRoutes.includes(r.id)} onChange={(e) => setSelRoutes((p) => (e.target.checked ? [...p, r.id] : p.filter((x) => x !== r.id)))} />
-                      <span style={{ background: colorOf(r.id) }} className="inline-block w-3 h-3 rounded-full" />{r.name}
-                    </label>
-                  ))}
+                <p className="font-semibold text-navy-800">Rutas a mostrar (puedes elegir varias)</p>
+                <div className="flex flex-wrap gap-2">
+                  <select className="admin-input !w-auto flex-1 min-w-[140px]" value={schoolFilter} onChange={(e) => setSchoolFilter(e.target.value)}>
+                    <option value="">Todos los planteles</option>
+                    {schools.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                  </select>
+                  <button type="button" className="btn-admin-ghost" onClick={() => setSelRoutes((p) => Array.from(new Set([...p, ...visibleRoutes.map((r) => r.id)])))}>Elegir todas</button>
+                  <button type="button" className="btn-admin-ghost" onClick={() => setSelRoutes([])}>Ninguna</button>
+                </div>
+                <div className="max-h-52 overflow-y-auto space-y-1">
+                  {visibleRoutes.map((r) => {
+                    const c = routeCounts[r.id] || { total: 0, located: 0 };
+                    return (
+                      <label key={r.id} className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" checked={selRoutes.includes(r.id)} onChange={(e) => setSelRoutes((p) => (e.target.checked ? [...p, r.id] : p.filter((x) => x !== r.id)))} />
+                        <span style={{ background: colorOf(r.id) }} className="inline-block w-3 h-3 rounded-full shrink-0" />
+                        <span className="flex-1 truncate">{r.name}</span>
+                        <span className={`shrink-0 ${c.total && c.located < c.total ? 'text-amber-700' : 'text-navy-400'}`}>{c.located}/{c.total} en mapa</span>
+                      </label>
+                    );
+                  })}
+                  {!visibleRoutes.length && <p className="text-xs text-navy-400">No hay rutas para mostrar.</p>}
                 </div>
                 <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showUnrouted} onChange={(e) => setShowUnrouted(e.target.checked)} /> Mostrar alumnos sin ruta</label>
                 <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={showRings} onChange={(e) => setShowRings(e.target.checked)} /> Mostrar cobertura de planteles</label>
                 <p className="text-xs text-navy-500">{shownWithLoc.length} en el mapa{shownNoLoc ? ` · ${shownNoLoc} sin ubicar` : ''}. Haz clic en un punto para proponer su cambio de ruta.</p>
+                {!selRoutes.length && !showUnrouted && <p className="text-xs text-amber-700">Elige al menos una ruta para ver a sus alumnos en el mapa.</p>}
+                {selRoutes.length > 0 && routeStudents.length > 0 && shownWithLoc.length === 0 && (
+                  <p className="text-xs text-red-700">Las rutas elegidas tienen alumnos pero ninguno tiene ubicación. Usa «Ubicar estas rutas» o fíjalos a mano en la lista de abajo.</p>
+                )}
+                {shownNoLoc > 0 && (
+                  <button type="button" className="btn-admin-ghost" disabled={geoBusy}
+                    onClick={() => geocodePending(routeStudents.map((x) => x.id))}>
+                    Ubicar estas rutas por domicilio ({routeStudents.filter((x) => !studentLoc(x) && (x.address || '').trim() && !geoFailed.includes(x.id)).length})
+                  </button>
+                )}
+                {placingStudent && (
+                  <p className="text-xs text-teal-700 flex items-center justify-between gap-2">
+                    Haz clic en el mapa donde vive {students.find((x) => x.id === placingStudent)?.name}.
+                    <button type="button" className="underline" onClick={() => setPlacingStudent('')}>Cancelar</button>
+                  </p>
+                )}
+              </div>
+
+              <div className="admin-card space-y-2 text-sm">
+                <p className="font-semibold text-navy-800">Alumnos de las rutas elegidas ({listStudents.length})</p>
+                <input className="admin-input" placeholder="Buscar por nombre o matrícula" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <div className="flex flex-wrap gap-2 items-center">
+                  <select className="admin-input !w-auto flex-1 min-w-[140px]" value={bulkTo} onChange={(e) => setBulkTo(e.target.value)}>
+                    <option value="">Mover marcados a…</option>
+                    {routes.filter((r) => r.kind !== 'taller').map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                  <button type="button" className="btn-admin-primary" disabled={!bulkTo || !Object.values(bulkSel).some(Boolean)}
+                    onClick={() => { listStudents.filter((x) => bulkSel[x.id]).forEach((x) => setMove(x, bulkTo)); setBulkSel({}); }}>
+                    Proponer
+                  </button>
+                </div>
+                <ul className="max-h-72 overflow-y-auto divide-y divide-navy-50 text-xs">
+                  {listStudents.slice(0, 250).map((st) => {
+                    const eff = effRoute(st); const moved = !!changes[st.id]; const hasLoc = !!studentLoc(st);
+                    return (
+                      <li key={st.id} className="py-1.5 flex items-center gap-2">
+                        <input type="checkbox" checked={!!bulkSel[st.id]} onChange={(e) => setBulkSel((p) => ({ ...p, [st.id]: e.target.checked }))} />
+                        <span style={{ background: colorOf(eff) }} className="inline-block w-2.5 h-2.5 rounded-full shrink-0" />
+                        <span className={`flex-1 min-w-0 truncate ${moved ? 'font-semibold' : ''}`} title={st.address || ''}>{st.name}</span>
+                        {!hasLoc && (
+                          <button type="button" className="shrink-0 text-amber-700 underline" onClick={() => setPlacingStudent(st.id)}>Ubicar</button>
+                        )}
+                        <select className="shrink-0 max-w-[120px] border border-navy-100 rounded px-1 py-0.5" value={changes[st.id]?.to || ''} onChange={(e) => setMove(st, e.target.value)}>
+                          <option value="">{routeById[st.routeId]?.name || 'sin ruta'}</option>
+                          {routes.filter((r) => r.kind !== 'taller' && r.id !== st.routeId).map((r) => <option key={r.id} value={r.id}>→ {r.name}</option>)}
+                        </select>
+                      </li>
+                    );
+                  })}
+                  {!listStudents.length && <li className="py-2 text-navy-400">Elige rutas para ver a sus alumnos.</li>}
+                </ul>
               </div>
 
               <div className="admin-card space-y-2 text-sm">
