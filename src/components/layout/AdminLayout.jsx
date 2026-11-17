@@ -189,6 +189,8 @@ export default function AdminLayout() {
   const mainRef = useRef(null);
 
   const role = profile?.role;
+  // Las pantallas de listas conservan el diseño original de la app (ver .legacy-lists en index.css)
+  const classicLists = /^\/admin\/(formar-ruta|listas\/|alumnos-quitados)/.test(location.pathname);
 
   const visibleGroups = useMemo(
     () =>
@@ -483,7 +485,7 @@ export default function AdminLayout() {
 
       <main
         ref={mainRef}
-        className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6 lg:px-8 ibime-watermark"
+        className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6 lg:px-8 ibime-watermark${classicLists ? ' legacy-lists' : ''}`}
       >
         <div className="max-w-[1600px] mx-auto">
           <Outlet />
