@@ -417,7 +417,7 @@ export default function OperatorPortalPage() {
   const showRoutePicker = routes.length > 1;
 
   return (
-    <div className="min-h-screen bg-navy-50">
+    <div className="min-h-screen bg-paper">
       <header className="bg-navy-800 text-white">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center gap-3">
           <img src="/ibime-shield.png" alt="IBIME" className="w-10 h-10" />

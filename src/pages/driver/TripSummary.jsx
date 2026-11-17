@@ -180,7 +180,7 @@ export default function TripSummary() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               {routeLine.length > 1 && (
-                <Polyline positions={routeLine} pathOptions={{ color: '#152238', weight: 3, opacity: 0.5, dashArray: '6 6' }} />
+                <Polyline positions={routeLine} pathOptions={{ color: '#0a2236', weight: 3, opacity: 0.5, dashArray: '6 6' }} />
               )}
               {startLoc && (
                 <Marker position={[startLoc.lat, startLoc.lng]} icon={startFlagIcon()}>

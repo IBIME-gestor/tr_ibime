@@ -1016,11 +1016,11 @@ export default function TripRunner() {
             {doneMarkers.length > 1 && (
               <Polyline
                 positions={doneMarkers.map((m) => [m.lat, m.lng])}
-                pathOptions={{ color: '#2E7D57', weight: 3, opacity: 0.7 }}
+                pathOptions={{ color: '#25744a', weight: 3, opacity: 0.7 }}
               />
             )}
             {doneMarkers.map((m) => (
-              <Marker key={`done-${m.id}`} position={[m.lat, m.lng]} icon={numberedIcon(m.seq, '#2E7D57')}>
+              <Marker key={`done-${m.id}`} position={[m.lat, m.lng]} icon={numberedIcon(m.seq, '#25744a')}>
                 <Popup>
                   <div className="text-xs leading-relaxed">
                     <p className="font-semibold">{m.seq}. {m.name}</p>

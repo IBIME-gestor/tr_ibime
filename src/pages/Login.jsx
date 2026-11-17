@@ -24,7 +24,7 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen bg-navy-800 flex items-center justify-center p-6 overflow-hidden">
+    <div className="login-page relative min-h-screen flex items-center justify-center p-6 overflow-hidden">
       <LoadingOverlay show={loading} label="Entrando…" />
       {/* Marca de agua de fondo */}
       <img
@@ -49,19 +49,19 @@ export default function Login() {
         <h1 className="text-3xl font-display font-bold text-white cascade-item" style={{ animationDelay: '80ms' }}>
           Ruta Segura
         </h1>
-        <p className="text-navy-100 mt-1 mb-8 cascade-item" style={{ animationDelay: '130ms' }}>
+        <p className="text-navy-300 mt-1 mb-8 cascade-item" style={{ animationDelay: '130ms' }}>
           Transporte escolar
         </p>
 
-        <div className="ticket-card cascade-item" style={{ animationDelay: '190ms' }}>
-          <p className="text-navy-600 mb-5">
+        <div className="login-card cascade-item" style={{ animationDelay: '190ms' }}>
+          <p className="text-navy-400 text-sm mb-5">
             Entra con tu cuenta de Google institucional
             <span className="block font-semibold text-navy-800">@ibime.edu.mx</span>
           </p>
           <button
             onClick={handleClick}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 rounded-xl border-2 border-navy-100 px-6 py-4 font-display font-semibold text-navy-800 transition-transform active:scale-[0.98] hover:border-navy-600"
+            className="btn-admin-primary w-full !h-12 gap-3 text-base"
           >
             <svg width="22" height="22" viewBox="0 0 48 48">
               <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l6-6C34.9 5.5 29.7 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5 44.5 35.3 44.5 24c0-1.2-.1-2.4-.3-3.5z"/>
@@ -69,9 +69,9 @@ export default function Login() {
               <path fill="#4CAF50" d="M24 44.5c5.6 0 10.7-1.9 14.6-5.2l-6.7-5.7c-2 1.5-4.7 2.4-7.9 2.4-5.3 0-9.7-3.1-11.3-7.5l-6.6 5.1C9.9 40.3 16.4 44.5 24 44.5z"/>
               <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6.7 5.7C41.5 36 44.5 30.6 44.5 24c0-1.2-.1-2.4-.3-3.5z"/>
             </svg>
-            Entrar con Google
+            Continuar con Google
           </button>
-          <div className="mt-5 pt-4 border-t border-dashed border-navy-100 flex items-center justify-between text-navy-300 text-xs">
+          <div className="mt-5 pt-4 border-t border-dashed border-navy-100 flex items-center justify-between text-navy-400 text-xs">
             <span className="font-display">Ruta Segura</span>
             <span className="font-display">{new Date().getFullYear()}</span>
           </div>
@@ -83,7 +83,7 @@ export default function Login() {
           </div>
         )}
 
-        <p className="text-navy-100 text-xs mt-6 cascade-item" style={{ animationDelay: '240ms' }}>
+        <p className="text-navy-300 text-xs mt-6 cascade-item" style={{ animationDelay: '240ms' }}>
           El acceso lo autoriza el administrador registrando tu correo
           institucional en la app. Si es tu primera vez y ves un error
           arriba, avísale para que lo registre.

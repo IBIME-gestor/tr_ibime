@@ -24,7 +24,7 @@ L.Icon.Default.mergeOptions({
 /* ------------------------------------------------------------------ */
 
 const SHIFTS = {
-  morning:   { label: 'Entrada · recolección (ida)', short: 'Entrada', locKey: 'boardedLocation', timeKey: 'boardedAt', color: '#FFC93C' },
+  morning:   { label: 'Entrada · recolección (ida)', short: 'Entrada', locKey: 'boardedLocation', timeKey: 'boardedAt', color: '#d89a2b' },
   afternoon: { label: 'Salida · entrega (vuelta)', short: 'Salida', locKey: 'deliveredLocation', timeKey: 'deliveredAt', color: '#2F80ED' },
 };
 const MEXICO_CITY = [19.4326, -99.1332];
@@ -73,7 +73,7 @@ function MapBox({ title, markers, line, schoolLoc, schoolName, startLoc, endLoc,
           <MapContainer center={pts[0] || MEXICO_CITY} zoom={13} style={{ height: '100%', width: '100%' }}>
             <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <Fit points={pts} keyId={keyId} />
-            {line && markers.length > 1 && <Polyline positions={markers.map((m) => [m.lat, m.lng])} pathOptions={{ color: '#152238', weight: 3, opacity: 0.55, dashArray: '6 6' }} />}
+            {line && markers.length > 1 && <Polyline positions={markers.map((m) => [m.lat, m.lng])} pathOptions={{ color: '#0a2236', weight: 3, opacity: 0.55, dashArray: '6 6' }} />}
             {schoolLoc?.lat && <Marker position={[schoolLoc.lat, schoolLoc.lng]} icon={schoolIcon()}><Popup>{schoolName || 'Plantel'}</Popup></Marker>}
             {startLoc?.lat != null && <Marker position={[startLoc.lat, startLoc.lng]} icon={startFlagIcon()}><Popup>Salida · inicio del recorrido</Popup></Marker>}
             {endLoc?.lat != null && <Marker position={[endLoc.lat, endLoc.lng]} icon={finishFlagIcon()}><Popup>Meta · cierre del recorrido</Popup></Marker>}

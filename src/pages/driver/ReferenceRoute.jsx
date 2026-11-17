@@ -114,7 +114,7 @@ export default function ReferenceRoute() {
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 {myLocation && (
-                  <Marker position={[myLocation.lat, myLocation.lng]} icon={numberedIcon('•', '#152238')}>
+                  <Marker position={[myLocation.lat, myLocation.lng]} icon={numberedIcon('•', '#0a2236')}>
                     <Popup>Tu ubicación</Popup>
                   </Marker>
                 )}

@@ -130,7 +130,7 @@ function FitOnce({ points }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Línea del recorrido: salida → paradas → meta, con el camioncito     */
+/*  Línea del recorrido: salida → paradas → meta, con el transporte     */
 /* ------------------------------------------------------------------ */
 function RouteTrack({ stopsCount, myIndex, busX, progress, shift, completed }) {
   const inset = 50; // px reservados en cada extremo para las banderas
@@ -198,7 +198,7 @@ function RouteTrack({ stopsCount, myIndex, busX, progress, shift, completed }) {
         </div>
       )}
 
-      {/* camioncito */}
+      {/* transporte */}
       <div
         className="absolute transition-[left] duration-1000 ease-in-out motion-reduce:transition-none"
         style={{ left: x(busX), top: 12, transform: 'translateX(-50%)' }}
@@ -718,7 +718,7 @@ export default function PublicTrack() {
 
   /* ---------------------------- render ---------------------------- */
   return (
-    <div className="min-h-screen bg-navy-50">
+    <div className="min-h-screen bg-paper">
       <LoadingOverlay show={loading || loginBusy} label={loginBusy ? 'Abriendo Google…' : 'Cargando…'} />
 
       <header className="bg-navy-800 text-white">
