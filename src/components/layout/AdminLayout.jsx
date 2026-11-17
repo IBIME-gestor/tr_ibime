@@ -248,15 +248,15 @@ export default function AdminLayout() {
   const flat = visibleGroups.length === 1 && realItems(visibleGroups[0]).length === 1;
 
   return (
-    <div className="h-screen flex flex-col bg-navy-50 overflow-hidden">
-      <header className="shrink-0 bg-navy-800 text-white relative z-40 shadow-panel">
+    <div className="h-screen flex flex-col bg-paper overflow-hidden">
+      <header className="shrink-0 bg-navy-900 text-white relative z-40 shadow-panel">
         <div className="max-w-[1600px] mx-auto px-3 sm:px-5 h-14 flex items-center gap-3">
           {/* Marca */}
           <NavLink to={role === 'cashier' ? '/admin/caja' : '/admin'} className="flex items-center gap-2.5 shrink-0">
             <img src="/ibime-shield.png" alt="IBIME" className="w-8 h-8" />
             <div className="leading-tight">
               <p className="font-display text-sm sm:text-base font-semibold">Ruta Segura</p>
-              <p className="hidden sm:block text-navy-400 text-[0.65rem]">
+              <p className="hidden sm:block text-navy-300 text-[0.65rem]">
                 {role === 'cashier' ? 'Caja' : 'Gestión de transporte escolar'}
               </p>
             </div>
@@ -279,7 +279,7 @@ export default function AdminLayout() {
                     end={item.end}
                     className={({ isActive }) =>
                       `relative flex items-center gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
-                        isActive ? 'text-white bg-navy-700' : 'text-navy-100 hover:text-white hover:bg-navy-700/60'
+                        isActive ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : 'text-navy-100 hover:text-white hover:bg-white/10'
                       }`
                     }
                   >
@@ -301,20 +301,17 @@ export default function AdminLayout() {
                     aria-expanded={isOpen}
                     onClick={() => setOpenGroup(isOpen ? null : g.key)}
                     className={`relative flex items-center gap-1.5 2xl:gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
-                      active || isOpen ? 'text-white bg-navy-700' : 'text-navy-100 hover:text-white hover:bg-navy-700/60'
+                      active ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : isOpen ? 'text-white bg-white/10' : 'text-navy-100 hover:text-white hover:bg-white/10'
                     }`}
                   >
                     <GroupIcon size={16} className="hidden 2xl:block" />
                     {g.label}
                     <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    {active && (
-                      <span className="absolute left-2.5 right-2.5 -bottom-[7px] h-[3px] rounded-full bg-signal-yellow" aria-hidden="true" />
-                    )}
                   </button>
 
                   {isOpen && (
                     <div className="absolute left-0 top-full pt-2 min-w-[240px] z-50">
-                      <ul className="bg-white text-navy-800 rounded-lg border border-navy-100 shadow-panel py-1.5 overflow-hidden">
+                      <ul className="bg-white text-navy-800 rounded-xl border border-navy-100 shadow-panel py-1.5 overflow-hidden">
                         {g.items.map((item, idx) => (item.heading ? (
                           <li key={`h-${item.heading}`} className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-navy-400 select-none">
                             {item.heading}
@@ -327,8 +324,8 @@ export default function AdminLayout() {
                               className={({ isActive }) =>
                                 `flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors border-l-[3px] pl-[13px] ${
                                   isActive
-                                    ? 'bg-navy-50 text-navy-900 border-signal-yellow'
-                                    : 'text-navy-600 hover:bg-navy-50 border-transparent'
+                                    ? 'bg-signal-light text-navy-900 border-signal-yellow'
+                                    : 'text-navy-600 hover:bg-signal-light border-transparent'
                                 }`
                               }
                             >
@@ -352,7 +349,7 @@ export default function AdminLayout() {
             <NavLink
               to="/admin/agenda"
               title={agenda.count ? `${agenda.count} pendiente(s) por atender` : 'Mi agenda'}
-              className="relative shrink-0 p-2 rounded-md text-navy-100 hover:text-white hover:bg-navy-700"
+              className="relative shrink-0 p-2 rounded-md text-navy-100 hover:text-white hover:bg-white/10"
             >
               <Bell size={18} />
               {agenda.count > 0 && (
@@ -366,9 +363,12 @@ export default function AdminLayout() {
           {/* Usuario (escritorio) */}
           <div className="hidden xl:flex items-center gap-3 shrink-0">
             <p className="hidden 2xl:block text-xs text-navy-100 max-w-[160px] truncate">{profile?.name || 'Administrador'}</p>
+            <span className="hidden 2xl:inline-block text-[0.65rem] font-extrabold uppercase tracking-wide text-navy-100 bg-white/10 border border-white/15 px-2 py-0.5 rounded-full">
+              {role === 'cashier' ? 'Caja' : 'Administrador'}
+            </span>
             <button
               onClick={logout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-navy-100 hover:text-white hover:bg-navy-700"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-navy-100 border border-white/15 bg-white/5 hover:text-white hover:bg-white/10"
             >
               <LogOut size={14} /> Salir
             </button>
@@ -377,7 +377,7 @@ export default function AdminLayout() {
           {/* Botón de menú (móvil / tablet) */}
           <button
             type="button"
-            className="xl:hidden p-2 -mr-2 rounded-md hover:bg-navy-700"
+            className="xl:hidden p-2 -mr-2 rounded-md hover:bg-white/10"
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Menú"
             aria-expanded={mobileOpen}
@@ -388,7 +388,7 @@ export default function AdminLayout() {
 
         {/* Panel móvil / tablet */}
         {mobileOpen && (
-          <div className="xl:hidden absolute left-0 right-0 top-full bg-navy-800 border-t border-navy-700 shadow-panel max-h-[calc(100vh-3.5rem)] overflow-y-auto">
+          <div className="xl:hidden absolute left-0 right-0 top-full bg-navy-900 border-t border-navy-700 shadow-panel max-h-[calc(100vh-3.5rem)] overflow-y-auto">
             <nav className="px-3 py-3 flex flex-col gap-1" aria-label="Módulos">
               {visibleGroups.map((g, gi) => {
                 const GroupIcon = g.icon;
@@ -404,7 +404,7 @@ export default function AdminLayout() {
                       end={item.end}
                       className={({ isActive }) =>
                         `nav-cascade flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium ${
-                          isActive ? 'bg-navy-700 text-white' : 'text-navy-100 hover:bg-navy-700/60'
+                          isActive ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : 'text-navy-100 hover:bg-white/10'
                         }`
                       }
                       style={{ animationDelay: `${gi * 28}ms` }}
@@ -421,7 +421,7 @@ export default function AdminLayout() {
                       onClick={() => setExpanded(isOpen ? '' : g.key)}
                       aria-expanded={isOpen}
                       className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-semibold ${
-                        active ? 'text-white bg-navy-700/70' : 'text-navy-100 hover:bg-navy-700/60'
+                        active ? 'text-white bg-white/10' : 'text-navy-100 hover:bg-white/10'
                       }`}
                     >
                       <GroupIcon size={18} />
@@ -442,8 +442,8 @@ export default function AdminLayout() {
                               className={({ isActive }) =>
                                 `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm ${
                                   isActive
-                                    ? 'text-white bg-navy-700 font-semibold'
-                                    : 'text-navy-100 hover:text-white hover:bg-navy-700/60'
+                                    ? 'text-navy-900 bg-signal-yellow font-bold'
+                                    : 'text-navy-100 hover:text-white hover:bg-white/10'
                                 }`
                               }
                             >
@@ -462,7 +462,7 @@ export default function AdminLayout() {
               <p className="text-sm text-navy-200 truncate">{profile?.name || 'Administrador'}</p>
               <button
                 onClick={logout}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-md text-sm text-navy-100 hover:bg-navy-700"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-navy-100 border border-white/15 hover:bg-white/10"
               >
                 <LogOut size={15} /> Cerrar sesión
               </button>

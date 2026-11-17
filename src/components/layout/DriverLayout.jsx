@@ -13,9 +13,9 @@ export default function DriverLayout() {
   const { pending, ack } = useNotices();
 
   return (
-    <div className="min-h-screen bg-navy-50 flex flex-col">
+    <div className="min-h-screen bg-paper flex flex-col">
       <NoticeGate pending={pending} ack={ack} />
-      <header className="bg-navy-800 text-white sticky top-0 z-10">
+      <header className="bg-navy-900 text-white sticky top-0 z-10 shadow-panel">
         <div className="px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
           <button
             onClick={() => navigate('/chofer')}
@@ -27,11 +27,11 @@ export default function DriverLayout() {
           <div className="flex items-center gap-3 text-sm">
             <span className="text-navy-100 truncate max-w-[40vw] sm:max-w-none">
               {profile?.name}
-              {profile?.role === 'nanny' && <span className="text-navy-400"> · Nanny</span>}
+              {profile?.role === 'nanny' && <span className="text-navy-300"> · Nanny</span>}
             </span>
             <button
               onClick={logout}
-              className="bg-navy-700 px-3 py-1.5 rounded-lg shrink-0"
+              className="border border-white/15 bg-white/5 hover:bg-white/10 font-bold px-3 py-1.5 rounded-lg shrink-0"
             >
               Salir
             </button>
