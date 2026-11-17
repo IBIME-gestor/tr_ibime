@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Trash2, CircleDollarSign } from 'lucide-react';
+import Drawer from '../../components/Drawer';
+import { Pencil, Trash2, CircleDollarSign, Plus } from 'lucide-react';
 import { PricingConcepts } from '../../firebase/services';
 
 const emptyForm = {
@@ -25,6 +26,9 @@ export default function Pricing() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { reset(); setDrawerOpen(true); };
+  const closeDrawer = () => { reset(); setDrawerOpen(false); };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -80,6 +84,7 @@ export default function Pricing() {
       else await PricingConcepts.create(data);
       await load();
       reset();
+      setDrawerOpen(false);
     } catch (err) {
       console.error('Error guardando concepto:', err);
       setError(err?.message || 'No se pudo guardar el concepto.');
@@ -90,6 +95,7 @@ export default function Pricing() {
 
   function edit(item) {
     setEditingId(item.id);
+    setDrawerOpen(true);
     setForm({
       name: item.name || '',
       description: item.description || '',
@@ -114,22 +120,23 @@ export default function Pricing() {
 
   return (
     <div>
-      <div className="mb-5">
+      <div className="page-head">
+      <div>
         <h1 className="admin-h1 mb-1">Conceptos y costos</h1>
         <p className="text-sm text-navy-400">
           Aquí defines los conceptos de cobro. Los conceptos son independientes de las rutas;
           después se asignan a cada ruta según su modalidad de servicio.
         </p>
       </div>
+        <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nuevo concepto</button>
+      </div>
 
-      {error && <div className="admin-card mb-5 border border-stop/20 text-stop text-sm">{error}</div>}
+      {error && !drawerOpen && <div className="admin-card mb-5 border border-stop/20 text-stop text-sm">{error}</div>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[380px_minmax(0,1fr)] gap-5 items-start">
-        <form onSubmit={handleSubmit} className="admin-card lg:sticky lg:top-6">
-          <div className="flex items-center gap-2 mb-3">
-            <CircleDollarSign size={17} className="text-navy-500" />
-            <p className="font-display font-semibold text-sm">{editingId ? 'Editar concepto' : 'Nuevo concepto'}</p>
-          </div>
+      <div>
+        <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar concepto' : 'Nuevo concepto'} size="md">
+<form onSubmit={handleSubmit} className="pb-0">
+          
 
           <div className="space-y-3">
             <div>
@@ -161,11 +168,13 @@ export default function Pricing() {
             </label>
           </div>
 
-          <div className="flex gap-2 mt-4">
+          {error && <p className="text-sm text-stop mt-3">{error}</p>}
+        <div className="drawer-actions">
             <button disabled={saving} className="btn-admin-primary flex-1">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear concepto'}</button>
-            {editingId && <button type="button" onClick={reset} className="btn-admin-ghost">Cancelar</button>}
+            <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
           </div>
         </form>
+</Drawer>
 
         <div className="admin-card p-0 overflow-hidden">
           <div className="px-5 py-4 border-b border-navy-100">

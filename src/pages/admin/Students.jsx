@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import Drawer from '../../components/Drawer';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -425,7 +426,7 @@ export default function StudentsPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-5 items-start">
+      <div>
         {/* -------------------------------------------------------------- */}
         {/* Columna izquierda: buscador, filtros y lista de alumnos         */}
         {/* -------------------------------------------------------------- */}
@@ -545,12 +546,14 @@ export default function StudentsPage() {
         {/* -------------------------------------------------------------- */}
         {/* Columna derecha: panel de detalle / formulario                  */}
         {/* -------------------------------------------------------------- */}
-        <div className="lg:sticky lg:top-6">
+        <Drawer
+          open={showingForm || !!selectedStudent}
+          onClose={() => { if (showingForm) handleCancelForm(); else setSelectedId(null); }}
+          size="lg"
+          title={showingForm ? (mode === 'edit' ? `Editar a ${form.name || 'alumno'}` : 'Nuevo alumno') : 'Ficha del alumno'}
+        >
           {showingForm ? (
-            <form onSubmit={handleSubmit} className="admin-card shadow-panel transition-shadow">
-              <p className="font-display font-semibold text-base text-navy-800 mb-4">
-                {mode === 'edit' ? `Editar a ${form.name || 'alumno'}` : 'Nuevo alumno'}
-              </p>
+            <form onSubmit={handleSubmit} className="pb-0">
               <div className="space-y-4">
                 <div>
                   <SectionLabel icon={User}>Datos del alumno</SectionLabel>
@@ -893,7 +896,7 @@ export default function StudentsPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 mt-5">
+              <div className="drawer-actions">
                 <button type="submit" className="btn-admin-primary flex-1">
                   {mode === 'edit' ? 'Guardar cambios' : 'Agregar alumno'}
                 </button>
@@ -903,7 +906,7 @@ export default function StudentsPage() {
               </div>
             </form>
           ) : selectedStudent ? (
-            <div className="admin-card shadow-panel">
+            <div>
               <div className="flex items-start justify-between gap-2 mb-4">
                 <div className="flex items-start gap-3 min-w-0">
                   <div className="w-11 h-11 rounded-full bg-navy-50 flex items-center justify-center shrink-0">
@@ -919,13 +922,6 @@ export default function StudentsPage() {
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedId(null)}
-                  className="text-navy-300 hover:text-navy-600 shrink-0"
-                  title="Cerrar"
-                >
-                  <X size={18} />
-                </button>
               </div>
 
               <div className="flex gap-4 border-b border-navy-100 mb-4">
@@ -1063,7 +1059,7 @@ export default function StudentsPage() {
                 </div>
               )}
 
-              <div className="flex gap-2 mt-5 pt-4 border-t border-navy-100">
+              <div className="drawer-actions">
                 <button onClick={handleEditClick} className="btn-admin-ghost flex-1">
                   <Pencil size={14} /> Editar alumno
                 </button>
@@ -1075,16 +1071,8 @@ export default function StudentsPage() {
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="admin-card shadow-panel text-center py-10">
-              <User size={28} className="mx-auto text-navy-200 mb-2" />
-              <p className="text-sm text-navy-400">
-                Selecciona un alumno de la lista para ver su información,
-                <br />o da clic en "Nuevo alumno" para dar de alta a uno.
-              </p>
-            </div>
-          )}
-        </div>
+          ) : null}
+        </Drawer>
       </div>
     </div>
   );

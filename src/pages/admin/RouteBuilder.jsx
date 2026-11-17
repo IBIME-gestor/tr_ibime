@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, RefreshCw, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import Drawer from '../../components/Drawer';
 import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 import { tallerDatesFor } from '../../firebase/trips';
 
@@ -1190,8 +1191,7 @@ export default function RouteBuilder() {
       )}
 
       {route && (lookupStudent || editingStudentId) && (
-        <div className="admin-card border-signal-yellow/30">
-          <div className="flex justify-between items-center mb-3"><div><p className="font-display font-semibold">{editingStudentId ? 'Editar alumno en la lista' : 'Agregar alumno a la ruta'}</p><p className="text-xs text-navy-400">{lookupStudent?.name} · {lookupStudent?.matricula}</p></div><button onClick={resetAddFlow} className="btn-admin-ghost"><X size={14}/></button></div>
+        <Drawer open onClose={() => resetAddFlow()} classic size="lg" title={editingStudentId ? 'Editar alumno en la lista' : 'Agregar alumno a la ruta'} subtitle={`${lookupStudent?.name || ''} · ${lookupStudent?.matricula || ''}`}>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className="admin-label">Tipo de servicio</label><select value={addForm.tipoServicio} onChange={(e) => setAddForm({ ...addForm, tipoServicio: e.target.value })} className="admin-select">{SERVICE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
             {addForm.tipoServicio !== 'completo' && <div><label className="admin-label">{addForm.tipoServicio === 'diario' ? 'Servicio del día' : 'Entrada o salida'}</label><select value={addForm.medioServicio} onChange={(e) => setAddForm({ ...addForm, medioServicio: e.target.value })} className="admin-select"><option value="entrada">Solo entrada</option><option value="salida">Solo salida</option>{addForm.tipoServicio === 'diario' && <option value="ambas">Entrada + salida</option>}</select></div>}
@@ -1199,15 +1199,23 @@ export default function RouteBuilder() {
           {addForm.tipoServicio === 'medio' && <div className="mt-3"><label className="admin-label">¿Qué días?</label><div className="flex gap-2">{DAY_META.map((d) => <label key={d.value} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.diasSemana.includes(d.value) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.diasSemana.includes(d.value)} onChange={() => toggleDiaSemana(d.value)}/>{d.short}</label>)}</div></div>}
           {addForm.tipoServicio === 'diario' && <div className="mt-3"><label className="admin-label">¿Qué fechas?</label><div className="flex flex-wrap gap-1.5">{dates.map((date) => <label key={date} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.fechasDiarias.includes(date) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.fechasDiarias.includes(date)} onChange={() => toggleFechaDiaria(date)}/>{dayHeader(date)}</label>)}</div></div>}
           {(() => { const preview = buildStudentRow({ ...lookupStudent, ...addForm }, dates, concepts, route); return <div className="mt-3 p-3 rounded bg-navy-50 text-xs"><b>Concepto:</b> {preview.concept || 'No configurado'} · <b>Monto:</b> ${preview.estimatedAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} · <b>Días:</b> {preview.daysCount}</div>; })()}
-          <div className="flex gap-2 mt-3"><button disabled={saving} onClick={saveStudentToRoster} className="btn-admin-primary"><Save size={14}/>{editingStudentId ? 'Guardar cambios' : 'Agregar alumno'}</button><button onClick={resetAddFlow} className="btn-admin-ghost">Cancelar</button></div>
-          {lookupError && <p className="text-stop text-xs mt-2">{lookupError}</p>}
-        </div>
+          {lookupError && <p className="text-stop text-xs mt-3">{lookupError}</p>}
+          <div className="drawer-actions"><button disabled={saving} onClick={saveStudentToRoster} className="btn-admin-primary"><Save size={14}/>{editingStudentId ? 'Guardar cambios' : 'Agregar alumno'}</button><button onClick={resetAddFlow} className="btn-admin-ghost">Cancelar</button></div>
+        </Drawer>
       )}
 
       {currentList && (
         <div className="admin-card p-0 overflow-hidden">
           <div className="px-3 py-3 border-b border-navy-100 flex flex-wrap justify-between gap-2"><div><b>{route?.name || 'Ruta'}</b><span className="text-xs text-navy-400 ml-2">{list.length} alumnos visibles</span></div><div className="text-xs text-navy-500">Estimado: <b>${filteredTotal().toLocaleString('es-MX', { minimumFractionDigits: 2 })}</b></div></div>
-          {movingRowId && <div className="m-3 p-3 rounded-lg bg-signal-yellow/10 border border-signal-yellow/30 text-xs"><div className="font-semibold mb-2">Mover alumno a otra ruta</div><div className="flex flex-wrap gap-2 items-end"><div><label className="admin-label">Ruta destino</label><select value={moveRouteId} onChange={(e) => setMoveRouteId(e.target.value)} className="admin-select"><option value="">Selecciona…</option>{routes.filter((r) => r.id !== currentList.routeId).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div><label className="admin-label">Operador</label><select value={moveOperatorId} onChange={(e) => setMoveOperatorId(e.target.value)} className="admin-select"><option value="">Sin operador</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><button onClick={() => moveStudent(currentList.rows.find((x) => x.studentId === movingRowId))} disabled={saving} className="btn-admin-primary">Mover alumno</button><button onClick={() => setMovingRowId(null)} className="btn-admin-ghost">Cancelar</button></div></div>}
+          {movingRowId && (
+            <Drawer open onClose={() => setMovingRowId(null)} classic size="md" title="Mover alumno a otra ruta" subtitle={currentList.rows.find((x) => x.studentId === movingRowId)?.name || ''}>
+              <div className="space-y-3">
+                <div><label className="admin-label">Ruta destino</label><select value={moveRouteId} onChange={(e) => setMoveRouteId(e.target.value)} className="admin-select"><option value="">Selecciona…</option>{routes.filter((r) => r.id !== currentList.routeId).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+                <div><label className="admin-label">Operador</label><select value={moveOperatorId} onChange={(e) => setMoveOperatorId(e.target.value)} className="admin-select"><option value="">Sin operador</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+              </div>
+              <div className="drawer-actions"><button onClick={() => moveStudent(currentList.rows.find((x) => x.studentId === movingRowId))} disabled={saving} className="btn-admin-primary">Mover alumno</button><button onClick={() => setMovingRowId(null)} className="btn-admin-ghost">Cancelar</button></div>
+            </Drawer>
+          )}
           <div className="overflow-x-auto">
             <table className="table-admin text-[11px] min-w-[850px]">
               <thead><tr><th className="w-10">#</th><th>Alumno</th><th>Matrícula</th><th>Tipo</th>{currentList.dates?.map((date) => <th key={date} className="text-center w-10 px-1">{dayHeader(date)}</th>)}<th className="text-right">Monto</th><th>Pago</th><th className="print:hidden"></th></tr></thead>
@@ -1231,7 +1239,7 @@ export default function RouteBuilder() {
                     })}
                     <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}{row.extraLegs > 0 && <span className="block text-[10px] font-normal text-amber-700">incl. {row.extraLegs} viaje(s) extra × ${Number(row.perDayAmount || 0)}</span>}</td>
                     <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving} className="w-3.5 h-3.5"/></td>
-                    <td className="print:hidden whitespace-nowrap"><button title="Editar" onClick={() => editRow(row)} className="link-action mr-2"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action mr-2 text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 mr-1"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 mr-1"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop"><Trash2 size={12}/></button></td>
+                    <td className="print:hidden whitespace-nowrap"><span className="row-actions"><button title="Editar" onClick={() => editRow(row)} className="link-action" aria-label="Editar"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 hover:text-navy-800" aria-label="Subir"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 hover:text-navy-800" aria-label="Bajar"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop" aria-label="Quitar de lista"><Trash2 size={12}/></button></span></td>
                   </tr>;
                 })}
               </tbody>

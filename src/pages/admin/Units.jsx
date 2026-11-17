@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import Drawer from '../../components/Drawer';
+import { Plus } from 'lucide-react';
 import { Units } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 import { FuelPanel, MaintenancePanel } from './UnitExpenses';
@@ -22,6 +24,9 @@ export default function UnitsPage() {
   const [units, setUnits] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(false); };
   const [tab, setTab] = useState('unidades');
 
   useEffect(() => Units.subscribe(setUnits), []);
@@ -42,11 +47,13 @@ export default function UnitsPage() {
     }
     setForm(emptyForm);
     setEditingId(null);
+    setDrawerOpen(false);
   }
 
   function handleEdit(u) {
     setForm({ ...emptyForm, ...u, lastKmEdit: u.lastKm ?? '' });
     setEditingId(u.id);
+    setDrawerOpen(true);
   }
 
   async function handleDelete(id) {
@@ -55,7 +62,10 @@ export default function UnitsPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-3">Unidades</h1>
+      <div className="page-head">
+        <h1 className="admin-h1">Unidades</h1>
+        {tab === 'unidades' && <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nueva unidad</button>}
+      </div>
       <div className="flex flex-wrap gap-2 mb-5">
         {[['unidades', 'Unidades'], ['gasolina', 'Gasolina'], ['mantenimiento', 'Mantenimiento y reparaciones']].map(([k, label]) => (
           <button key={k} type="button" onClick={() => setTab(k)} className={tab === k ? 'btn-admin-primary' : 'btn-admin-ghost'}>{label}</button>
@@ -65,11 +75,10 @@ export default function UnitsPage() {
       {tab === 'gasolina' && <FuelPanel units={units} />}
       {tab === 'mantenimiento' && <MaintenancePanel units={units} />}
 
-      {tab === 'unidades' && <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-        <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 cascade-item">
-          <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-            {editingId ? 'Editar unidad' : 'Nueva unidad'}
-          </p>
+      {tab === 'unidades' && <div>
+        <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar unidad' : 'Nueva unidad'} size="md">
+<form onSubmit={handleSubmit} className="pb-0">
+          
           <div className="space-y-3">
             <div>
               <label className="admin-label">Placas</label>
@@ -158,21 +167,14 @@ export default function UnitsPage() {
               <textarea value={form.conditions} onChange={(e) => setForm({ ...form, conditions: e.target.value })} className="admin-input min-h-20" />
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
+          <div className="drawer-actions">
             <button type="submit" className="btn-admin-primary flex-1">
               {editingId ? 'Guardar cambios' : 'Agregar unidad'}
             </button>
-            {editingId && (
-              <button
-                type="button"
-                onClick={() => { setEditingId(null); setForm(emptyForm); }}
-                className="btn-admin-ghost"
-              >
-                Cancelar
-              </button>
-            )}
+            <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
           </div>
         </form>
+</Drawer>
 
         <div className="admin-card p-0 overflow-hidden cascade-item" style={cascadeStyle(1, 60)}>
           <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">

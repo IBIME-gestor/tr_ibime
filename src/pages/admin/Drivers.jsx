@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import Drawer from '../../components/Drawer';
+import { Plus } from 'lucide-react';
 import { Drivers, Schools } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 
@@ -9,6 +11,9 @@ export default function DriversPage() {
   const [schools, setSchools] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(false); };
 
   useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => Schools.subscribe(setSchools), []);
@@ -24,11 +29,13 @@ export default function DriversPage() {
     }
     setForm(emptyForm);
     setEditingId(null);
+    setDrawerOpen(false);
   }
 
   function handleEdit(d) {
     setForm({ ...emptyForm, ...d });
     setEditingId(d.id);
+    setDrawerOpen(true);
   }
 
   async function handleDelete(id) {
@@ -41,20 +48,24 @@ export default function DriversPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-1">Operadores y nannies</h1>
-      <p className="text-sm text-navy-400 mb-5">{drivers.length} personas dadas de alta</p>
+      <div className="page-head">
+        <div>
+          <h1 className="admin-h1 mb-1">Operadores y nannies</h1>
+          <p className="text-sm text-navy-400">{drivers.length} personas dadas de alta</p>
+        </div>
+        <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nuevo operador / nanny</button>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-        <div className="space-y-4 lg:sticky lg:top-6 cascade-item">
+      <div>
+        <div className="space-y-4 mb-4 cascade-item">
           <div className="bg-signal-yellow/20 border border-signal-yellow rounded-lg px-4 py-3 text-sm text-navy-800">
             No necesitas crear ninguna contraseña: cada persona entra sola con su cuenta de Google
             institucional. Solo asegúrate de que el correo coincida exactamente.
           </div>
 
-          <form onSubmit={handleSubmit} className="admin-card shadow-panel">
-            <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-              {editingId ? 'Editar' : 'Nuevo operador / nanny'}
-            </p>
+          <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar operador / nanny' : 'Nuevo operador / nanny'} size="md">
+<form onSubmit={handleSubmit} className="pb-0">
+            
             <div className="space-y-3">
               <div>
                 <label className="admin-label">Nombre completo</label>
@@ -126,21 +137,14 @@ export default function DriversPage() {
                 />
               </div>
             </div>
-            <div className="flex gap-2 mt-4">
+            <div className="drawer-actions">
               <button type="submit" className="btn-admin-primary flex-1">
                 {editingId ? 'Guardar cambios' : 'Agregar'}
               </button>
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={() => { setEditingId(null); setForm(emptyForm); }}
-                  className="btn-admin-ghost"
-                >
-                  Cancelar
-                </button>
-              )}
+              <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
             </div>
           </form>
+</Drawer>
         </div>
 
         <div className="admin-card p-0 overflow-hidden cascade-item" style={cascadeStyle(1, 60)}>

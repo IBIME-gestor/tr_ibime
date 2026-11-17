@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Fuel, Wrench, Trash2, Pencil } from 'lucide-react';
+import Drawer from '../../components/Drawer';
+import { Fuel, Wrench, Trash2, Pencil, Plus } from 'lucide-react';
 import { UnitFuelLogs, UnitMaintenance } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
 
@@ -36,6 +37,9 @@ export function FuelPanel({ units }) {
   const [logs, setLogs] = useState([]);
   const [form, setForm] = useState(emptyFuel());
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyFuel()); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyFuel()); setDrawerOpen(false); };
   const [unitFilter, setUnitFilter] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -67,6 +71,7 @@ export function FuelPanel({ units }) {
       if (editingId) await UnitFuelLogs.update(editingId, data); else await UnitFuelLogs.create(data);
       setForm({ ...emptyFuel(), unitId: form.unitId });
       setEditingId(null);
+      setDrawerOpen(false);
     } catch (err) {
       console.error(err);
       setError(err?.message || 'No se pudo guardar la carga.');
@@ -74,18 +79,19 @@ export function FuelPanel({ units }) {
   }
 
   function edit(l) {
-    setEditingId(l.id);
+    setEditingId(l.id); setDrawerOpen(true);
     setForm({ unitId: l.unitId, date: l.date, time: l.time || '', amount: l.amount, liters: l.liters, odometer: l.odometer ?? '', station: l.station || '', notes: l.notes || '' });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   async function remove(l) {
     if (window.confirm('¿Eliminar esta carga de gasolina?')) await UnitFuelLogs.remove(l.id);
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-      <form onSubmit={submit} className="admin-card shadow-panel lg:sticky lg:top-6">
-        <p className="font-display font-semibold text-sm text-navy-800 mb-3 flex items-center gap-2"><Fuel size={15} />{editingId ? 'Editar carga' : 'Registrar carga de gasolina'}</p>
+    <div>
+      <div className="flex justify-end mb-3"><button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Registrar carga</button></div>
+      <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar carga' : 'Registrar carga de gasolina'} size="md">
+<form onSubmit={submit} className="pb-0">
+        
         <div className="space-y-3">
           <div><label className="admin-label">Unidad</label><UnitSelect units={units} value={form.unitId} onChange={(v) => setForm({ ...form, unitId: v })} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -102,11 +108,12 @@ export function FuelPanel({ units }) {
           <div><label className="admin-label">Notas</label><textarea className="admin-input min-h-16" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
         </div>
         {error && <p className="text-sm text-red-700 mt-3">{error}</p>}
-        <div className="flex gap-2 mt-4">
+        <div className="drawer-actions">
           <button type="submit" disabled={saving} className="btn-admin-primary flex-1">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Guardar carga'}</button>
-          {editingId && <button type="button" className="btn-admin-ghost" onClick={() => { setEditingId(null); setForm(emptyFuel()); }}>Cancelar</button>}
+          <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
+</Drawer>
 
       <div className="admin-card p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-navy-100 flex flex-wrap items-center justify-between gap-3">
@@ -151,6 +158,9 @@ export function MaintenancePanel({ units }) {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(emptyMaint());
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyMaint()); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyMaint()); setDrawerOpen(false); };
   const [unitFilter, setUnitFilter] = useState('');
   const [kindFilter, setKindFilter] = useState('');
   const [error, setError] = useState('');
@@ -179,22 +189,24 @@ export function MaintenancePanel({ units }) {
       if (editingId) await UnitMaintenance.update(editingId, data); else await UnitMaintenance.create(data);
       setForm({ ...emptyMaint(), unitId: form.unitId });
       setEditingId(null);
+      setDrawerOpen(false);
     } catch (err) {
       console.error(err);
       setError(err?.message || 'No se pudo guardar.');
     } finally { setSaving(false); }
   }
   function edit(x) {
-    setEditingId(x.id);
+    setEditingId(x.id); setDrawerOpen(true);
     setForm({ unitId: x.unitId, date: x.date, kind: x.kind || 'mantenimiento', description: x.description || '', amount: x.amount, provider: x.provider || '', odometer: x.odometer ?? '', notes: x.notes || '' });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   async function remove(x) { if (window.confirm('¿Eliminar este registro?')) await UnitMaintenance.remove(x.id); }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-      <form onSubmit={submit} className="admin-card shadow-panel lg:sticky lg:top-6">
-        <p className="font-display font-semibold text-sm text-navy-800 mb-3 flex items-center gap-2"><Wrench size={15} />{editingId ? 'Editar registro' : 'Registrar mantenimiento, reparación o pieza'}</p>
+    <div>
+      <div className="flex justify-end mb-3"><button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Registrar mantenimiento</button></div>
+      <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar registro' : 'Registrar mantenimiento, reparación o pieza'} size="md">
+<form onSubmit={submit} className="pb-0">
+        
         <div className="space-y-3">
           <div><label className="admin-label">Unidad</label><UnitSelect units={units} value={form.unitId} onChange={(v) => setForm({ ...form, unitId: v })} /></div>
           <div className="grid grid-cols-2 gap-3">
@@ -210,11 +222,12 @@ export function MaintenancePanel({ units }) {
           <div><label className="admin-label">Notas</label><textarea className="admin-input min-h-16" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
         </div>
         {error && <p className="text-sm text-red-700 mt-3">{error}</p>}
-        <div className="flex gap-2 mt-4">
+        <div className="drawer-actions">
           <button type="submit" disabled={saving} className="btn-admin-primary flex-1">{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Guardar registro'}</button>
-          {editingId && <button type="button" className="btn-admin-ghost" onClick={() => { setEditingId(null); setForm(emptyMaint()); }}>Cancelar</button>}
+          <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
+</Drawer>
 
       <div className="admin-card p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-navy-100 flex flex-wrap items-center justify-between gap-3">

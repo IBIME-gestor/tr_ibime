@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { X, Plus, AlertTriangle } from 'lucide-react';
+import Drawer from '../../components/Drawer';
 import { Students, RouteLists, FinanceRecords } from '../../firebase/services';
 import { buildStudentRow, financePayload, invalidateListReviewPatch, priorityCompare, DAY_META, SERVICE_OPTIONS, dayHeader } from './RouteBuilder';
 
@@ -114,15 +115,8 @@ export default function QuickAddToList({ student, months, hintTipo, lists, route
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-navy-900/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-display font-semibold text-navy-800">Agregar a lista · carga exprés</p>
-            <p className="text-xs text-navy-500">{student.name} · <span className="font-mono">{student.matricula || 'sin matrícula'}</span></p>
-          </div>
-          <button type="button" className="btn-admin-ghost" onClick={onClose} disabled={saving}><X size={14} /></button>
-        </div>
+    <Drawer open onClose={() => { if (!saving) onClose(); }} size="lg" title="Agregar a lista · carga exprés" subtitle={`${student.name} · ${student.matricula || 'sin matrícula'}`}>
+      <div className="space-y-4">
 
         <div className="grid md:grid-cols-2 gap-3">
           <div>
@@ -191,14 +185,14 @@ export default function QuickAddToList({ student, months, hintTipo, lists, route
         </div>
 
         {error && <p className="text-sm text-red-700">{error}</p>}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-navy-500">Se actualiza «Formar ruta», Finanzas y la tabla de Cometa al guardar.</span>
-          <div className="flex gap-2">
+        <span className="block text-xs text-navy-500">Se actualiza «Formar ruta», Finanzas y la tabla de Cometa al guardar.</span>
+        <div className="drawer-actions">
+          <div className="flex gap-2 ml-auto">
             <button type="button" className="btn-admin-ghost" onClick={onClose} disabled={saving}>Cancelar</button>
             <button type="button" className="btn-admin-primary" disabled={!canSave} onClick={save}><Plus size={13} className="inline mr-1" />{saving ? 'Agregando…' : `Agregar a ${active.length} lista(s)`}</button>
           </div>
         </div>
       </div>
-    </div>
+    </Drawer>
   );
 }

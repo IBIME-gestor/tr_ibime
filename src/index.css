@@ -435,3 +435,88 @@ main { scrollbar-width: thin; scrollbar-color: #c9d3db transparent; }
 @media (prefers-reduced-motion: reduce) {
   .bus-marker-pulse { animation: none; opacity: 0.35; }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Panel lateral derecho (Drawer): crear / editar sin salir de la lista */
+/* ------------------------------------------------------------------ */
+.drawer-root { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; }
+.drawer-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(10, 34, 54, 0.42);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  animation: drawer-fade 0.18s ease-out both;
+}
+.drawer-panel {
+  position: relative; display: flex; flex-direction: column;
+  width: 100%; max-width: 100%; height: 100%;
+  background: #fff; color: #17212b;
+  box-shadow: -18px 0 50px rgba(10, 34, 54, 0.22);
+  animation: drawer-slide 0.22s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+.drawer-panel.legacy-lists { background-color: #fff; }
+@media (min-width: 641px) {
+  .drawer-md { width: 440px; }
+  .drawer-lg { width: 560px; }
+  .drawer-xl { width: 720px; }
+}
+.drawer-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.25rem; border-bottom: 1px solid rgb(var(--c-navy-100));
+  background: #fff; flex-shrink: 0;
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+.drawer-title { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; color: rgb(var(--c-navy-900)); line-height: 1.3; }
+.drawer-subtitle { font-size: 0.78rem; color: rgb(var(--c-navy-400)); margin-top: 0.15rem; }
+.drawer-close {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 8px; color: rgb(var(--c-navy-400));
+  border: 1px solid rgb(var(--c-navy-100)); background: #fff;
+}
+.drawer-close:hover { color: rgb(var(--c-navy-900)); border-color: rgb(var(--c-signal-yellow)); background: rgb(var(--c-signal-light)); }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 1.25rem 1.25rem 0; -webkit-overflow-scrolling: touch; }
+/* Botones Guardar / Cancelar: pegados abajo mientras el formulario se desplaza */
+.drawer-actions {
+  position: sticky; bottom: 0; z-index: 1;
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  margin: 1.25rem -1.25rem 0; padding: 0.75rem 1.25rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: #fff; border-top: 1px solid rgb(var(--c-navy-100));
+}
+.drawer-body > form, .drawer-body > div > form { padding-bottom: 0; }
+@keyframes drawer-slide { from { transform: translateX(32px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes drawer-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer-panel, .drawer-backdrop { animation: none; } }
+
+/* Barra de título de página con acción principal a la derecha ("Nuevo …") */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.page-head > :first-child { min-width: 0; }
+.page-head h1 { margin-bottom: 0 !important; }
+
+/* ------------------------------------------------------------------ */
+/*  Iconos que no se encimen                                            */
+/* ------------------------------------------------------------------ */
+/* Lupa dentro de un campo de búsqueda: `.admin-input` define su propio padding y le ganaba a
+   `pl-8` / `pl-9`, por eso la lupa quedaba encima del texto. Aquí el espacio para el icono se
+   garantiza siempre que un icono absoluto precede al campo. */
+.relative > svg[class*='absolute'][class*='left-'] ~ input,
+.relative > svg[class*='absolute'][class*='left-'] ~ select {
+  padding-left: 2.25rem;
+}
+/* Iconos dentro de botones y enlaces: nunca se aplastan ni se montan sobre el texto */
+.btn-admin svg, .btn-huge svg, .link-action svg, .link-danger svg, .badge svg { flex-shrink: 0; }
+/* Columna de acciones de las tablas: iconos en fila, con aire y sin saltar de renglón */
+.table-admin td.actions-cell, .table-admin td:last-child .row-actions { white-space: nowrap; }
+.row-actions { display: inline-flex; align-items: center; gap: 0.625rem; }
+
+/* Formularios dentro del cajón: columnas que caben, campos a todo el ancho */
+.drawer-body .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.drawer-body [class*='col-span-'] { grid-column: 1 / -1; }
+.drawer-body .admin-input, .drawer-body .admin-select { width: 100%; max-width: none; }
+@media (max-width: 480px) { .drawer-body .grid { grid-template-columns: minmax(0, 1fr) !important; } }
+.page-head p { margin-bottom: 0 !important; }
+
+/* Iconos de acción en fila: área táctil cómoda y nunca montados */
+.row-actions > button, .row-actions > a {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; padding: 4px; border-radius: 6px; margin: 0 !important;
+}
+.row-actions > button:hover, .row-actions > a:hover { background: rgb(var(--c-navy-50)); }

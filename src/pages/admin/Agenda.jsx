@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Bell, BellRing, Check, Trash2, Pencil } from 'lucide-react';
+import Drawer from '../../components/Drawer';
+import { Bell, BellRing, Check, Trash2, Pencil, Plus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
 import { Agenda, AGENDA_CATEGORIES, REMINDER_STEPS, dueMs, remindMs, stageLabel } from '../../firebase/agenda';
@@ -32,6 +33,9 @@ export default function AgendaAdmin() {
   const { items, error } = useAgendaAlerts();
   const [form, setForm] = useState(emptyForm());
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyForm()); setMsg(''); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyForm()); setMsg(''); setDrawerOpen(false); };
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [perm, setPerm] = useState(typeof Notification !== 'undefined' ? Notification.permission : 'unsupported');
@@ -54,6 +58,7 @@ export default function AgendaAdmin() {
       if (editingId) await Agenda.update(editingId, data);
       else await Agenda.create({ ...data, ownerUid: user.uid });
       setForm(emptyForm()); setEditingId(null);
+      setDrawerOpen(false);
     } catch (err) {
       console.error(err);
       setMsg(err?.message || 'No se pudo guardar (¿están publicadas las reglas de Firestore?).');
@@ -64,9 +69,9 @@ export default function AgendaAdmin() {
   function handleEdit(it) {
     const ms = dueMs(it);
     setEditingId(it.id);
+    setDrawerOpen(true);
     const rm = remindMs(it);
     setForm({ title: it.title || '', notes: it.notes || '', category: it.category || AGENDA_CATEGORIES[0], date: ms ? toDateInput(ms) : '', time: ms ? toTimeInput(ms) : '09:00', remindDate: rm ? toDateInput(rm) : '', remindTime: rm ? toTimeInput(rm) : '08:00' });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   const toggleDone = (it) => Agenda.update(it.id, { done: !it.done, doneAt: !it.done ? new Date() : null });
   async function handleDelete(it) {
@@ -111,11 +116,14 @@ export default function AgendaAdmin() {
 
   return (
     <div className="space-y-5 max-w-3xl">
+      <div className="page-head">
       <div>
         <h1 className="admin-h1 mb-1 flex items-center gap-2"><Bell size={22} /> Mi agenda</h1>
         <p className="text-sm text-navy-400">
           Pendientes con fecha y hora. Se marcan con campana cuando faltan {REMINDER_STEPS.join(', ')} horas (y al vencer), aquí y en el encabezado.
         </p>
+      </div>
+        <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nuevo pendiente</button>
       </div>
       {error && <p className="rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm px-3 py-2">{error}</p>}
 
@@ -132,8 +140,9 @@ export default function AgendaAdmin() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="admin-card space-y-3">
-        <p className="font-display font-semibold text-sm text-navy-800">{editingId ? 'Editar pendiente' : 'Nuevo pendiente'}</p>
+      <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar pendiente' : 'Nuevo pendiente'} size="lg">
+<form onSubmit={handleSubmit} className="pb-0">
+        
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="md:col-span-4"><label className="admin-label">Pendiente</label><input className="admin-input" value={form.title} onChange={set('title')} placeholder="ej. Servicio al museo solicitado por Dirección" required /></div>
           <div className="md:col-span-2">
@@ -159,11 +168,12 @@ export default function AgendaAdmin() {
           <div className="md:col-span-4"><label className="admin-label">Notas</label><textarea rows={2} className="admin-input" value={form.notes} onChange={set('notes')} /></div>
         </div>
         {msg && <p className="text-xs text-red-700">{msg}</p>}
-        <div className="flex gap-2">
+        <div className="drawer-actions">
           <button type="submit" className="btn-admin-primary" disabled={saving}>{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Agregar a mi agenda'}</button>
-          {editingId && <button type="button" className="btn-admin-ghost" onClick={() => { setEditingId(null); setForm(emptyForm()); setMsg(''); }}>Cancelar edición</button>}
+          <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
+</Drawer>
 
       {open.length === 0 && done.length === 0 && <p className="text-sm text-navy-400">Tu agenda está vacía.</p>}
       <Section title="Vencidos" list={overdue} />

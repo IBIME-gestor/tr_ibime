@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import Drawer from '../../components/Drawer';
+import { Plus } from 'lucide-react';
 import { Schools } from '../../firebase/services';
 import { cascadeStyle } from '../../utils/cascade';
 
@@ -6,6 +8,9 @@ export default function SchoolsPage() {
   const [schools, setSchools] = useState([]);
   const [form, setForm] = useState({ name: '', address: '', latitude: '', longitude: '' });
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm({ name: '', address: '', latitude: '', longitude: '' }); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm({ name: '', address: '', latitude: '', longitude: '' }); setDrawerOpen(false); };
 
   useEffect(() => Schools.subscribe(setSchools), []);
 
@@ -19,11 +24,13 @@ export default function SchoolsPage() {
     }
     setForm({ name: '', address: '', latitude: '', longitude: '' });
     setEditingId(null);
+    setDrawerOpen(false);
   }
 
   function handleEdit(school) {
     setForm({ name: school.name, address: school.address || '', latitude: school.latitude ?? '', longitude: school.longitude ?? '' });
     setEditingId(school.id);
+    setDrawerOpen(true);
   }
 
   async function handleDelete(id) {
@@ -34,13 +41,15 @@ export default function SchoolsPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-5">Planteles</h1>
+      <div className="page-head">
+        <h1 className="admin-h1">Planteles</h1>
+        <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nuevo plantel</button>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
-        <form onSubmit={handleSubmit} className="admin-card shadow-panel lg:sticky lg:top-6 cascade-item">
-          <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-            {editingId ? 'Editar plantel' : 'Nuevo plantel'}
-          </p>
+      <div>
+        <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar plantel' : 'Nuevo plantel'} size="md">
+<form onSubmit={handleSubmit} className="pb-0">
+          
           <div className="space-y-3">
             <div>
               <label className="admin-label">Nombre del colegio</label>
@@ -73,21 +82,14 @@ export default function SchoolsPage() {
               <p className="text-[11px] text-navy-400 mt-1">Estas coordenadas pertenecen al plantel. No indican el origen de cada transporte.</p>
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
+          <div className="drawer-actions">
             <button type="submit" className="btn-admin-primary flex-1">
               {editingId ? 'Guardar cambios' : 'Agregar plantel'}
             </button>
-            {editingId && (
-              <button
-                type="button"
-                onClick={() => { setEditingId(null); setForm({ name: '', address: '', latitude: '', longitude: '' }); }}
-                className="btn-admin-ghost"
-              >
-                Cancelar
-              </button>
-            )}
+            <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
           </div>
         </form>
+</Drawer>
 
         <div className="admin-card p-0 overflow-hidden cascade-item" style={cascadeStyle(1, 60)}>
           <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">

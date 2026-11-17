@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Navigation2 } from 'lucide-react';
+import Drawer from '../../components/Drawer';
+import { ChevronDown, ChevronUp, Navigation2, Plus } from 'lucide-react';
 import { Routes, Schools, Drivers, Units, Students, PricingConcepts } from '../../firebase/services';
 import { getReferenceTrip } from '../../firebase/trips';
 import { resolveStudentLocation, resolveSchoolLocation } from '../../firebase/geocoding';
@@ -21,6 +22,9 @@ export default function RoutesPage() {
   const [concepts, setConcepts] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(emptyForm); setDrawerOpen(false); };
   const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => Routes.subscribe(setRoutesState), []);
@@ -44,11 +48,13 @@ export default function RoutesPage() {
     }
     setForm(emptyForm);
     setEditingId(null);
+    setDrawerOpen(false);
   }
 
   function handleEdit(r) {
     setForm({ ...emptyForm, ...r });
     setEditingId(r.id);
+    setDrawerOpen(true);
   }
 
   async function handleDelete(id) {
@@ -62,12 +68,14 @@ export default function RoutesPage() {
 
   return (
     <div>
-      <h1 className="admin-h1 mb-5">Rutas</h1>
+      <div className="page-head">
+        <h1 className="admin-h1">Rutas</h1>
+        <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nueva ruta</button>
+      </div>
 
-      <form onSubmit={handleSubmit} className="admin-card mb-5 max-w-3xl">
-        <p className="font-display font-semibold text-sm text-navy-800 mb-3">
-          {editingId ? 'Editar ruta' : 'Nueva ruta'}
-        </p>
+      <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar ruta' : 'Nueva ruta'} size="xl">
+<form onSubmit={handleSubmit} className="pb-0">
+        
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="md:col-span-2">
             <label className="admin-label">Nombre de la ruta</label>
@@ -175,21 +183,14 @@ export default function RoutesPage() {
             ))}
           </div>
         </div>
-        <div className="flex gap-2 mt-4">
+        <div className="drawer-actions">
           <button type="submit" className="btn-admin-primary">
             {editingId ? 'Guardar cambios' : 'Crear ruta'}
           </button>
-          {editingId && (
-            <button
-              type="button"
-              onClick={() => { setEditingId(null); setForm(emptyForm); }}
-              className="btn-admin-ghost"
-            >
-              Cancelar
-            </button>
-          )}
+          <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
+</Drawer>
 
       <div className="space-y-2.5">
         {routes.map((r, i) => (

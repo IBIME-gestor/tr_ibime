@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bus, RefreshCw } from 'lucide-react';
+import Drawer from '../../components/Drawer';
+import { Bus, RefreshCw, Plus } from 'lucide-react';
 import { Schools, Drivers, Units } from '../../firebase/services';
 import { SpecialTrips, SPECIAL_STATUS, REQUEST_AREAS } from '../../firebase/specialTrips';
 import { tsMs } from '../../utils/tripOrder';
@@ -37,6 +38,9 @@ export default function SpecialTripsAdmin() {
   const [units, setUnits] = useState([]);
   const [form, setForm] = useState(empty());
   const [editingId, setEditingId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openNew = () => { setEditingId(null); setForm(empty()); setError(''); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(empty()); setError(''); setDrawerOpen(false); };
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [fMonth, setFMonth] = useState(todayStr().slice(0, 7));
@@ -110,6 +114,7 @@ export default function SpecialTripsAdmin() {
         await SpecialTrips.create(payload);
       }
       setForm(empty()); setEditingId(null);
+      setDrawerOpen(false);
       await load();
     } catch (err) {
       console.error(err);
@@ -120,6 +125,7 @@ export default function SpecialTripsAdmin() {
 
   function handleEdit(t) {
     setEditingId(t.id);
+    setDrawerOpen(true);
     setForm({
       ...empty(), ...t,
       studentsPlanned: t.studentsPlanned ?? '', kmInicial: t.kmInicial ?? '', kmFinal: t.kmFinal ?? '',
@@ -169,12 +175,16 @@ export default function SpecialTripsAdmin() {
           <h1 className="admin-h1 mb-1 flex items-center gap-2"><Bus size={22} /> Viajes especiales</h1>
           <p className="text-sm text-navy-400 max-w-3xl">Traslados solicitados por dirección, coordinación u otro personal fuera de los horarios de las rutas. Se registra cuántos alumnos fueron, la unidad, los horarios y el operador.</p>
         </div>
-        <button type="button" className="btn-admin-ghost" onClick={load}><RefreshCw size={14} className="inline mr-1" />Actualizar</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-admin-ghost" onClick={load}><RefreshCw size={14} className="inline mr-1" />Actualizar</button>
+          <button type="button" onClick={openNew} className="btn-admin-primary"><Plus size={16} /> Nuevo viaje</button>
+        </div>
       </div>
       {error && <p className="rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm px-3 py-2">{error}</p>}
 
-      <form onSubmit={handleSubmit} className="admin-card space-y-3">
-        <p className="font-display font-semibold text-sm text-navy-800">{editingId ? 'Editar viaje' : 'Nuevo viaje solicitado'}</p>
+      <Drawer open={drawerOpen} onClose={closeDrawer} title={editingId ? 'Editar viaje' : 'Nuevo viaje solicitado'} size="xl">
+<form onSubmit={handleSubmit} className="pb-0">
+        
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           <div><label className="admin-label">Fecha</label><input type="date" className="admin-input" value={form.date} onChange={set('date')} required /></div>
           <div><label className="admin-label">Hora de salida (programada)</label><input type="time" className="admin-input" value={form.scheduledStart} onChange={set('scheduledStart')} /></div>
@@ -234,11 +244,13 @@ export default function SpecialTripsAdmin() {
           </div>
         )}
 
-        <div className="flex gap-2">
+        {error && <p className="text-sm text-stop mt-3">{error}</p>}
+        <div className="drawer-actions">
           <button type="submit" className="btn-admin-primary" disabled={saving}>{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Registrar viaje'}</button>
-          {editingId && <button type="button" className="btn-admin-ghost" onClick={() => { setEditingId(null); setForm(empty()); setError(''); }}>Cancelar edición</button>}
+          <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
+</Drawer>
 
       <div className="admin-card space-y-3">
         <div className="flex flex-wrap items-center gap-2">
