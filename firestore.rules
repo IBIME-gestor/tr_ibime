@@ -33,6 +33,15 @@ service cloud.firestore {
       return hasUserProfile() && userDoc().data.role == 'nanny';
     }
 
+    // Cierre semanal de sesión de familias: solo vale si iniciaron sesión después del
+    // último sábado 11:00 pm de la Ciudad de México (UTC-6, sin horario de verano),
+    // es decir, el domingo 05:00 UTC. 277200000 ms = domingo 4-ene-1970 05:00 UTC;
+    // 604800000 ms = una semana. El personal no pasa por esta regla.
+    function familySessionFresh() {
+      return request.auth.token.auth_time * 1000 >=
+        request.time.toMillis() - ((request.time.toMillis() - 277200000) % 604800000);
+    }
+
     // Personal con perfil (admin, operador, nanny o cajero). Las familias que
     // entran al seguimiento con su correo NO tienen perfil en `users`, así que
     // no pasan por aquí: solo leen lo de SU hijo(a) (ver `students`).
@@ -160,6 +169,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Avisos a familias: el admin los envía; cada familia solo lee los dirigidos a su correo.
+    match /familyNotices/{id} {
+      allow read: if isAdmin() ||
+        (isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
+         request.auth.token.email.lower() in resource.data.recipientEmails);
+      allow create, update, delete: if isAdmin();
+    }
+    match /familyNoticeReads/{id} {
+      allow read: if isAdmin() ||
+        (isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
+         resource.data.email == request.auth.token.email.lower());
+      allow create: if isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
+        request.resource.data.email == request.auth.token.email.lower() &&
+        id == request.resource.data.noticeId + '__' + request.resource.data.email;
+      allow update, delete: if isAdmin();
+    }
+
     match /routeDrafts/{id} {
       allow read, write: if isAdmin();
     }
@@ -183,9 +209,9 @@ service cloud.firestore {
       // tutor coincide con el de su sesión de Google (verificado). Van en reglas
       // separadas para que la consulta por correo se autorice por sí sola.
       allow read: if isStaff();
-      allow read: if isSignedIn() && request.auth.token.email_verified == true &&
+      allow read: if isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
         resource.data.parentEmail == request.auth.token.email.lower();
-      allow read: if isSignedIn() && request.auth.token.email_verified == true &&
+      allow read: if isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
         resource.data.studentEmail == request.auth.token.email.lower();
       // El admin puede modificar cualquier campo. El cajero SOLO puede
       // tocar lo relacionado con el cobro (estatus, vencimiento, montos),
@@ -204,12 +230,22 @@ service cloud.firestore {
             .hasOnly(['lastDeliveredLocation', 'lastDeliveredAt', 'lastDeliveredTripId'])) ||
         // Familia (cuenta del alumno o del tutor): solo puede corregir los datos del
         // tutor — nombre, parentesco y teléfono —; nunca ruta, cobro ni nada más.
-        (isSignedIn() && request.auth.token.email_verified == true &&
+        (isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
           (resource.data.get('parentEmail', '') == request.auth.token.email.lower() ||
            resource.data.get('studentEmail', '') == request.auth.token.email.lower()) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['familiarResponsable', 'parentesco', 'telefono', 'parentContact',
-                      'familyUpdatedAt', 'familyUpdatedByEmail']));
+                      'familyUpdatedAt', 'familyUpdatedByEmail'])) ||
+        // Solo desde la cuenta del ALUMNO (correo institucional) se puede registrar o
+        // cambiar el correo del tutor. El tutor solo entra con ese correo una vez que
+        // lo verifica (ver email_verified arriba), así que nadie puede usar un correo ajeno.
+        (isSignedIn() && request.auth.token.email_verified == true && familySessionFresh() &&
+          resource.data.get('studentEmail', '') == request.auth.token.email.lower() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['familiarResponsable', 'parentesco', 'telefono', 'parentContact',
+                      'parentEmail', 'familyUpdatedAt', 'familyUpdatedByEmail']) &&
+          request.resource.data.get('parentEmail', '') is string &&
+          request.resource.data.get('parentEmail', '') == request.resource.data.get('parentEmail', '').lower());
       allow create, delete: if isAdmin();
 
       // Bitácora de cobranza (folio, monto, método, quién y cuándo).
