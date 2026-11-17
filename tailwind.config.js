@@ -3,40 +3,40 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // Mismo sistema visual que "Servicios IBIME": tipografía del sistema,
+      // sin fuentes externas (carga más rápido y se ve nativa en cada equipo).
       fontFamily: {
-        display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
-        body: ['"Inter"', 'system-ui', 'sans-serif'],
+        display: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+        body: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
       },
       colors: {
-        // Paleta "Ruta Segura": azul noche de tablero + amarillo escolar
+        // Azul marino institucional IBIME (misma escala que Servicios IBIME).
+        // Se conserva el nombre "navy" para no tocar las clases existentes.
         navy: {
-          50: '#eef1f6',
-          100: '#d5dce8',
-          400: '#3a527a',
-          600: '#22314f',
-          700: '#1a2540',
-          800: '#152238',
-          900: '#0e1626',
+          50: '#eef2f5',   // superficie hundida / hover de filas
+          100: '#dce3e8',  // bordes
+          200: '#c9d3db',  // bordes fuertes
+          300: '#a9c0ce',  // texto tenue sobre fondo oscuro
+          400: '#667381',  // texto secundario
+          500: '#287ca8',  // enlaces / acento azul
+          600: '#175578',
+          700: '#12405f',
+          800: '#0d304a',
+          900: '#0a2236',  // barra superior, encabezados
         },
+        // Fondo general de la app
+        paper: '#f6f7f9',
+        // Acento ámbar (en Servicios IBIME marca lo activo y el foco)
         signal: {
-          yellow: '#FFC93C',
-          amber: '#F2A93B',
+          yellow: '#d89a2b',
+          amber: '#b97816',
+          light: '#fbf2df',
         },
-        go: {
-          DEFAULT: '#2E7D57',
-          light: '#E6F4EC',
-        },
-        stop: {
-          DEFAULT: '#C24C3E',
-          light: '#FBEAE7',
-        },
-        wait: {
-          DEFAULT: '#8A93A6',
-          light: '#EEF0F3',
-        },
+        go: { DEFAULT: '#25744a', light: '#eaf6ef' },
+        stop: { DEFAULT: '#d62d25', light: '#fdeeed' },
+        wait: { DEFAULT: '#667381', light: '#eef2f5' },
         // Paleta "línea de ruta": 6 colores fijos para identificar cada
-        // ruta visualmente en toda la app, como líneas de metro — una
-        // ruta siempre se ve del mismo color en tablas, badges y mapas.
+        // ruta visualmente en toda la app — no se tocan.
         route: {
           teal: '#1E9E96',
           violet: '#7C6FE0',
@@ -47,8 +47,8 @@ export default {
         },
       },
       boxShadow: {
-        panel: '0 8px 24px -12px rgba(14, 22, 38, 0.35)',
-        ticket: '0 1px 0 rgba(14,22,38,0.04), 0 12px 30px -16px rgba(14,22,38,0.25)',
+        panel: '0 7px 20px rgba(16, 43, 62, 0.09)',
+        ticket: '0 2px 8px rgba(16, 43, 62, 0.05), 0 12px 30px rgba(16, 43, 62, 0.035)',
       },
     },
   },

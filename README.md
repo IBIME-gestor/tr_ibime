@@ -1,6 +1,6 @@
 # Ruta Segura — App de Transporte Escolar
 
-App web para administrar rutas de transporte escolar y para que **choferes y
+App web para administrar rutas de transporte escolar y para que **operadores y
 nannies** registren, con botones grandes, la subida y bajada de cada alumno
 (con hora, fecha y ubicación GPS) en el recorrido de **ida** y **vuelta**.
 
@@ -12,14 +12,14 @@ hay contraseñas que administrar.
 ## Cómo funciona
 
 **Administrador**: da de alta planteles, unidades, alumnos (manual o CSV) y
-choferes/nannies (con su correo institucional). Crea rutas asignando
-plantel, chofer, nanny, unidad y alumnos. Consulta reportes con mapa.
+operadores/nannies (con su correo institucional). Crea rutas asignando
+plantel, operador, nanny, unidad y alumnos. Consulta reportes con mapa.
 
-**Chofer/nanny — ida (mañana)**: ve su lista de alumnos, los marca
+**Operador/nanny — ida (mañana)**: ve su lista de alumnos, los marca
 "Recogido" uno por uno (o busca por matrícula el primer día), y al llegar
 al plantel un botón "Llegamos al plantel" cierra a todos de golpe.
 
-**Chofer/nanny — vuelta (tarde)**: un botón "Todos abordaron" los sube a
+**Operador/nanny — vuelta (tarde)**: un botón "Todos abordaron" los sube a
 todos de golpe, y luego va marcando "Bajó" alumno por alumno en cada
 domicilio.
 
@@ -36,7 +36,7 @@ en la conversación donde se generó este proyecto. En resumen:
 3. **Firestore** → pestaña Data → crear colección `admins`, con un
    documento cuyo ID sea tu correo institucional en minúsculas.
 4. Dar de alta el resto de tus datos desde `/admin` (planteles, alumnos,
-   choferes con su correo institucional, unidades, rutas).
+   operadores con su correo institucional, unidades, rutas).
 5. **Vercel** → importar este repositorio de GitHub → agregar las
    variables `VITE_FIREBASE_*` (ver `.env.example`) → Deploy.
 
@@ -55,9 +55,9 @@ npm run dev
 | `admins` | Lista blanca de correos con acceso de administrador (doc ID = correo) |
 | `schools` | Planteles/colegios |
 | `students` | Alumnos: matrícula, nombre, `schoolId`, `routeId`, domicilio |
-| `drivers` | Choferes y nannies: nombre, rol, plantel, correo institucional |
+| `drivers` | Operadores y nannies: nombre, rol, plantel, correo institucional |
 | `units` | Vehículos: placas, modelo, capacidad |
-| `routes` | Plantel, chofer, nanny, unidad, y el orden de alumnos guardado (`studentOrderMorning` / `studentOrderAfternoon`) |
+| `routes` | Plantel, operador, nanny, unidad, y el orden de alumnos guardado (`studentOrderMorning` / `studentOrderAfternoon`) |
 | `users` | Vincula el `uid` de Firebase Auth con su rol (`admin`/`driver`); se crea solo, la primera vez que la persona inicia sesión |
 | `trips` | Un recorrido concreto (ruta + fecha + turno). Subcolección `stops`: hora/ubicación de subida y de bajada por alumno |
 
