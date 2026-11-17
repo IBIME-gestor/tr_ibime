@@ -3,6 +3,10 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
@@ -25,6 +29,21 @@ import { setAuditActor } from '../firebase/audit';
  * primera vez que esa persona entra con Google, el sistema lo reconoce.
  */
 const AuthContext = createContext(null);
+
+// Las familias entran a ver información de sus hijos: por seguridad su sesión se
+// cierra sola cada sábado a las 11:00 pm y tienen que volver a iniciarla.
+// (Las reglas de Firestore hacen la misma comprobación en el servidor.)
+function lastWeeklyCutoff(now = new Date()) {
+  const d = new Date(now);
+  d.setHours(23, 0, 0, 0);
+  d.setDate(d.getDate() - ((d.getDay() - 6 + 7) % 7)); // retrocede hasta el sábado
+  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 7);
+  return d.getTime();
+}
+const signInMsOf = (u) => Date.parse(u?.metadata?.lastSignInTime || '') || 0;
+const staleFamilySession = (u) => signInMsOf(u) < lastWeeklyCutoff();
+const WEEKLY_MSG = 'Por seguridad, la sesión se cierra cada sábado por la noche. Vuelve a iniciar sesión para ver el seguimiento.';
+
 
 async function provisionProfile(firebaseUser) {
   const email = (firebaseUser.email || '').toLowerCase();
@@ -86,7 +105,6 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      setAuthError('');
       if (!firebaseUser) {
         setErrorActor(null);
         setAuditActor(null);
@@ -102,6 +120,16 @@ export function AuthProvider({ children }) {
       // pegada en la pantalla de "Cargando…" sin explicación — el bug
       // detrás de "el módulo del operador se queda cargando y no abre".
       try {
+        // Cuenta con correo y contraseña que aún no confirma su correo: no accede a datos,
+        // solo ve el aviso para confirmarlo.
+        if (!firebaseUser.emailVerified) {
+          setAuthError('');
+          setUser(firebaseUser);
+          setProfile({ role: 'unverified', email: (firebaseUser.email || '').toLowerCase(), name: firebaseUser.displayName || '' });
+          setLoading(false);
+          return;
+        }
+
         const existing = await getDoc(doc(db, 'users', firebaseUser.uid));
         let profileData = existing.exists() ? existing.data() : null;
 
@@ -120,7 +148,17 @@ export function AuthProvider({ children }) {
           return;
         }
 
+        if (profileData.role === 'family' && staleFamilySession(firebaseUser)) {
+          setAuthError(WEEKLY_MSG);
+          await signOut(auth);
+          setUser(null);
+          setProfile(null);
+          setLoading(false);
+          return;
+        }
+
         const who = { uid: firebaseUser.uid, name: profileData.name || firebaseUser.displayName || '', email: firebaseUser.email || '', role: profileData.role };
+        setAuthError('');
         setErrorActor(who);
         setAuditActor(who);
         setUser(firebaseUser);
@@ -139,6 +177,15 @@ export function AuthProvider({ children }) {
     });
     return unsub;
   }, []);
+
+  // Cierre semanal también si la página se queda abierta pasando el sábado 11:00 pm.
+  useEffect(() => {
+    if (profile?.role !== 'family' || !user) return undefined;
+    const id = setInterval(() => {
+      if (staleFamilySession(user)) { setAuthError(WEEKLY_MSG); signOut(auth); }
+    }, 60000);
+    return () => clearInterval(id);
+  }, [profile?.role, user]);
 
   async function loginWithGoogle() {
     setAuthError('');
@@ -170,6 +217,40 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // ---- Acceso con correo y contraseña (tutores) ----
+  // La cuenta del tutor se crea desde la sesión del alumno (cuenta institucional),
+  // y SOLO sirve cuando el tutor confirma su correo con el enlace que se le manda:
+  // así nadie puede registrarse con el correo de otra familia.
+  const verifyLink = () => ({ url: `${window.location.origin}/seguimiento` });
+
+  async function registerTutorAccount(email, password) {
+    const clean = String(email || '').trim().toLowerCase();
+    const cred = await createUserWithEmailAndPassword(auth, clean, password);
+    await sendEmailVerification(cred.user, verifyLink());
+    await signOut(auth); // se regresa al inicio de sesión para que entre con su correo y contraseña
+  }
+
+  async function loginWithPassword(email, password) {
+    setAuthError('');
+    await signInWithEmailAndPassword(auth, String(email || '').trim().toLowerCase(), password);
+  }
+
+  async function sendPasswordReset(email) {
+    await sendPasswordResetEmail(auth, String(email || '').trim().toLowerCase(), verifyLink());
+  }
+
+  async function resendVerification() {
+    if (auth.currentUser) await sendEmailVerification(auth.currentUser, verifyLink());
+  }
+
+  // «Ya lo verifiqué»: se refresca la cuenta y se vuelve a entrar al seguimiento.
+  async function refreshVerification() {
+    if (!auth.currentUser) return;
+    await auth.currentUser.reload();
+    await auth.currentUser.getIdToken(true);
+    window.location.reload();
+  }
+
   // Después de que la familia corrige sus datos, se refleja en su sesión sin recargar.
   function patchFamilyStudent(studentId, patch) {
     setProfile((prev) => (prev?.role === 'family'
@@ -180,7 +261,7 @@ export function AuthProvider({ children }) {
   const logout = () => signOut(auth);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, authError, loginWithGoogle, loginWithGoogleFamily, patchFamilyStudent, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, authError, loginWithGoogle, loginWithGoogleFamily, registerTutorAccount, loginWithPassword, sendPasswordReset, resendVerification, refreshVerification, patchFamilyStudent, logout }}>
       {children}
     </AuthContext.Provider>
   );

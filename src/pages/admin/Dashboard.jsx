@@ -19,6 +19,8 @@ import {
   Inbox,
   ArrowRight,
   Bus,
+  Bell,
+  MapPinned,
 } from 'lucide-react';
 import { Schools, Students, Drivers, Units, Routes } from '../../firebase/services';
 import { Submissions } from '../../firebase/operatorPortal';
@@ -90,14 +92,42 @@ export default function Dashboard() {
 
   const sections = [
     {
-      title: 'Operación',
-      subtitle: 'Lo que se mueve día a día',
+      title: 'Planeación',
+      subtitle: 'Cómo se arma el servicio',
       items: [
         { label: 'Rutas', to: '/admin/rutas', icon: RouteIcon },
-        { label: 'Formar lista de ruta', to: '/admin/formar-ruta', icon: ListOrdered },
-        { label: 'Enlaces y solicitudes', to: '/admin/solicitudes-operadores', icon: Link2, badge: pending },
-        { label: 'Recorridos en curso', to: '/admin/recorridos-activos', icon: LifeBuoy },
+        { label: 'Planeación en mapa', to: '/admin/planeacion', icon: MapPinned },
+        { label: 'Talleres (17:30)', to: '/admin/talleres', icon: MapPinned },
+        { label: 'Viajes especiales', to: '/admin/viajes-especiales', icon: MapPinned },
+      ],
+    },
+    {
+      title: 'Listas',
+      subtitle: 'Quién viaja en cada ruta',
+      items: [
+        { label: 'Generar listas de alumnos', to: '/admin/formar-ruta', icon: ListOrdered },
+        { label: 'Consultar listas', to: '/admin/listas/consultar', icon: ClipboardList },
+        { label: 'Banco por asignar', to: '/admin/listas/banco', icon: Inbox },
+        { label: 'Asistencia vs lista', to: '/admin/listas/asistencia', icon: ClipboardList },
+      ],
+    },
+    {
+      title: 'Seguimiento',
+      subtitle: 'Hoy y revisión',
+      items: [
         { label: 'Flota en vivo', to: '/admin/en-vivo', icon: Radio },
+        { label: 'Recorridos en curso', to: '/admin/recorridos-activos', icon: LifeBuoy },
+        { label: 'Enlaces y solicitudes', to: '/admin/solicitudes-operadores', icon: Link2, badge: pending },
+        { label: 'Reportes', to: '/admin/reportes', icon: FileBarChart },
+      ],
+    },
+    {
+      title: 'Comunicación',
+      subtitle: 'Avisos y agenda',
+      items: [
+        { label: 'Avisos a operadores', to: '/admin/avisos', icon: Bell },
+        { label: 'Avisos a familias', to: '/admin/avisos-familias', icon: Bell },
+        { label: 'Mi agenda', to: '/admin/agenda', icon: Bell },
       ],
     },
     {
@@ -107,15 +137,16 @@ export default function Dashboard() {
         { label: 'Caja', to: '/admin/caja', icon: Wallet },
         { label: 'Finanzas', to: '/admin/finanzas', icon: Landmark },
         { label: 'Tarifas y conceptos', to: '/admin/tarifas', icon: CircleDollarSign },
+        { label: 'Nómina de personal', to: '/admin/nomina', icon: ClipboardList },
       ],
     },
     {
-      title: 'Administración',
-      subtitle: 'Análisis y accesos',
+      title: 'Sistema',
+      subtitle: 'Accesos y soporte',
       items: [
-        { label: 'Reportes', to: '/admin/reportes', icon: FileBarChart },
-        { label: 'Nómina de personal', to: '/admin/nomina', icon: ClipboardList },
         { label: 'Personas con acceso', to: '/admin/acceso', icon: UserCog },
+        { label: 'Bitácora de cambios', to: '/admin/soporte/bitacora', icon: ClipboardList },
+        { label: 'Errores de usuarios', to: '/admin/soporte/errores', icon: LifeBuoy },
       ],
     },
   ];

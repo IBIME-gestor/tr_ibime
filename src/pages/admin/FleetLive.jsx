@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import AnimatedBus from '../../components/AnimatedBus';
+import useLiveLocations, { withLive } from '../../hooks/useLiveLocations';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Routes, Drivers } from '../../firebase/services';
@@ -8,7 +10,7 @@ import { History, PhoneCall, AlertTriangle } from 'lucide-react';
 import { subscribeActiveTripsLive, todayString } from '../../firebase/trips';
 import { tsMs } from '../../utils/tripOrder';
 import { fmtAgo, signalState, SIGNAL_META } from '../../utils/tripStatus';
-import { busIcon, startFlagIcon } from '../../utils/mapIcons';
+import { startFlagIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -86,6 +88,8 @@ export default function FleetLive() {
     Drivers.list().then((ds) => setStaffById(Object.fromEntries(ds.map((d) => [d.id, d]))));
   }, []);
   useEffect(() => subscribeActiveTripsLive(setTrips), []);
+  // La ubicación en vivo viene del espejo público (una sola escritura por posición).
+  const liveMap = useLiveLocations();
   // Reloj para que "hace 12 s" y el estado de la señal se mantengan al día.
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 10000);
@@ -94,8 +98,8 @@ export default function FleetLive() {
 
   const today = todayString();
   const todayTrips = useMemo(
-    () => trips.filter((t) => t.date === today).sort((a, b) => String(routesById[a.routeId]?.name || '').localeCompare(String(routesById[b.routeId]?.name || ''), 'es')),
-    [trips, today, routesById]
+    () => withLive(trips, liveMap).filter((t) => t.date === today).sort((a, b) => String(routesById[a.routeId]?.name || '').localeCompare(String(routesById[b.routeId]?.name || ''), 'es')),
+    [trips, liveMap, today, routesById]
   );
   const staleOld = trips.length - todayTrips.length;
 
@@ -132,7 +136,6 @@ export default function FleetLive() {
     return () => { document.title = base; };
   }, [lostTrips.length]);
 
-  const icon = useMemo(() => busIcon(), []);
   const flag = useMemo(() => startFlagIcon(), []);
   const operatorOf = (trip) =>
     staffById[trip.driverId]?.name || (trip.nannyId && staffById[trip.nannyId]?.name) || 'Operador';
@@ -253,10 +256,10 @@ export default function FleetLive() {
               </Marker>
             ))}
             {withLocation.map((trip) => (
-              <Marker
+              <AnimatedBus
                 key={trip.id}
-                position={[trip.liveLocation.lat, trip.liveLocation.lng]}
-                icon={icon}
+                position={trip.liveLocation}
+                at={tsMs(trip.liveLocation.updatedAt)}
                 zIndexOffset={selectedId === trip.id ? 1000 : 0}
                 eventHandlers={{ click: () => setSelectedId(trip.id) }}
               >
@@ -265,7 +268,7 @@ export default function FleetLive() {
                   <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'} · {operatorOf(trip)}</p>
                   <p className="text-xs">{fmtAgo(tsMs(trip.liveLocation.updatedAt), now)}</p>
                 </Popup>
-              </Marker>
+              </AnimatedBus>
             ))}
           </MapContainer>
           {todayTrips.length > 0 && withLocation.length === 0 && (

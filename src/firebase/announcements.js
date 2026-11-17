@@ -17,7 +17,7 @@ const ANN = 'announcements';
 const REC = 'announcementRecipients';
 const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-export async function sendAnnouncement({ title, body, priority, audience, recipients, createdByName, createdByUid }) {
+export async function sendAnnouncement({ title, body, priority, audience, recipients, createdByName, createdByUid, publishAt = null }) {
   if (!recipients?.length) throw new Error('Elige al menos un destinatario.');
   const annRef = doc(collection(db, ANN));
   const batch = writeBatch(db);
@@ -27,11 +27,13 @@ export async function sendAnnouncement({ title, body, priority, audience, recipi
     recipientNames: recipients.map((r) => r.name),
     createdByName: createdByName || '', createdByUid: createdByUid || '',
     cancelled: false, createdAt: serverTimestamp(),
+    publishAt: publishAt || null, // programado: aparece a partir de ese día y hora
   });
   recipients.forEach((r) => {
     batch.set(doc(db, REC, `${annRef.id}_${r.id}`), {
       announcementId: annRef.id, staffId: r.id, staffName: r.name,
       title, body, priority, status: 'pendiente', ackedAt: null, createdAt: serverTimestamp(),
+      publishAt: publishAt || null,
     });
   });
   await batch.commit();

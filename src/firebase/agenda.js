@@ -50,4 +50,29 @@ export function reminderStage(item, nowMs = Date.now()) {
   return hit ?? null;
 }
 
-export const stageLabel = (stage) => (stage === 0 ? 'Vencido' : stage != null ? `Faltan menos de ${stage} h` : '');
+export const remindMs = (item) => (item?.remindAt?.toMillis ? item.remindAt.toMillis() : item?.remindAt?.seconds ? item.remindAt.seconds * 1000 : null);
+
+/**
+ * Recordatorio programado («recuérdamelo el día X a las HH:MM»): el pendiente se marca
+ * como alerta TODO ese día —desde que inicia (00:00) y cada vez que se abre la app— y
+ * al terminar el día regresa a la lógica normal de avisos (24/12/6/1 h antes y vencido).
+ */
+export function remindActiveToday(item, nowMs = Date.now()) {
+  const at = remindMs(item);
+  if (!at || item.done) return false;
+  const start = new Date(at); start.setHours(0, 0, 0, 0);
+  const end = new Date(at); end.setHours(23, 59, 59, 999);
+  return nowMs >= start.getTime() && nowMs <= end.getTime();
+}
+
+/** Etapa «recordatorio programado»: menos urgente que cualquier cuenta regresiva. */
+export const REMIND_STAGE = 25;
+
+export const stageLabel = (stage, item) => {
+  if (stage === 0) return 'Vencido';
+  if (stage === REMIND_STAGE) {
+    const at = remindMs(item);
+    return at ? `Recordatorio de hoy · ${new Date(at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}` : 'Recordatorio de hoy';
+  }
+  return stage != null ? `Faltan menos de ${stage} h` : '';
+};

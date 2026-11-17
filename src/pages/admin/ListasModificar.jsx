@@ -184,7 +184,7 @@ export default function ListasModificar() {
   return (
     <div className="space-y-5 max-w-6xl mx-auto">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="text-xs uppercase tracking-widest text-navy-400 font-semibold">Operación / Listas alumnos</p><h1 className="text-2xl font-display font-bold text-navy-900 mt-1">Modificar datos de listas</h1><p className="text-sm text-navy-500 mt-1">Elimina las listas hechas por error o duplicadas, o abre el detalle de una lista para corregir su ruta, operador y periodo.</p></div>
+        <div><p className="text-xs uppercase tracking-widest text-navy-400 font-semibold">Listas / Alumnos</p><h1 className="text-2xl font-display font-bold text-navy-900 mt-1">Modificar datos de listas</h1><p className="text-sm text-navy-500 mt-1">Elimina las listas hechas por error o duplicadas, o abre el detalle de una lista para corregir su ruta, operador y periodo.</p></div>
         <button onClick={loadData} disabled={loading || saving} className="btn-admin-ghost"><RefreshCw size={14} className="inline mr-2"/>Actualizar</button>
       </div>
 

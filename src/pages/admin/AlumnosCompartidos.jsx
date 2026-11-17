@@ -4,7 +4,7 @@ import { Shuffle, RefreshCw, AlertTriangle, CheckCircle2, Search } from 'lucide-
 import { CometaBank, RouteLists, Routes } from '../../firebase/services';
 
 /**
- * Operación / Alumnos en varias rutas
+ * Listas / Alumnos en varias rutas
  * ---------------------------------------------------------------------
  * Un alumno que en el mismo mes está en listas de RUTAS distintas (otra
  * ruta algunos días, o una para entrada y otra para salida) no se concilia

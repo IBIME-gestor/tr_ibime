@@ -8,7 +8,7 @@ import { normalizeText } from '../../utils/search';
 import QuickAddToList from './QuickAddToList';
 
 /**
- * Operación / Banco por asignar
+ * Listas / Banco por asignar
  * ---------------------------------------------------------------------
  * Alumnos que el operador agregó "al momento" en un recorrido porque aún
  * no estaban configurados (se subieron de último minuto). Se guardan
@@ -141,7 +141,7 @@ export default function BancoAsignar() {
     <div className="space-y-5 max-w-6xl mx-auto">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs text-navy-400 font-semibold">Operación / Listas de alumnos</p>
+          <p className="text-xs text-navy-400 font-semibold">Listas / Banco por asignar</p>
           <h1 className="admin-h1 mt-1">Banco por asignar</h1>
           <p className="text-sm text-navy-500 mt-1 max-w-3xl">
             Alumnos que el operador agregó en pleno recorrido porque todavía no estaban configurados.

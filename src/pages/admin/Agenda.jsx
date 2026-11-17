@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Bell, BellRing, Check, Trash2, Pencil } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
-import { Agenda, AGENDA_CATEGORIES, REMINDER_STEPS, dueMs, stageLabel } from '../../firebase/agenda';
+import { Agenda, AGENDA_CATEGORIES, REMINDER_STEPS, dueMs, remindMs, stageLabel } from '../../firebase/agenda';
 
 /**
  * Mi agenda (solo admin)
@@ -15,10 +15,11 @@ const pad = (n) => String(n).padStart(2, '0');
 const toDateInput = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const toTimeInput = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const fmtDue = (ms) => new Date(ms).toLocaleString('es-MX', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-const emptyForm = () => ({ title: '', notes: '', category: AGENDA_CATEGORIES[0], date: toDateInput(Date.now() + 86400000), time: '09:00' });
+const emptyForm = () => ({ title: '', notes: '', category: AGENDA_CATEGORIES[0], date: toDateInput(Date.now() + 86400000), time: '09:00', remindDate: '', remindTime: '08:00' });
 
 const stageStyle = (stage) => {
   if (stage === 0) return 'bg-red-100 text-red-800 border-red-200';
+  if (stage === 25) return 'bg-blue-50 text-blue-800 border-blue-200';
   if (stage === 1) return 'bg-red-50 text-red-700 border-red-200';
   if (stage === 6) return 'bg-orange-50 text-orange-800 border-orange-200';
   if (stage === 12) return 'bg-amber-50 text-amber-800 border-amber-200';
@@ -44,7 +45,12 @@ export default function AgendaAdmin() {
     if (Number.isNaN(due.getTime())) { setMsg('La fecha u hora no es válida.'); return; }
     setSaving(true); setMsg('');
     try {
-      const data = { title: form.title.trim(), notes: form.notes.trim(), category: form.category, dueAt: due };
+      let remindAt = null;
+      if (form.remindDate) {
+        remindAt = new Date(`${form.remindDate}T${form.remindTime || '08:00'}:00`);
+        if (Number.isNaN(remindAt.getTime())) { setMsg('La fecha del recordatorio no es válida.'); setSaving(false); return; }
+      }
+      const data = { title: form.title.trim(), notes: form.notes.trim(), category: form.category, dueAt: due, remindAt };
       if (editingId) await Agenda.update(editingId, data);
       else await Agenda.create({ ...data, ownerUid: user.uid });
       setForm(emptyForm()); setEditingId(null);
@@ -58,7 +64,8 @@ export default function AgendaAdmin() {
   function handleEdit(it) {
     const ms = dueMs(it);
     setEditingId(it.id);
-    setForm({ title: it.title || '', notes: it.notes || '', category: it.category || AGENDA_CATEGORIES[0], date: ms ? toDateInput(ms) : '', time: ms ? toTimeInput(ms) : '09:00' });
+    const rm = remindMs(it);
+    setForm({ title: it.title || '', notes: it.notes || '', category: it.category || AGENDA_CATEGORIES[0], date: ms ? toDateInput(ms) : '', time: ms ? toTimeInput(ms) : '09:00', remindDate: rm ? toDateInput(rm) : '', remindTime: rm ? toTimeInput(rm) : '08:00' });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   const toggleDone = (it) => Agenda.update(it.id, { done: !it.done, doneAt: !it.done ? new Date() : null });
@@ -86,7 +93,8 @@ export default function AgendaAdmin() {
         <p className={`text-sm font-semibold ${it.done ? 'line-through text-navy-400' : 'text-navy-900'}`}>
           {it.stage !== null && !it.done && <BellRing size={14} className="inline mr-1 -mt-0.5" />}{it.title}
         </p>
-        <p className="text-xs">{dueMs(it) ? fmtDue(dueMs(it)) : '—'} · {it.category || 'Otro'}{it.stage !== null && !it.done ? ` · ${stageLabel(it.stage)}` : ''}</p>
+        <p className="text-xs">{dueMs(it) ? fmtDue(dueMs(it)) : '—'} · {it.category || 'Otro'}{it.stage !== null && !it.done ? ` · ${stageLabel(it.stage, it)}` : ''}</p>
+        {remindMs(it) && !it.done && <p className="text-xs text-blue-700">🔔 Recordarme: {fmtDue(remindMs(it))}</p>}
         {it.notes && <p className="text-xs text-navy-500 mt-0.5 whitespace-pre-line">{it.notes}</p>}
       </div>
       <button type="button" className="link-action" onClick={() => handleEdit(it)} title="Editar"><Pencil size={14} /></button>
@@ -134,6 +142,20 @@ export default function AgendaAdmin() {
           </div>
           <div><label className="admin-label">Fecha</label><input type="date" className="admin-input" value={form.date} onChange={set('date')} required /></div>
           <div><label className="admin-label">Hora</label><input type="time" className="admin-input" value={form.time} onChange={set('time')} required /></div>
+          <div className="md:col-span-2">
+            <label className="admin-label">Recordarme el día (opcional)</label>
+            <input type="date" className="admin-input" value={form.remindDate} onChange={set('remindDate')} />
+          </div>
+          <div>
+            <label className="admin-label">A las</label>
+            <input type="time" className="admin-input" value={form.remindTime} onChange={set('remindTime')} disabled={!form.remindDate} />
+          </div>
+          <div className="flex items-end">
+            {form.remindDate && <button type="button" className="link-action text-xs" onClick={() => setForm({ ...form, remindDate: '' })}>Quitar recordatorio</button>}
+          </div>
+          <p className="md:col-span-4 text-[11px] text-navy-400 -mt-1">
+            Con «Recordarme el día», el pendiente aparece en tu campana desde que inicia ese día y cada vez que abras la app; al terminar el día regresa a los avisos normales (24, 12, 6 y 1 hora antes, y vencido).
+          </p>
           <div className="md:col-span-4"><label className="admin-label">Notas</label><textarea rows={2} className="admin-input" value={form.notes} onChange={set('notes')} /></div>
         </div>
         {msg && <p className="text-xs text-red-700">{msg}</p>}

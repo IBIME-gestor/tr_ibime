@@ -3,6 +3,8 @@ import { Bell, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Drivers } from '../../firebase/services';
 import { sendAnnouncement, listAnnouncements, listRecipientsFor, cancelAnnouncement } from '../../firebase/announcements';
+import ScheduleField from '../../components/ScheduleField';
+import { emptySchedule, scheduleDate, scheduleError, msOf, fmtWhen } from '../../utils/schedule';
 
 /**
  * Avisos a operadores y nannies (solo admin)
@@ -21,6 +23,7 @@ export default function AvisosAdmin() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [priority, setPriority] = useState('normal');
+  const [schedule, setSchedule] = useState(emptySchedule());
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
@@ -64,17 +67,20 @@ export default function AvisosAdmin() {
     e.preventDefault();
     if (!title.trim()) { setMsg('Escribe el título del aviso.'); return; }
     if (!picked.length) { setMsg('Elige al menos un destinatario.'); return; }
-    if (!window.confirm(`¿Enviar este aviso a ${picked.length} persona(s)?`)) return;
+    const schErr = scheduleError(schedule);
+    if (schErr) { setMsg(schErr); return; }
+    const when = scheduleDate(schedule);
+    if (!window.confirm(when ? `¿Programar este aviso para ${fmtWhen(when.getTime())} para ${picked.length} persona(s)?` : `¿Enviar este aviso a ${picked.length} persona(s)?`)) return;
     setSending(true); setMsg('');
     try {
       const recipients = staff.filter((d) => picked.includes(d.id)).map((d) => ({ id: d.id, name: d.name || 'Sin nombre' }));
       await sendAnnouncement({
         title: title.trim(), body: body.trim(), priority,
         audience: recipients.length === staff.length ? 'all' : 'selected',
-        recipients, createdByName: profile?.name || '', createdByUid: user?.uid || '',
+        recipients, createdByName: profile?.name || '', createdByUid: user?.uid || '', publishAt: when,
       });
-      setTitle(''); setBody(''); setPriority('normal'); setPicked([]);
-      setMsg(`Aviso enviado a ${recipients.length} persona(s). Lo verán al abrir la app.`);
+      setTitle(''); setBody(''); setPriority('normal'); setPicked([]); setSchedule(emptySchedule());
+      setMsg(when ? `Aviso programado para ${fmtWhen(when.getTime())}. Aparecerá ese día a esa hora y desde entonces cada vez que abran la app.` : `Aviso enviado a ${recipients.length} persona(s). Lo verán al abrir la app.`);
       await loadHistory();
     } catch (err) {
       console.error(err);
@@ -145,8 +151,9 @@ export default function AvisosAdmin() {
           {staff.length === 0 && <p className="text-xs text-navy-400">No hay operadores ni nannies registrados.</p>}
           <p className="text-[11px] text-navy-400">Solo lo verá quien tenga su cuenta vinculada a su ficha en «Personas con acceso».</p>
         </div>
+        <ScheduleField value={schedule} onChange={setSchedule} />
         {msg && <p className="text-xs text-navy-600">{msg}</p>}
-        <button type="submit" className="btn-admin-primary" disabled={sending}>{sending ? 'Enviando…' : 'Enviar aviso'}</button>
+        <button type="submit" className="btn-admin-primary" disabled={sending}>{sending ? 'Guardando…' : schedule.mode === 'later' ? 'Programar aviso' : 'Enviar aviso'}</button>
       </form>
 
       <div className="space-y-3">
@@ -168,6 +175,7 @@ export default function AvisosAdmin() {
                     {a.title}
                     {a.priority === 'urgente' && <span className="ml-2 text-[10px] font-bold text-red-700 bg-red-50 rounded-full px-2 py-0.5">URGENTE</span>}
                     {a.cancelled && <span className="ml-2 text-[10px] font-bold text-navy-500 bg-navy-50 rounded-full px-2 py-0.5">CANCELADO</span>}
+                    {!a.cancelled && msOf(a.publishAt) > Date.now() && <span className="ml-2 text-[10px] font-bold text-blue-700 bg-blue-50 rounded-full px-2 py-0.5">PROGRAMADO · {fmtWhen(msOf(a.publishAt))}</span>}
                   </p>
                   <p className="text-[11px] text-navy-400">{fmt(a.createdAt)} · {a.createdByName || 'Admin'}</p>
                 </div>

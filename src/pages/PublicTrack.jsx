@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Home, Navigation, Sun, Sunset, Pencil, LogOut, Check } from 'lucide-react';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { Home, Navigation, Sun, Sunset, Pencil, LogOut, Check, Bell, Search, Eye, EyeOff, X as XIcon } from 'lucide-react';
+import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { NOTICE_TYPES, listNoticesForEmail, listReadIdsForEmail, markNoticeRead } from '../firebase/familyNotices';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import { normalizePhone } from '../utils/phone';
@@ -15,7 +16,8 @@ import {
 } from '../firebase/trips';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { useArrivalCountdown, fmtCountdown } from '../utils/countdown';
-import { busIcon, startFlagIcon, finishFlagIcon, busSvg, startFlagSvg, finishFlagSvg } from '../utils/mapIcons';
+import { startFlagIcon, finishFlagIcon, busSvg, startFlagSvg, finishFlagSvg } from '../utils/mapIcons';
+import AnimatedBus from '../components/AnimatedBus';
 import { tsMs } from '../utils/tripOrder';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -69,74 +71,44 @@ function routeForShift(kid, shift) {
   return kid.routeId || '';
 }
 
+// Administración: últimas consultas (matrícula o correo) en este equipo.
+const ADMIN_SAVED_KEY = 'ibime_seguimiento_admin';
+const readAdminSaved = () => { try { return JSON.parse(localStorage.getItem(ADMIN_SAVED_KEY) || '[]'); } catch { return []; } };
+const writeAdminSaved = (list) => { try { localStorage.setItem(ADMIN_SAVED_KEY, JSON.stringify(list)); } catch { /* sin almacenamiento */ } return list; };
+
+// Contraseña: mínimo 8 caracteres, una mayúscula, una minúscula, un símbolo y sin espacios.
+const PW_RULES = [
+  { k: 'len', label: 'Mínimo 8 caracteres', test: (p) => p.length >= 8 },
+  { k: 'up', label: 'Una letra mayúscula', test: (p) => /\p{Lu}/u.test(p) },
+  { k: 'low', label: 'Una letra minúscula', test: (p) => /\p{Ll}/u.test(p) },
+  { k: 'sym', label: 'Un símbolo (por ejemplo ! # $ % & * @)', test: (p) => /[^\p{L}\p{N}\s]/u.test(p) },
+  { k: 'sp', label: 'Sin espacios', test: (p) => p.length > 0 && !/\s/.test(p) },
+];
+const pwValid = (p) => PW_RULES.every((r) => r.test(p));
+const isEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+// Campo de contraseña con «ojito» para ver lo escrito.
+function PasswordInput({ value, onChange, placeholder, autoComplete, id }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input id={id} type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value.replace(/\s/g, ''))}
+        placeholder={placeholder} autoComplete={autoComplete} autoCapitalize="none" spellCheck={false}
+        className="w-full rounded-xl border border-navy-100 pl-3 pr-11 py-3 text-base text-navy-900" />
+      <button type="button" onClick={() => setShow((v) => !v)} aria-label={show ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center text-navy-400">
+        {show ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </div>
+  );
+}
+
 const PARENTESCOS = ['Madre', 'Padre', 'Tutor(a)', 'Abuelo(a)', 'Tío(a)', 'Hermano(a)', 'Otro'];
 const firstName = (n) => titleCase(n).split(' ')[0] || '';
 
 /* ------------------------------------------------------------------ */
 /*  Mapa                                                                */
 /* ------------------------------------------------------------------ */
-
-/**
- * El transporte se mueve entre lecturas del GPS (cada ~5 s) deslizando el
- * marcador de Leaflet directamente — sin pasar por el estado de React, que
- * volvería a pintar toda la página en cada cuadro de la animación.
- */
-function AnimatedBus({ position, at, follow }) {
-  const map = useMap();
-  const markerRef = useRef(null);
-  const fromRef = useRef(null);
-  const frameRef = useRef(null);
-  const lastAtRef = useRef(null);
-
-  useEffect(() => {
-    if (!position) return undefined;
-    const marker = markerRef.current;
-    if (!marker) return undefined;
-    const from = fromRef.current || position;
-    fromRef.current = position;
-    cancelAnimationFrame(frameRef.current);
-
-    // La animación dura lo que de verdad pasó entre las dos últimas
-    // posiciones (hora del servidor), para que el camioncito llegue justo
-    // cuando llega la siguiente y no se frene ni se adelante. Si hubo una
-    // pausa larga (estuvo parado y arrancó), se usa el intervalo normal.
-    const gap = at != null && lastAtRef.current != null ? at - lastAtRef.current : null;
-    if (at != null) lastAtRef.current = at;
-    const duration =
-      gap != null && gap >= 1500 && gap <= LIVE_LOCATION_INTERVAL_MS * 2
-        ? gap
-        : LIVE_LOCATION_INTERVAL_MS;
-
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (reduce || (from.lat === position.lat && from.lng === position.lng)) {
-      marker.setLatLng([position.lat, position.lng]);
-      if (follow) map.panTo([position.lat, position.lng], { animate: false });
-      return undefined;
-    }
-
-    const start = performance.now();
-    function tick(now) {
-      const t = Math.min(1, (now - start) / duration);
-      const lat = from.lat + (position.lat - from.lat) * t;
-      const lng = from.lng + (position.lng - from.lng) * t;
-      marker.setLatLng([lat, lng]);
-      if (follow) map.panTo([lat, lng], { animate: false });
-      if (t < 1) frameRef.current = requestAnimationFrame(tick);
-    }
-    frameRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position?.lat, position?.lng, at]);
-
-  // Icono estable: no se vuelve a crear en cada render.
-  const icon = useMemo(() => busIcon(), []);
-  if (!position) return null;
-  return (
-    <Marker ref={markerRef} position={[position.lat, position.lng]} icon={icon} zIndexOffset={1000}>
-      <Popup>Camión escolar</Popup>
-    </Marker>
-  );
-}
 
 /** Si la persona mueve el mapa con el dedo, dejamos de seguir al transporte. */
 function StopFollowOnDrag({ onDrag }) {
@@ -251,8 +223,9 @@ function RouteTrack({ stopsCount, myIndex, busX, progress, shift, completed }) {
 /*  Página                                                              */
 /* ------------------------------------------------------------------ */
 export default function PublicTrack() {
-  const { user, profile, loading, authError, loginWithGoogleFamily, patchFamilyStudent, logout } = useAuth();
+  const { user, profile, loading, authError, loginWithGoogleFamily, registerTutorAccount, loginWithPassword, sendPasswordReset, resendVerification, refreshVerification, patchFamilyStudent, logout } = useAuth();
   const isFamily = profile?.role === 'family';
+  const isAdmin = profile?.role === 'admin';
   const myEmail = (user?.email || '').toLowerCase();
 
   const [kidId, setKidId] = useState('');
@@ -267,9 +240,10 @@ export default function PublicTrack() {
   const mapRef = useRef(null);
 
   // Hijos(as) ligados al correo con el que entró (cuenta del alumno o del tutor).
+  const [adminKids, setAdminKids] = useState([]); // administración: alumnos encontrados por matrícula o correo
   const kids = useMemo(
-    () => [...(isFamily ? profile.students || [] : [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
-    [isFamily, profile]
+    () => [...(isFamily ? profile.students || [] : isAdmin ? adminKids : [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+    [isFamily, isAdmin, profile, adminKids]
   );
   const kid = kids.find((k) => k.id === kidId) || kids[0] || null;
   const trackingRouteId = routeForShift(kid, shift);
@@ -298,18 +272,38 @@ export default function PublicTrack() {
 
   // Se suscribe al recorrido de hoy de la ruta del alumno, en el turno elegido.
   // Cambiar de turno cambia la suscripción al instante.
+  //
+  // Para cuidar la cuota diaria de lecturas de Firestore (cada actualización de la
+  // ubicación cuenta como una lectura por persona que mira):
+  //  · se pausa sola cuando la pantalla se oculta o se cambia de pestaña/app;
+  //  · se pausa tras 20 min seguidos viendo en vivo (pestañas olvidadas), con un
+  //    botón para seguir viendo.
+  const [pageVisible, setPageVisible] = useState(typeof document === 'undefined' ? true : !document.hidden);
+  const [livePaused, setLivePaused] = useState(false);
+  useEffect(() => {
+    const onVis = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   useEffect(() => {
     setTracking(null);
     setFirstSeenMs(null);
     setFollow(true);
-    if (!kid || !trackingRouteId) { setTrackingLoaded(true); return undefined; }
-    setTrackingLoaded(false);
-    return subscribePublicTracking(trackingRouteId, shift, (t) => {
+    setLivePaused(false);
+    setTrackingLoaded(!(kid && trackingRouteId));
+  }, [trackingRouteId, kid?.matricula, shift]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!kid || !trackingRouteId || !pageVisible || livePaused) return undefined;
+    const unsub = subscribePublicTracking(trackingRouteId, shift, (t) => {
       setTracking(t);
       setTrackingLoaded(true);
       setFirstSeenMs((prev) => prev ?? Date.now());
     });
-  }, [trackingRouteId, kid?.matricula, shift]); // eslint-disable-line react-hooks/exhaustive-deps
+    const autoPause = setTimeout(() => setLivePaused(true), 20 * 60 * 1000);
+    return () => { unsub(); clearTimeout(autoPause); };
+  }, [trackingRouteId, kid?.matricula, shift, pageVisible, livePaused]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleLogin() {
     setLoginBusy(true); setLoginError('');
@@ -322,7 +316,7 @@ export default function PublicTrack() {
 
   // Edición de los datos del tutor (solo se guarda en Ruta Segura).
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: '', parentesco: '', phone: '' });
+  const [form, setForm] = useState({ name: '', parentesco: '', phone: '', tutorEmail: '', createPw: false, pw: '', pw2: '' });
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
@@ -332,6 +326,8 @@ export default function PublicTrack() {
       name: titleCase(kid?.familiarResponsable),
       parentesco: kid?.parentesco || '',
       phone: String(kid?.telefono || kid?.parentContact || '').replace(/^\+52/, ''),
+      tutorEmail: String(kid?.parentEmail || ''),
+      createPw: false, pw: '', pw2: '',
     });
     setFormError(''); setSavedMsg(''); setEditing(true);
   }
@@ -346,17 +342,53 @@ export default function PublicTrack() {
       if (tel.status !== 'ok') { setFormError('El teléfono debe tener 10 dígitos.'); return; }
       phone = tel.phone;
     }
+
+    // El correo del tutor y su contraseña solo se registran desde la cuenta del alumno.
+    const canSetTutorEmail = isStudentAccount;
+    const tutorEmail = form.tutorEmail.trim().toLowerCase();
+    if (canSetTutorEmail && tutorEmail) {
+      if (!isEmail(tutorEmail)) { setFormError('Escribe un correo de tutor válido.'); return; }
+      if (tutorEmail === myEmail) { setFormError('El correo del tutor debe ser distinto al de la cuenta del alumno.'); return; }
+    }
+    const wantsPw = canSetTutorEmail && form.createPw;
+    if (wantsPw) {
+      if (!tutorEmail) { setFormError('Escribe el correo del tutor para crearle una contraseña.'); return; }
+      if (!pwValid(form.pw)) { setFormError('La contraseña no cumple con todos los requisitos.'); return; }
+      if (form.pw !== form.pw2) { setFormError('Las contraseñas no coinciden.'); return; }
+    }
+
     setSaving(true); setFormError('');
     try {
-      await updateDoc(doc(db, 'students', kid.id), {
+      const patch = {
         familiarResponsable: name,
         parentesco: form.parentesco,
         telefono: phone,
         parentContact: phone,
-        familyUpdatedAt: serverTimestamp(),
-        familyUpdatedByEmail: myEmail,
-      });
-      patchFamilyStudent(kid.id, { familiarResponsable: name, parentesco: form.parentesco, telefono: phone, parentContact: phone });
+        ...(canSetTutorEmail && tutorEmail ? { parentEmail: tutorEmail } : {}),
+      };
+      // 1) Se guardan los datos con la sesión del alumno (también liga el correo del tutor).
+      await updateDoc(doc(db, 'students', kid.id), { ...patch, familyUpdatedAt: serverTimestamp(), familyUpdatedByEmail: myEmail });
+      patchFamilyStudent(kid.id, patch);
+
+      // 2) Si se creó contraseña, se crea la cuenta del tutor y se le manda confirmar su correo.
+      if (wantsPw) {
+        try {
+          await registerTutorAccount(tutorEmail, form.pw);
+          setEditing(false);
+          setPwEmail(tutorEmail);
+          setRegisteredMsg(`Listo. Guardamos los datos y creamos el acceso para ${tutorEmail}. Te enviamos un correo para confirmarlo: ábrelo y después inicia sesión aquí abajo con ese correo y tu contraseña.`);
+          setSaving(false);
+          return; // la sesión del alumno se cerró: se muestra el inicio de sesión con correo y contraseña
+        } catch (err) {
+          if (err?.code === 'auth/email-already-in-use') {
+            setEditing(false);
+            setSavedMsg('Datos guardados. Ese correo ya tiene una contraseña creada: el tutor puede entrar con ella, o usar «Olvidé mi contraseña» en el inicio de sesión.');
+            setSaving(false);
+            return;
+          }
+          throw err;
+        }
+      }
       setEditing(false);
       setSavedMsg('Listo, tus datos quedaron actualizados en Ruta Segura.');
     } catch (err) {
@@ -364,6 +396,126 @@ export default function PublicTrack() {
       setFormError('No se pudo guardar. Revisa tu conexión e intenta de nuevo.');
     }
     setSaving(false);
+  }
+
+  /* ---------------- Avisos para la familia ---------------- */
+  const [view, setView] = useState('seguimiento'); // seguimiento | avisos
+  const [notices, setNotices] = useState([]);
+  const [readIds, setReadIds] = useState(new Set());
+  const [noticesLoading, setNoticesLoading] = useState(false);
+  const [noticeError, setNoticeError] = useState('');
+
+  async function loadNotices() {
+    if (!isFamily || !myEmail) return;
+    setNoticesLoading(true); setNoticeError('');
+    try {
+      const [list, reads] = await Promise.all([listNoticesForEmail(myEmail), listReadIdsForEmail(myEmail)]);
+      setNotices(list.sort((a, b) => (tsMs(b.publishAt) || tsMs(b.createdAt) || 0) - (tsMs(a.publishAt) || tsMs(a.createdAt) || 0)));
+      setReadIds(reads);
+    } catch (err) {
+      console.error(err);
+      setNoticeError('No pudimos cargar los avisos. Intenta de nuevo en un momento.');
+    }
+    setNoticesLoading(false);
+  }
+  // Se cargan al entrar y cada 5 minutos, para que la pestaña muestre cuántos avisos nuevos hay.
+  useEffect(() => {
+    if (!isFamily) return undefined;
+    loadNotices();
+    const id = setInterval(() => { if (!document.hidden) loadNotices(); }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFamily, myEmail]);
+
+  async function openNotice(n) {
+    if (readIds.has(n.id)) return;
+    setReadIds((prev) => new Set([...prev, n.id]));
+    try { await markNoticeRead(n.id, myEmail); } catch (err) { console.warn('No se pudo marcar como leído:', err?.message); }
+  }
+  // Los avisos programados aparecen cuando llega su día y hora.
+  const visibleNotices = notices.filter((n) => !tsMs(n.publishAt) || tsMs(n.publishAt) <= now);
+  const unreadCount = visibleNotices.filter((n) => !readIds.has(n.id)).length;
+
+  /* ---------------- Administración: ver como lo ve la familia ---------------- */
+  const [adminQuery, setAdminQuery] = useState('');
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState('');
+  const [adminSaved, setAdminSaved] = useState(readAdminSaved);
+
+  async function adminFind(value) {
+    const v = String(value || '').trim();
+    if (!v) return;
+    setAdminBusy(true); setAdminError('');
+    try {
+      let docs = [];
+      if (v.includes('@')) {
+        const em = v.toLowerCase();
+        const [a, b] = await Promise.all([
+          getDocs(query(collection(db, 'students'), where('studentEmail', '==', em))),
+          getDocs(query(collection(db, 'students'), where('parentEmail', '==', em))),
+        ]);
+        docs = [...a.docs, ...b.docs];
+      } else {
+        const queries = [getDocs(query(collection(db, 'students'), where('matricula', '==', v)))];
+        if (/^\d+$/.test(v)) queries.push(getDocs(query(collection(db, 'students'), where('matricula', '==', Number(v)))));
+        docs = (await Promise.all(queries)).flatMap((r) => r.docs);
+      }
+      const seen = new Set();
+      const list = docs.filter((d) => !seen.has(d.id) && seen.add(d.id)).map((d) => ({ id: d.id, ...d.data() }));
+      if (!list.length) { setAdminError('No se encontró ningún alumno con esa matrícula o correo.'); return; }
+      setAdminKids(list);
+      setKidId(list[0].id);
+      setEditing(false);
+      setAdminSaved(writeAdminSaved([{ q: v, name: list[0].name || v }, ...readAdminSaved().filter((x) => x.q !== v)].slice(0, 6)));
+      setAdminQuery('');
+    } catch (err) {
+      console.error(err);
+      setAdminError('No se pudo consultar. Revisa tu conexión e intenta de nuevo.');
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  // Acceso con correo y contraseña (tutores)
+  const [pwEmail, setPwEmail] = useState('');
+  const [pwValue, setPwValue] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [registeredMsg, setRegisteredMsg] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState('');
+
+  async function handlePasswordLogin(e) {
+    e.preventDefault();
+    if (!isEmail(pwEmail.trim()) || !pwValue) { setLoginError('Escribe tu correo y tu contraseña.'); return; }
+    setPwBusy(true); setLoginError(''); setRegisteredMsg('');
+    try { await loginWithPassword(pwEmail, pwValue); } catch (err) {
+      console.error(err);
+      const c = err?.code || '';
+      setLoginError(c === 'auth/too-many-requests'
+        ? 'Demasiados intentos. Espera unos minutos o usa «Olvidé mi contraseña».'
+        : 'Correo o contraseña incorrectos.');
+    }
+    setPwBusy(false);
+  }
+
+  async function handleForgot() {
+    if (!isEmail(pwEmail.trim())) { setLoginError('Escribe tu correo arriba y vuelve a tocar «Olvidé mi contraseña».'); return; }
+    setPwBusy(true); setLoginError('');
+    try { await sendPasswordReset(pwEmail); setResetSent(true); } catch (err) {
+      console.error(err);
+      setLoginError('No pudimos enviar el correo. Intenta de nuevo en unos minutos.');
+    }
+    setPwBusy(false);
+  }
+
+  async function handleResendVerification() {
+    setVerifyBusy(true); setVerifyMsg('');
+    try { await resendVerification(); setVerifyMsg('Te mandamos otro correo. Revisa también tu carpeta de spam.'); } catch (err) {
+      console.error(err);
+      setVerifyMsg('No pudimos reenviarlo todavía. Espera un momento e inténtalo otra vez.');
+    }
+    setVerifyBusy(false);
   }
 
   // Quién es quien entró y cómo saludarle.
@@ -576,10 +728,13 @@ export default function PublicTrack() {
             <p className="font-display font-semibold">Ruta Segura</p>
             <p className="text-navy-100 text-xs">Seguimiento del transporte escolar</p>
           </div>
-          {user && (
+          {user && !isAdmin && (
             <button type="button" onClick={logout} className="flex items-center gap-1.5 text-xs text-navy-100 border border-white/20 rounded-full px-3 py-1.5">
               <LogOut size={13} /> Salir
             </button>
+          )}
+          {isAdmin && (
+            <a href="/admin" className="text-xs text-navy-100 border border-white/20 rounded-full px-3 py-1.5">Volver al panel</a>
           )}
         </div>
       </header>
@@ -606,24 +761,130 @@ export default function PublicTrack() {
                 <path fill="#4CAF50" d="M24 44.5c5.6 0 10.7-1.9 14.6-5.2l-6.7-5.7c-2 1.5-4.7 2.4-7.9 2.4-5.3 0-9.7-3.1-11.3-7.5l-6.6 5.1C9.9 40.3 16.4 44.5 24 44.5z" />
                 <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6.7 5.7C41.5 36 44.5 30.6 44.5 24c0-1.2-.1-2.4-.3-3.5z" />
               </svg>
-              Entrar con Google
+              Entrar con Google (cuenta institucional)
             </button>
+            <div className="flex items-center gap-3 text-xs text-navy-300"><span className="flex-1 h-px bg-navy-100" />o con correo y contraseña<span className="flex-1 h-px bg-navy-100" /></div>
+            {registeredMsg && (
+              <p className="text-sm rounded-xl bg-go/10 border border-go px-3 py-2.5 text-navy-800 flex gap-2"><Check size={16} className="shrink-0 mt-0.5" /> {registeredMsg}</p>
+            )}
+            <form onSubmit={handlePasswordLogin} className="space-y-2">
+              <input type="email" value={pwEmail} onChange={(e) => setPwEmail(e.target.value)} placeholder="Correo del tutor" autoComplete="username"
+                className="w-full rounded-xl border border-navy-100 px-3 py-3 text-base text-navy-900" />
+              <PasswordInput value={pwValue} onChange={setPwValue} placeholder="Contraseña" autoComplete="current-password" />
+              <button type="submit" disabled={pwBusy || !pwEmail.trim() || !pwValue}
+                className="w-full rounded-xl bg-navy-800 text-white px-6 py-3 font-display font-semibold disabled:opacity-50">
+                {pwBusy ? 'Entrando…' : 'Entrar con correo y contraseña'}
+              </button>
+              {resetSent ? (
+                <p className="text-xs text-navy-600">Si ese correo tiene una contraseña creada, te enviamos un enlace para cambiarla.</p>
+              ) : (
+                <button type="button" onClick={handleForgot} disabled={pwBusy} className="text-xs underline text-navy-600">Olvidé mi contraseña</button>
+              )}
+            </form>
             {(authError || loginError) && <p className="text-stop text-sm">{authError || loginError}</p>}
             <p className="text-xs text-navy-400">
-              Puedes usar el correo del alumno o el del tutor. Si tu correo no funciona, pide en el plantel que lo registren o lo corrijan.
+              <b>Primera vez:</b> entra con Google usando la cuenta institucional del alumno (@ibime.edu.mx). Ahí, en «Editar información», puedes registrar el correo del tutor y crearle una contraseña para que también entre con ella. Por seguridad, la sesión se cierra cada sábado por la noche.
             </p>
           </section>
         )}
 
+        {/* Correo y contraseña creados, pero el correo aún no se confirma */}
+        {user && profile?.role === 'unverified' && (
+          <section className="card space-y-3">
+            <p className="font-display font-bold text-navy-900">Confirma tu correo</p>
+            <p className="text-sm text-navy-600">
+              Enviamos un enlace a <b>{profile.email}</b>. Ábrelo desde ese correo (revisa también spam) y después toca «Ya lo confirmé».
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={refreshVerification} className="w-full rounded-xl bg-navy-800 text-white py-3 font-display font-semibold">Ya lo confirmé</button>
+              <button type="button" onClick={handleResendVerification} disabled={verifyBusy} className="w-full rounded-xl border border-navy-100 py-3 text-navy-600 font-medium disabled:opacity-50">
+                {verifyBusy ? 'Enviando…' : 'Reenviar correo'}
+              </button>
+              <button type="button" onClick={logout} className="text-xs underline text-navy-500">Usar otro correo</button>
+            </div>
+            {verifyMsg && <p className="text-xs text-navy-600">{verifyMsg}</p>}
+          </section>
+        )}
+
         {/* Sesión del personal: esta pantalla es para familias */}
-        {user && profile && !isFamily && (
+        {user && profile && !isFamily && !isAdmin && profile.role !== 'unverified' && (
           <section className="card space-y-2 text-sm text-navy-600">
             <p>Entraste con una cuenta del personal. El seguimiento es para familias.</p>
             <a href={profile.role === 'admin' ? '/admin' : '/chofer'} className="underline text-navy-800 font-medium">Ir a mi panel</a>
           </section>
         )}
 
-        {isFamily && kid && (
+        {/* Administración: se ve el seguimiento igual que lo ve la familia */}
+        {isAdmin && (
+          <section className="card space-y-3">
+            <div>
+              <p className="font-display font-bold text-navy-900">Vista de administración</p>
+              <p className="text-xs text-navy-400 mt-0.5">Escribe una matrícula o un correo (de alumno o tutor) para ver el seguimiento como lo ve la familia.</p>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); adminFind(adminQuery); }} className="flex gap-2">
+              <input value={adminQuery} onChange={(e) => setAdminQuery(e.target.value)} placeholder="Matrícula o correo" autoComplete="off"
+                className="flex-1 min-w-0 rounded-xl border border-navy-100 px-3 py-2.5 text-base" />
+              <button type="submit" disabled={adminBusy || !adminQuery.trim()} className="px-4 rounded-xl bg-navy-800 text-white disabled:opacity-50" aria-label="Buscar"><Search size={17} /></button>
+            </form>
+            {adminError && <p className="text-stop text-sm">{adminError}</p>}
+            {adminSaved.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {adminSaved.map((x) => (
+                  <button key={x.q} type="button" onClick={() => adminFind(x.q)} className="text-xs rounded-full border border-navy-100 bg-white px-3 py-1.5 text-navy-700">
+                    {firstName(x.name) || x.q} <span className="text-navy-300">· {x.q.length > 18 ? `${x.q.slice(0, 16)}…` : x.q}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Pestañas de la familia */}
+        {isFamily && (
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white border border-navy-100" role="tablist" aria-label="Sección">
+            {[['seguimiento', 'Seguimiento', Navigation], ['avisos', 'Avisos', Bell]].map(([k, label, Icon]) => (
+              <button key={k} type="button" role="tab" aria-selected={view === k}
+                onClick={() => { setView(k); if (k === 'avisos') loadNotices(); }}
+                className={`relative flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors ${view === k ? 'bg-navy-800 text-white' : 'text-navy-600'}`}>
+                <Icon size={16} /> {label}
+                {k === 'avisos' && unreadCount > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-stop text-white text-[10px] font-bold flex items-center justify-center">{unreadCount}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Avisos */}
+        {isFamily && view === 'avisos' && (
+          <section className="space-y-3">
+            {noticeError && <p className="text-stop text-sm">{noticeError}</p>}
+            {noticesLoading && !notices.length && <p className="text-sm text-navy-400">Cargando avisos…</p>}
+            {!noticesLoading && !noticeError && !visibleNotices.length && (
+              <div className="card text-center text-sm text-navy-400 py-8">Por ahora no tienes avisos. Aquí verás recordatorios y avisos del plantel.</div>
+            )}
+            {visibleNotices.map((n) => {
+              const unread = !readIds.has(n.id);
+              const at = tsMs(n.publishAt) || tsMs(n.createdAt);
+              return (
+                <article key={n.id} onClick={() => openNotice(n)}
+                  className={`card space-y-1.5 cursor-pointer ${unread ? 'border-2 border-signal-yellow bg-signal-yellow/10' : ''}`}>
+                  <div className="flex items-start gap-2">
+                    <span className="text-xl leading-none" aria-hidden="true">{NOTICE_TYPES[n.type]?.icon || '📢'}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-display font-semibold text-navy-900 leading-tight">{n.title}</p>
+                      <p className="text-xs text-navy-400">{NOTICE_TYPES[n.type]?.label || 'Aviso'}{at ? ` · ${new Date(at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}` : ''}</p>
+                    </div>
+                    {unread && <span className="text-[10px] font-bold uppercase bg-stop text-white rounded-full px-2 py-0.5">Nuevo</span>}
+                  </div>
+                  <p className="text-sm text-navy-700 whitespace-pre-line">{n.body}</p>
+                </article>
+              );
+            })}
+          </section>
+        )}
+
+        {(isFamily ? view === 'seguimiento' : isAdmin) && kid && (
           <>
             {/* Varios hijos ligados al mismo correo */}
             {kids.length > 1 && (
@@ -650,6 +911,14 @@ export default function PublicTrack() {
             )}
 
             {/* Saludo */}
+            {isAdmin ? (
+              <section className="card space-y-1 text-sm">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-navy-400 uppercase tracking-wide"><Eye size={13} /> Así lo ve la familia</p>
+                <p className="font-display font-bold text-navy-900">{titleCase(kid.name)} <span className="text-navy-400 font-normal">· {kid.matricula}</span></p>
+                <p className="text-navy-600">Tutor(a): {tutorName || 'sin registrar'}{kid.parentesco ? ` (${kid.parentesco})` : ''}</p>
+                <p className="text-xs text-navy-400 break-all">Correo tutor: {kid.parentEmail || '—'} · Correo alumno: {kid.studentEmail || '—'}</p>
+              </section>
+            ) : (
             <section className="card space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -706,6 +975,41 @@ export default function PublicTrack() {
                   <label className="block text-xs text-navy-500">Teléfono de contacto (10 dígitos)
                     <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="tel" autoComplete="tel" placeholder="55 1234 5678" className="w-full mt-1 rounded-xl border border-navy-100 px-3 py-2.5 text-base text-navy-900" />
                   </label>
+
+                  {isStudentAccount ? (
+                    <>
+                      <label className="block text-xs text-navy-500">Correo del tutor(a)
+                        <input type="email" value={form.tutorEmail} onChange={(e) => setForm({ ...form, tutorEmail: e.target.value })} placeholder="tutor@ejemplo.com" autoComplete="off"
+                          className="w-full mt-1 rounded-xl border border-navy-100 px-3 py-2.5 text-base text-navy-900" />
+                      </label>
+                      <label className="flex items-start gap-2 text-sm text-navy-700">
+                        <input type="checkbox" checked={form.createPw} onChange={(e) => setForm({ ...form, createPw: e.target.checked, pw: '', pw2: '' })} className="mt-1 accent-navy-800" />
+                        <span>Crear una contraseña para que el tutor entre con su correo<span className="block text-xs text-navy-400">Podrá entrar con correo y contraseña, además de la cuenta del alumno.</span></span>
+                      </label>
+                      {form.createPw && (
+                        <div className="space-y-2 rounded-xl bg-navy-50 p-3">
+                          <PasswordInput value={form.pw} onChange={(v) => setForm({ ...form, pw: v })} placeholder="Contraseña" autoComplete="new-password" />
+                          <PasswordInput value={form.pw2} onChange={(v) => setForm({ ...form, pw2: v })} placeholder="Confirmar contraseña" autoComplete="new-password" />
+                          <ul className="text-xs space-y-0.5">
+                            {PW_RULES.map((r) => {
+                              const ok = r.test(form.pw);
+                              return (
+                                <li key={r.k} className={`flex items-center gap-1.5 ${ok ? 'text-go' : 'text-navy-400'}`}>
+                                  {ok ? <Check size={12} /> : <XIcon size={12} />} {r.label}
+                                </li>
+                              );
+                            })}
+                            <li className={`flex items-center gap-1.5 ${form.pw2 && form.pw === form.pw2 ? 'text-go' : 'text-navy-400'}`}>
+                              {form.pw2 && form.pw === form.pw2 ? <Check size={12} /> : <XIcon size={12} />} Las contraseñas coinciden
+                            </li>
+                          </ul>
+                          <p className="text-xs text-navy-500">Al guardar enviaremos un correo al tutor para confirmar su dirección, y regresarás al inicio de sesión.</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-navy-400">Correo con el que entraste: <b>{myEmail}</b></p>
+                  )}
                   {formError && <p className="text-stop text-sm">{formError}</p>}
                   <p className="text-xs text-navy-400">Estos cambios solo se actualizan en Ruta Segura; no modifican tus datos en el plantel ni en otros sistemas.</p>
                   <div className="flex gap-2">
@@ -715,10 +1019,11 @@ export default function PublicTrack() {
                 </form>
               )}
             </section>
+            )}
           </>
         )}
 
-        {isFamily && student && (
+        {(isFamily ? view === 'seguimiento' : isAdmin) && student && (
           <>
             {/* Turno */}
             <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white border border-navy-100" role="tablist" aria-label="Turno">
@@ -772,6 +1077,12 @@ export default function PublicTrack() {
                 </span>
               </div>
 
+              {livePaused && (
+                <button type="button" onClick={() => setLivePaused(false)}
+                  className="mt-3 w-full rounded-xl bg-signal-yellow text-navy-900 font-display font-semibold py-2.5 text-sm">
+                  Pausado para ahorrar datos · Toca para seguir viendo en vivo
+                </button>
+              )}
               <h2 className="font-display font-bold text-[1.65rem] leading-tight mt-3">{status.headline}</h2>
               {status.sub && <p className="text-navy-100 text-[0.95rem] leading-snug mt-2">{status.sub}</p>}
 
@@ -835,7 +1146,9 @@ export default function PublicTrack() {
                           <Popup>{tracking.destination.name || 'Plantel'} · meta</Popup>
                         </Marker>
                       )}
-                      <AnimatedBus position={completed ? null : liveLoc} at={liveMs} follow={follow} />
+                      <AnimatedBus position={completed ? null : liveLoc} at={liveMs} follow={follow}>
+                        <Popup>Transporte escolar</Popup>
+                      </AnimatedBus>
                     </MapContainer>
 
                     <div className="absolute top-3 left-3 z-[1000] rounded-full bg-white/95 shadow px-3 py-1.5 text-xs font-medium flex items-center gap-2">

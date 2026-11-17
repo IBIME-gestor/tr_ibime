@@ -12,6 +12,7 @@ import {
   todayString,
 } from '../../firebase/trips';
 import LoadingOverlay from '../../components/LoadingOverlay';
+import useLiveLocations, { withLive } from '../../hooks/useLiveLocations';
 import { tsMs } from '../../utils/tripOrder';
 import { dayLabel, fmtAgo, fmtShortDay, signalState, SIGNAL_META } from '../../utils/tripStatus';
 
@@ -50,6 +51,7 @@ export default function ActiveTrips() {
   const [openTripId, setOpenTripId] = useState(null);
   const [showOld, setShowOld] = useState(null); // null = automático
   const [now, setNow] = useState(Date.now());
+  const liveMap = useLiveLocations(); // la ubicación en vivo ya no se guarda en el recorrido
 
   async function load() {
     setLoading(true);
@@ -83,10 +85,10 @@ export default function ActiveTrips() {
   const { todayTrips, oldTrips } = useMemo(() => {
     const t = [];
     const o = [];
-    trips.forEach((trip) => (trip.date === today ? t : o).push(trip));
+    withLive(trips, liveMap).forEach((trip) => (trip.date === today ? t : o).push(trip));
     o.sort((a, b) => String(b.date).localeCompare(String(a.date)));
     return { todayTrips: t, oldTrips: o };
-  }, [trips, today]);
+  }, [trips, liveMap, today]);
 
   // Si hoy no hay nada, se muestran de entrada los anteriores (es lo único que hay).
   const oldOpen = showOld ?? todayTrips.length === 0;

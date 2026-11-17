@@ -9,6 +9,7 @@ import {
 import { geocodeAddress, resolveStudentLocation } from '../../firebase/geocoding';
 import { buildStudentRow, financePayload, invalidateListReviewPatch, priorityCompare } from './RouteBuilder';
 import { schoolIcon } from '../../utils/mapIcons';
+import PlaneacionOrden from './PlaneacionOrden';
 
 /**
  * Planeación (solo admin)
@@ -389,11 +390,11 @@ export default function Planeacion() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold text-navy-900 flex items-center gap-2"><MapPin size={22} /> Planeación en mapa</h1>
-          <p className="text-sm text-navy-500 mt-1 max-w-3xl">Cobertura de planteles y reasignación de alumnos entre rutas. Los alumnos se ubican con su domicilio (geocodificación gratuita de OpenStreetMap), así que la posición es aproximada.</p>
+          <p className="text-sm text-navy-500 mt-1 max-w-3xl">Cobertura de planteles, reasignación de alumnos entre rutas y orden de entrega de cada recorrido. Los alumnos se ubican con su domicilio (geocodificación gratuita de OpenStreetMap), así que la posición es aproximada.</p>
         </div>
         <button type="button" className="btn-admin-ghost" onClick={load} disabled={loading}><RefreshCw size={14} className="inline mr-1" />Actualizar</button>
       </div>
-      <div className="flex gap-2">{tabBtn('cobertura', 'Cobertura de planteles')}{tabBtn('rutas', 'Rutas y borradores')}</div>
+      <div className="flex gap-2">{tabBtn('cobertura', 'Cobertura de planteles')}{tabBtn('rutas', 'Rutas y borradores')}{tabBtn('orden', 'Orden de entrega')}</div>
       {error && <p className="rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm px-3 py-2">{error}</p>}
 
       {geoFailed.length > 0 && !geoBusy && (
@@ -410,6 +411,15 @@ export default function Planeacion() {
         </div>
       )}
 
+      {tab === 'orden' && (
+        <PlaneacionOrden
+          students={students} routes={routes} schools={schools} drafts={drafts} profile={profile}
+          studentLoc={studentLoc}
+          reloadDrafts={async () => setDrafts((await RouteDrafts.list().catch(() => [])) || [])}
+        />
+      )}
+
+      {tab !== 'orden' && (
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
         <div className="admin-card p-0 overflow-hidden" style={{ height: '72vh' }}>
           <MapContainer center={MEXICO_CITY} zoom={11} style={{ height: '100%', width: '100%', cursor: placingId || placingStudent ? 'crosshair' : undefined }}>
@@ -606,7 +616,7 @@ export default function Planeacion() {
                 <p className="font-semibold text-navy-800">Borrador de cambios ({changeList.length})</p>
                 <select className="admin-input" value={draftId} onChange={(e) => loadDraft(e.target.value)}>
                   <option value="">— Borrador nuevo —</option>
-                  {drafts.map((d) => <option key={d.id} value={d.id}>{d.name}{d.status === 'ejecutado' ? ' (ejecutado)' : ''}</option>)}
+                  {drafts.filter((d) => d.type !== 'orden').map((d) => <option key={d.id} value={d.id}>{d.name}{d.status === 'ejecutado' ? ' (ejecutado)' : ''}</option>)}
                 </select>
                 <input className="admin-input" placeholder="Nombre del borrador" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
                 <ul className="max-h-48 overflow-y-auto text-xs space-y-1">
@@ -633,6 +643,7 @@ export default function Planeacion() {
           )}
         </aside>
       </div>
+      )}
 
       {plan && (
         <div className="fixed inset-0 z-[2000] bg-black/40 flex items-center justify-center p-4">

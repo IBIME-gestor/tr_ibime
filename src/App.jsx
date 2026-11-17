@@ -32,6 +32,7 @@ import AgendaAdmin from './pages/admin/Agenda';
 import DriverSpecialTrips from './pages/driver/SpecialTrips';
 import DriverNotices from './pages/driver/Notices';
 import AvisosAdmin from './pages/admin/Avisos';
+import AvisosFamilias from './pages/admin/AvisosFamilias';
 import CorregirRecorridos from './pages/admin/CorregirRecorridos';
 import AlumnosQuitados from './pages/admin/AlumnosQuitados';
 import ListasConsulta from './pages/admin/ListasConsulta';
@@ -102,6 +103,7 @@ export default function App() {
         <Route path="talleres" element={<Talleres />} />
         <Route path="agenda" element={<AgendaAdmin />} />
         <Route path="avisos" element={<AvisosAdmin />} />
+        <Route path="avisos-familias" element={<AvisosFamilias />} />
         <Route path="corregir-recorridos" element={<CorregirRecorridos />} />
         <Route path="alumnos-quitados" element={<AlumnosQuitados />} />
         <Route path="historial-unidades" element={<HistorialUnidad />} />

@@ -173,7 +173,7 @@ function PaymentHistory({ item, row, cometa, cometaError, manual, loading, other
 }
 
 /**
- * Operación / Consultar listas
+ * Listas / Consultar listas
  * Lectura de las listas por mes + marca de pagos y de revisión.
  * La edición de datos y la eliminación viven en "Modificar listas".
  */
@@ -431,7 +431,7 @@ export default function ListasConsulta() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wider font-semibold text-navy-400">Operación / Listas alumnos</p>
+          <p className="text-xs uppercase tracking-wider font-semibold text-navy-400">Listas / Alumnos</p>
           <h1 className="font-display text-2xl font-bold text-navy-900 mt-1">Consultar listas</h1>
           <p className="text-sm text-navy-500 mt-1">Lee las listas del mes, marca los pagos y la revisión. Para corregir o eliminar una lista usa «Modificar listas».</p>
         </div>

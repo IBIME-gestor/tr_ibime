@@ -3,6 +3,7 @@ import { Bell, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { listMyNotices, ackNotice } from '../../firebase/announcements';
 import LoadingOverlay from '../../components/LoadingOverlay';
+import { isPublished } from '../../utils/schedule';
 
 const fmt = (ts) => (ts?.seconds ? new Date(ts.seconds * 1000).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 
@@ -15,7 +16,7 @@ export default function DriverNotices() {
 
   async function load() {
     if (!profile?.staffId) { setLoading(false); return; }
-    try { setRows((await listMyNotices(profile.staffId)).filter((r) => r.status !== 'cancelado')); setError(''); }
+    try { setRows((await listMyNotices(profile.staffId)).filter((r) => r.status !== 'cancelado' && isPublished(r))); setError(''); }
     catch (e) { console.error(e); setError(e?.message || 'No se pudieron cargar tus avisos.'); }
     setLoading(false);
   }

@@ -36,55 +36,87 @@ import {
   ScrollText,
   Pencil,
   Bell,
+  MessageSquare,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
 
 /**
- * Menú agrupado por categorías. Cada grupo es un botón en la barra
+ * Menú agrupado por etapas del trabajo. Cada grupo es un botón en la barra
  * superior que despliega sus módulos en cascada ligera.
  *
- *  - Inicio:         Resumen
- *  - Operación:      lo que se mueve día a día (rutas, listas, recorridos)
- *  - Catálogos:      datos maestros (alumnos, planteles, operadores, unidades)
- *  - Finanzas:       cobranza, tarifas y estado financiero
- *  - Administración: reportes, nómina y accesos
+ *  - Inicio:        Resumen
+ *  - Planeación:    cómo se arma el servicio (rutas, mapa, talleres, viajes especiales)
+ *  - Listas:        quién viaja en cada ruta (generar, consultar, modificar, banco)
+ *  - Seguimiento:   HOY (flota, recorridos en curso) y REVISIÓN (asistencia, GPS, historial, reportes)
+ *  - Comunicación:  avisos a operadores y familias, y tu agenda
+ *  - Catálogos:     datos maestros (alumnos, planteles, operadores, unidades)
+ *  - Finanzas:      caja, cobranza, tarifas y nómina
+ *  - Sistema:       accesos y herramientas de soporte
+ *
+ * Un renglón con `heading` es solo un subtítulo dentro del menú desplegado.
  */
+const A = ['admin'];
 const groups = [
   {
     key: 'inicio',
     label: 'Inicio',
     icon: LayoutDashboard,
     items: [
-      { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard, roles: ['admin'] },
+      { to: '/admin', label: 'Resumen', end: true, icon: LayoutDashboard, roles: A },
     ],
   },
   {
-    key: 'operacion',
-    label: 'Operación',
+    key: 'planeacion',
+    label: 'Planeación',
     icon: Compass,
     items: [
-      { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: ['admin'] },
-      { to: '/admin/formar-ruta', label: 'Generar listas de alumnos', icon: ListOrdered, roles: ['admin'] },
-      { to: '/admin/listas/consultar', label: 'Consultar listas', icon: Search, roles: ['admin'] },
-      { to: '/admin/listas/modificar', label: 'Modificar listas', icon: Settings2, roles: ['admin'] },
-      { to: '/admin/listas/compartidos', label: 'Alumnos en varias rutas', icon: Shuffle, roles: ['admin'] },
-      { to: '/admin/listas/banco', label: 'Banco por asignar', icon: Inbox, roles: ['admin'] },
-      { to: '/admin/listas/asistencia', label: 'Asistencia vs lista', icon: CheckSquare, roles: ['admin'] },
-      { to: '/admin/mapas-ruta', label: 'Mapas de recorridos', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/recorrido-real', label: 'Recorrido real (GPS)', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/agenda', label: 'Mi agenda', icon: Bell, roles: ['admin'] },
-      { to: '/admin/avisos', label: 'Avisos a operadores', icon: Bell, roles: ['admin'] },
-      { to: '/admin/corregir-recorridos', label: 'Corregir recorridos', icon: Pencil, roles: ['admin'] },
-      { to: '/admin/alumnos-quitados', label: 'Alumnos quitados (revisión)', icon: Pencil, roles: ['admin'] },
-      { to: '/admin/talleres', label: 'Talleres (17:30)', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/viajes-especiales', label: 'Viajes especiales', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: MapIcon, roles: ['admin'] },
-      { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: ['admin'] },
-      { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: ['admin'] },
-      { to: '/admin/vista-operador', label: 'Vista del operador', icon: RouteIcon, roles: ['admin'] },
-      { to: '/admin/en-vivo', label: 'Flota en vivo', icon: Radio, roles: ['admin'] },
+      { to: '/admin/rutas', label: 'Rutas', icon: RouteIcon, roles: A },
+      { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: A },
+      { to: '/admin/talleres', label: 'Talleres (17:30)', icon: MapIcon, roles: A },
+      { to: '/admin/viajes-especiales', label: 'Viajes especiales', icon: MapIcon, roles: A },
+    ],
+  },
+  {
+    key: 'listas',
+    label: 'Listas',
+    icon: ClipboardList,
+    items: [
+      { to: '/admin/formar-ruta', label: 'Generar listas de alumnos', icon: ListOrdered, roles: A },
+      { to: '/admin/listas/consultar', label: 'Consultar listas', icon: Search, roles: A },
+      { to: '/admin/listas/modificar', label: 'Modificar listas', icon: Settings2, roles: A },
+      { to: '/admin/listas/compartidos', label: 'Alumnos en varias rutas', icon: Shuffle, roles: A },
+      { to: '/admin/listas/banco', label: 'Banco por asignar', icon: Inbox, roles: A },
+      { to: '/admin/alumnos-quitados', label: 'Alumnos quitados (revisión)', icon: Pencil, roles: A },
+    ],
+  },
+  {
+    key: 'seguimiento',
+    label: 'Seguimiento',
+    icon: Radio,
+    items: [
+      { heading: 'Hoy, en vivo', roles: A },
+      { to: '/admin/en-vivo', label: 'Flota en vivo', icon: Radio, roles: A },
+      { to: '/admin/recorridos-activos', label: 'Recorridos en curso', icon: LifeBuoy, roles: A },
+      { to: '/admin/vista-operador', label: 'Vista del operador', icon: RouteIcon, roles: A },
+      { to: '/admin/solicitudes-operadores', label: 'Enlaces y solicitudes', icon: Link2, roles: A },
+      { heading: 'Revisión', roles: A },
+      { to: '/admin/listas/asistencia', label: 'Asistencia vs lista', icon: CheckSquare, roles: A },
+      { to: '/admin/recorrido-real', label: 'Recorrido real (GPS)', icon: MapIcon, roles: A },
+      { to: '/admin/mapas-ruta', label: 'Mapas de recorridos', icon: MapIcon, roles: A },
+      { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: Truck, roles: A },
+      { to: '/admin/corregir-recorridos', label: 'Corregir recorridos', icon: Pencil, roles: A },
+      { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: A },
+    ],
+  },
+  {
+    key: 'comunicacion',
+    label: 'Comunicación',
+    icon: MessageSquare,
+    items: [
+      { to: '/admin/avisos', label: 'Avisos a operadores', icon: Bell, roles: A },
+      { to: '/admin/avisos-familias', label: 'Avisos a familias', icon: Bell, roles: A },
+      { to: '/admin/agenda', label: 'Mi agenda', icon: Bell, roles: A },
     ],
   },
   {
@@ -92,10 +124,10 @@ const groups = [
     label: 'Catálogos',
     icon: Database,
     items: [
-      { to: '/admin/alumnos', label: 'Alumnos', icon: Users, roles: ['admin'] },
-      { to: '/admin/planteles', label: 'Planteles', icon: School, roles: ['admin'] },
-      { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: ['admin'] },
-      { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: ['admin'] },
+      { to: '/admin/alumnos', label: 'Alumnos', icon: Users, roles: A },
+      { to: '/admin/planteles', label: 'Planteles', icon: School, roles: A },
+      { to: '/admin/choferes', label: 'Operadores y nannies', icon: Contact, roles: A },
+      { to: '/admin/unidades', label: 'Unidades', icon: Truck, roles: A },
     ],
   },
   {
@@ -104,35 +136,41 @@ const groups = [
     icon: Landmark,
     items: [
       { to: '/admin/caja', label: 'Caja', icon: Wallet, roles: ['admin', 'cashier'] },
-      { to: '/admin/finanzas', label: 'Finanzas', icon: Landmark, roles: ['admin'] },
-      { to: '/admin/cobranza', label: 'Cobranza por plantel', icon: PhoneCall, roles: ['admin'] },
-      { to: '/admin/cometa', label: 'Banco de pagos Cometa', icon: FileSpreadsheet, roles: ['admin'] },
-      { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: ['admin'] },
+      { to: '/admin/finanzas', label: 'Finanzas', icon: Landmark, roles: A },
+      { to: '/admin/cobranza', label: 'Cobranza por plantel', icon: PhoneCall, roles: A },
+      { to: '/admin/cometa', label: 'Banco de pagos Cometa', icon: FileSpreadsheet, roles: A },
+      { to: '/admin/tarifas', label: 'Tarifas y conceptos', icon: CircleDollarSign, roles: A },
+      { to: '/admin/nomina', label: 'Nómina de personal', icon: ClipboardList, roles: A },
     ],
   },
   {
-    key: 'administracion',
-    label: 'Administración',
+    key: 'sistema',
+    label: 'Sistema',
     icon: Settings2,
     items: [
-      { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: ['admin'] },
-      { to: '/admin/nomina', label: 'Nómina de personal', icon: ClipboardList, roles: ['admin'] },
-      { to: '/admin/acceso', label: 'Personas con acceso', icon: UserCog, roles: ['admin'] },
-    ],
-  },
-  {
-    key: 'soporte',
-    label: 'Soporte',
-    icon: Bug,
-    items: [
-      { to: '/admin/soporte/errores', label: 'Errores de usuarios', icon: Bug, roles: ['admin'] },
-      { to: '/admin/soporte/bitacora', label: 'Bitácora de cambios', icon: ScrollText, roles: ['admin'] },
-      { to: '/admin/soporte/alumnos', label: 'Editor de alumnos', icon: Pencil, roles: ['admin'] },
-      { to: '/admin/soporte/operador', label: 'Diagnóstico de operador', icon: UserCog, roles: ['admin'] },
-      { to: '/admin/soporte/sincronizar', label: 'Sincronizar operador con lista', icon: RefreshCw, roles: ['admin'] },
+      { heading: 'Accesos', roles: A },
+      { to: '/admin/acceso', label: 'Personas con acceso', icon: UserCog, roles: A },
+      { heading: 'Soporte', roles: A },
+      { to: '/admin/soporte/errores', label: 'Errores de usuarios', icon: Bug, roles: A },
+      { to: '/admin/soporte/bitacora', label: 'Bitácora de cambios', icon: ScrollText, roles: A },
+      { to: '/admin/soporte/alumnos', label: 'Editor de alumnos', icon: Pencil, roles: A },
+      { to: '/admin/soporte/operador', label: 'Diagnóstico de operador', icon: UserCog, roles: A },
+      { to: '/admin/soporte/sincronizar', label: 'Sincronizar operador con lista', icon: RefreshCw, roles: A },
     ],
   },
 ];
+
+/** Módulos reales de un grupo (sin los subtítulos). */
+const realItems = (g) => g.items.filter((i) => !i.heading);
+
+/** Quita los subtítulos que se quedaron sin módulos debajo. */
+function dropEmptyHeadings(items) {
+  return items.filter((it, idx) => {
+    if (!it.heading) return true;
+    const next = items[idx + 1];
+    return next && !next.heading;
+  });
+}
 
 function isItemActive(item, pathname) {
   if (item.end) return pathname === item.to;
@@ -155,8 +193,8 @@ export default function AdminLayout() {
   const visibleGroups = useMemo(
     () =>
       groups
-        .map((g) => ({ ...g, items: g.items.filter((i) => i.roles.includes(role)) }))
-        .filter((g) => g.items.length > 0),
+        .map((g) => ({ ...g, items: dropEmptyHeadings(g.items.filter((i) => i.roles.includes(role))) }))
+        .filter((g) => realItems(g).length > 0),
     [role]
   );
 
@@ -207,7 +245,7 @@ export default function AdminLayout() {
   }, [mobileOpen]);
 
   // Si solo hay un grupo con un solo módulo (cajero), se muestra como enlace directo.
-  const flat = visibleGroups.length === 1 && visibleGroups[0].items.length === 1;
+  const flat = visibleGroups.length === 1 && realItems(visibleGroups[0]).length === 1;
 
   return (
     <div className="h-screen flex flex-col bg-navy-50 overflow-hidden">
@@ -225,27 +263,27 @@ export default function AdminLayout() {
           </NavLink>
 
           {/* Navegación de escritorio */}
-          <nav ref={navRef} className="hidden lg:flex items-center gap-1 ml-4 flex-1 min-w-0" aria-label="Módulos">
+          <nav ref={navRef} className="hidden xl:flex items-center gap-0.5 ml-4 flex-1 min-w-0" aria-label="Módulos">
             {visibleGroups.map((g) => {
               const GroupIcon = g.icon;
               const active = g.items.some((i) => isItemActive(i, location.pathname));
               const isOpen = openGroup === g.key;
 
               // Grupo de un solo módulo (Inicio, o Caja para el cajero): enlace directo.
-              if (g.items.length === 1) {
-                const item = g.items[0];
+              if (realItems(g).length === 1) {
+                const item = realItems(g)[0];
                 return (
                   <NavLink
                     key={g.key}
                     to={item.to}
                     end={item.end}
                     className={({ isActive }) =>
-                      `relative flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      `relative flex items-center gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
                         isActive ? 'text-white bg-navy-700' : 'text-navy-100 hover:text-white hover:bg-navy-700/60'
                       }`
                     }
                   >
-                    <GroupIcon size={16} /> {flat ? item.label : g.label}
+                    <GroupIcon size={16} className="hidden 2xl:block" /> {flat ? item.label : g.label}
                   </NavLink>
                 );
               }
@@ -262,22 +300,26 @@ export default function AdminLayout() {
                     aria-haspopup="true"
                     aria-expanded={isOpen}
                     onClick={() => setOpenGroup(isOpen ? null : g.key)}
-                    className={`relative flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`relative flex items-center gap-1.5 2xl:gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
                       active || isOpen ? 'text-white bg-navy-700' : 'text-navy-100 hover:text-white hover:bg-navy-700/60'
                     }`}
                   >
-                    <GroupIcon size={16} />
+                    <GroupIcon size={16} className="hidden 2xl:block" />
                     {g.label}
                     <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                     {active && (
-                      <span className="absolute left-3 right-3 -bottom-[7px] h-[3px] rounded-full bg-signal-yellow" aria-hidden="true" />
+                      <span className="absolute left-2.5 right-2.5 -bottom-[7px] h-[3px] rounded-full bg-signal-yellow" aria-hidden="true" />
                     )}
                   </button>
 
                   {isOpen && (
                     <div className="absolute left-0 top-full pt-2 min-w-[240px] z-50">
                       <ul className="bg-white text-navy-800 rounded-lg border border-navy-100 shadow-panel py-1.5 overflow-hidden">
-                        {g.items.map((item, idx) => (
+                        {g.items.map((item, idx) => (item.heading ? (
+                          <li key={`h-${item.heading}`} className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-navy-400 select-none">
+                            {item.heading}
+                          </li>
+                        ) : (
                           <li key={item.to} className="nav-cascade" style={{ animationDelay: `${idx * 28}ms` }}>
                             <NavLink
                               to={item.to}
@@ -294,7 +336,7 @@ export default function AdminLayout() {
                               {item.label}
                             </NavLink>
                           </li>
-                        ))}
+                        )))}
                       </ul>
                     </div>
                   )}
@@ -303,7 +345,7 @@ export default function AdminLayout() {
             })}
           </nav>
 
-          <div className="flex-1 lg:hidden" />
+          <div className="flex-1 xl:hidden" />
 
           {/* Campana de la agenda (24 / 12 / 6 / 1 h antes) */}
           {role === 'admin' && (
@@ -322,8 +364,8 @@ export default function AdminLayout() {
           )}
 
           {/* Usuario (escritorio) */}
-          <div className="hidden lg:flex items-center gap-3 shrink-0">
-            <p className="text-xs text-navy-100 max-w-[160px] truncate">{profile?.name || 'Administrador'}</p>
+          <div className="hidden xl:flex items-center gap-3 shrink-0">
+            <p className="hidden 2xl:block text-xs text-navy-100 max-w-[160px] truncate">{profile?.name || 'Administrador'}</p>
             <button
               onClick={logout}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-navy-100 hover:text-white hover:bg-navy-700"
@@ -335,7 +377,7 @@ export default function AdminLayout() {
           {/* Botón de menú (móvil / tablet) */}
           <button
             type="button"
-            className="lg:hidden p-2 -mr-2 rounded-md hover:bg-navy-700"
+            className="xl:hidden p-2 -mr-2 rounded-md hover:bg-navy-700"
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Menú"
             aria-expanded={mobileOpen}
@@ -346,15 +388,15 @@ export default function AdminLayout() {
 
         {/* Panel móvil / tablet */}
         {mobileOpen && (
-          <div className="lg:hidden absolute left-0 right-0 top-full bg-navy-800 border-t border-navy-700 shadow-panel max-h-[calc(100vh-3.5rem)] overflow-y-auto">
+          <div className="xl:hidden absolute left-0 right-0 top-full bg-navy-800 border-t border-navy-700 shadow-panel max-h-[calc(100vh-3.5rem)] overflow-y-auto">
             <nav className="px-3 py-3 flex flex-col gap-1" aria-label="Módulos">
               {visibleGroups.map((g, gi) => {
                 const GroupIcon = g.icon;
                 const active = g.items.some((i) => isItemActive(i, location.pathname));
                 const isOpen = expanded === g.key || (expanded === null && active);
 
-                if (g.items.length === 1) {
-                  const item = g.items[0];
+                if (realItems(g).length === 1) {
+                  const item = realItems(g)[0];
                   return (
                     <NavLink
                       key={g.key}
@@ -388,7 +430,11 @@ export default function AdminLayout() {
                     </button>
                     {isOpen && (
                       <ul className="ml-5 mt-1 mb-1 pl-3 border-l border-navy-600 flex flex-col gap-0.5">
-                        {g.items.map((item, idx) => (
+                        {g.items.map((item, idx) => (item.heading ? (
+                          <li key={`h-${item.heading}`} className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-navy-300 select-none">
+                            {item.heading}
+                          </li>
+                        ) : (
                           <li key={item.to} className="nav-cascade" style={{ animationDelay: `${idx * 24}ms` }}>
                             <NavLink
                               to={item.to}
@@ -405,7 +451,7 @@ export default function AdminLayout() {
                               {item.label}
                             </NavLink>
                           </li>
-                        ))}
+                        )))}
                       </ul>
                     )}
                   </div>
@@ -430,7 +476,7 @@ export default function AdminLayout() {
         <button
           type="button"
           aria-label="Cerrar menú"
-          className="lg:hidden fixed inset-0 top-14 z-30 bg-navy-900/50"
+          className="xl:hidden fixed inset-0 top-14 z-30 bg-navy-900/50"
           onClick={() => setMobileOpen(false)}
         />
       )}

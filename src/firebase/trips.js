@@ -74,7 +74,7 @@ import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActua
 export const ARRIVAL_WAIT_SECONDS = 120;
 
 /** Cada cuánto se publica la ubicación del transporte (operador → admin y padres). */
-export const LIVE_LOCATION_INTERVAL_MS = 5000;
+export const LIVE_LOCATION_INTERVAL_MS = 10000;
 // Para ahorrar escrituras: solo se publica si el transporte se movió al menos
 // esta distancia desde la última posición publicada...
 export const LIVE_LOCATION_MIN_MOVE_M = 15;
@@ -938,13 +938,24 @@ export async function applyOrderToTrip(tripId, orderedStudentIds, stops) {
  */
 export async function updateLiveLocation(tripId, location) {
   if (!location) return;
-  const liveLocation = { ...location, updatedAt: serverTimestamp() };
-  await updateDoc(doc(db, 'trips', tripId), { liveLocation });
+  // UNA sola escritura (antes eran dos): la ubicación vive en el espejo público,
+  // que leen las familias y también el mapa de administración. Así se cuida la
+  // cuota diaria de escrituras de Firestore.
   await setDoc(
     doc(db, 'publicTracking', tripId),
-    { liveLocation },
+    { liveLocation: { ...location, updatedAt: serverTimestamp() } },
     { merge: true }
   );
+}
+
+/** Administración: ubicaciones en vivo de los recorridos de HOY → { [tripId]: liveLocation }. */
+export function subscribeTodayLiveLocations(callback) {
+  const q = query(collection(db, 'publicTracking'), where('date', '==', todayString()));
+  return onSnapshot(q, (snap) => {
+    const map = {};
+    snap.docs.forEach((d) => { if (d.data().liveLocation) map[d.id] = d.data().liveLocation; });
+    callback(map);
+  });
 }
 
 /**
