@@ -39,8 +39,12 @@ export default function SpecialTripsAdmin() {
   const [form, setForm] = useState(empty());
   const [editingId, setEditingId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const openNew = () => { setEditingId(null); setForm(empty()); setError(''); setDrawerOpen(true); };
-  const closeDrawer = () => { setEditingId(null); setForm(empty()); setError(''); setDrawerOpen(false); };
+  // Asignación múltiple (solo al crear): { [operatorId]: unitId } — un viaje por operador marcado
+  const [assign, setAssign] = useState({});
+  const openNew = () => { setEditingId(null); setForm(empty()); setAssign({}); setError(''); setDrawerOpen(true); };
+  const closeDrawer = () => { setEditingId(null); setForm(empty()); setAssign({}); setError(''); setDrawerOpen(false); };
+  const toggleOp = (id) => setAssign((a) => { const n = { ...a }; if (id in n) delete n[id]; else n[id] = ''; return n; });
+  const setOpUnit = (id, unitId) => setAssign((a) => ({ ...a, [id]: unitId }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [fMonth, setFMonth] = useState(todayStr().slice(0, 7));
@@ -111,9 +115,31 @@ export default function SpecialTripsAdmin() {
           }
         }
       } else {
-        await SpecialTrips.create(payload);
+        const ids = Object.keys(assign);
+        if (ids.length === 0) {
+          await SpecialTrips.create({ ...payload, operatorId: '', operatorName: '', unitId: '', unitName: '', status: 'solicitado' });
+        } else {
+          // Un viaje por operador: cada uno ve el suyo en su portal y registra su propio km y alumnos.
+          const results = await Promise.allSettled(ids.map((opId) => SpecialTrips.create({
+            ...payload,
+            operatorId: opId,
+            operatorName: nameOf(drivers, opId),
+            unitId: assign[opId] || '',
+            unitName: assign[opId] ? nameOf(units, assign[opId], 'plate') : '',
+            status: 'asignado',
+          })));
+          const failedIds = ids.filter((_, i) => results[i].status === 'rejected');
+          if (failedIds.length) {
+            // Se queda solo lo que faltó, para reintentar sin duplicar los que ya se crearon
+            setAssign(Object.fromEntries(failedIds.map((id) => [id, assign[id]])));
+            await load();
+            setError(`Se crearon ${ids.length - failedIds.length} de ${ids.length} viajes. Quedaron marcados los operadores que faltan; vuelve a guardar.`);
+            setSaving(false);
+            return;
+          }
+        }
       }
-      setForm(empty()); setEditingId(null);
+      setForm(empty()); setEditingId(null); setAssign({});
       setDrawerOpen(false);
       await load();
     } catch (err) {
@@ -206,20 +232,57 @@ export default function SpecialTripsAdmin() {
           <div className="lg:col-span-2"><label className="admin-label">Motivo</label><input className="admin-input" value={form.motivo} onChange={set('motivo')} placeholder="ej. Traslado al centro cultural" required /></div>
           <div className="lg:col-span-2"><label className="admin-label">Destino</label><input className="admin-input" value={form.destino} onChange={set('destino')} /></div>
           <div><label className="admin-label">Alumnos aproximados</label><input type="number" min="0" className="admin-input" value={form.studentsPlanned} onChange={set('studentsPlanned')} /></div>
-          <div>
-            <label className="admin-label">Operador asignado</label>
-            <select className="admin-select" value={form.operatorId} onChange={set('operatorId')}>
-              <option value="">Sin asignar</option>
-              {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="admin-label">Unidad sugerida (el operador puede cambiarla)</label>
-            <select className="admin-select" value={form.unitId} onChange={set('unitId')}>
-              <option value="">Sin sugerir</option>
-              {units.map((u) => <option key={u.id} value={u.id}>{u.plate}{u.model ? ` — ${u.model}` : ''}</option>)}
-            </select>
-          </div>
+          {editingId ? (
+            <>
+              <div>
+                <label className="admin-label">Operador asignado</label>
+                <select className="admin-select" value={form.operatorId} onChange={set('operatorId')}>
+                  <option value="">Sin asignar</option>
+                  {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="admin-label">Unidad sugerida (el operador puede cambiarla)</label>
+                <select className="admin-select" value={form.unitId} onChange={set('unitId')}>
+                  <option value="">Sin sugerir</option>
+                  {units.map((u) => <option key={u.id} value={u.id}>{u.plate}{u.model ? ` — ${u.model}` : ''}</option>)}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="lg:col-span-4">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="admin-label !mb-0">
+                  Operadores asignados{Object.keys(assign).length > 0 ? ` (${Object.keys(assign).length})` : ''}
+                </label>
+                <div className="flex gap-3 text-xs">
+                  <button type="button" className="link-action" onClick={() => setAssign(Object.fromEntries(drivers.map((d) => [d.id, assign[d.id] || ''])))}>Marcar todos</button>
+                  <button type="button" className="link-action" onClick={() => setAssign({})}>Ninguno</button>
+                </div>
+              </div>
+              <div className="rounded-lg border border-navy-100 max-h-72 overflow-y-auto divide-y divide-navy-100 bg-white">
+                {drivers.length === 0 && <p className="text-sm text-navy-400 px-3 py-3">Aún no hay operadores dados de alta.</p>}
+                {drivers.map((d) => {
+                  const on = d.id in assign;
+                  return (
+                    <div key={d.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 ${on ? 'bg-signal-light' : ''}`}>
+                      <label className="flex items-center gap-2 flex-1 min-w-[150px] cursor-pointer text-sm">
+                        <input type="checkbox" checked={on} onChange={() => toggleOp(d.id)} />
+                        <span className="truncate">{d.name}</span>
+                      </label>
+                      {on && (
+                        <select className="admin-select !h-8 text-xs" value={assign[d.id]} onChange={(e) => setOpUnit(d.id, e.target.value)} aria-label={`Unidad de ${d.name}`}>
+                          <option value="">Unidad: sin sugerir</option>
+                          {units.map((u) => <option key={u.id} value={u.id}>{u.plate}{u.model ? ` — ${u.model}` : ''}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-navy-400 mt-1">Se crea un viaje por cada operador marcado (cada quien registra su propio km y alumnos). Sin marcar a nadie, el viaje queda «Solicitado». «Alumnos aproximados» se copia a cada viaje.</p>
+            </div>
+          )}
           <div className="lg:col-span-4"><label className="admin-label">Descripción</label><textarea rows={2} className="admin-input" value={form.descripcion} onChange={set('descripcion')} /></div>
         </div>
 
@@ -246,7 +309,7 @@ export default function SpecialTripsAdmin() {
 
         {error && <p className="text-sm text-stop mt-3">{error}</p>}
         <div className="drawer-actions">
-          <button type="submit" className="btn-admin-primary" disabled={saving}>{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Registrar viaje'}</button>
+          <button type="submit" className="btn-admin-primary" disabled={saving}>{saving ? 'Guardando…' : editingId ? 'Guardar cambios' : Object.keys(assign).length > 1 ? `Registrar ${Object.keys(assign).length} viajes` : 'Registrar viaje'}</button>
           <button type="button" onClick={closeDrawer} className="btn-admin-ghost">Cancelar</button>
         </div>
       </form>
