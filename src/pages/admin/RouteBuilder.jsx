@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import Drawer from '../../components/Drawer';
 import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
 import { tallerDatesFor } from '../../firebase/trips';
+import { recordMonth, nextMonthRangeOf } from '../../utils/dates';
 
 export const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
@@ -597,14 +598,8 @@ export default function RouteBuilder() {
   function defaultListName(r, operator) {
     return `${startDate} ${endDate} | R-${routeNomenclature(r)}-${String(operator || '').trim() || 'SIN-OPERADOR'}`;
   }
-  function monthKey(date) { return String(date || '').slice(0, 7); }
-  function nextMonthRange(dateString) {
-    const d = new Date(`${dateString}T12:00:00`);
-    d.setMonth(d.getMonth() + 1, 1);
-    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0');
-    const last = new Date(y, d.getMonth() + 1, 0);
-    return { start: `${y}-${m}-01`, end: `${y}-${m}-${String(last.getDate()).padStart(2,'0')}` };
-  }
+  function monthKey(list) { return recordMonth(list); }
+  function nextMonthRange(list) { return nextMonthRangeOf(recordMonth(list)); }
 
   function addDays(dateString, days) {
     if (!dateString) return '';
@@ -740,14 +735,14 @@ export default function RouteBuilder() {
     setEndDate(found.endDate || endDate);
     setOperatorId(found.operatorId || '');
     setListName(found.listName || '');
-    setListMonth(monthKey(found.startDate));
+    setListMonth(monthKey(found));
     setServiceFilters(['todos']);
     setSelectedDay(null);
   }
 
   async function createNextMonthList() {
     if (!currentList || !route) return;
-    const range = nextMonthRange(currentList.startDate || startDate);
+    const range = nextMonthRange(currentList);
     const nextDates = dateRange(range.start, range.end);
     const nextRows = (currentList.rows || []).map((row) => {
       const clone = { ...row };
@@ -789,7 +784,7 @@ export default function RouteBuilder() {
       openList(id);
       setCurrentList(created);
       setListName(created.listName);
-      setListMonth(monthKey(created.startDate));
+      setListMonth(monthKey(created));
       window.alert(`Se creó la lista de ${range.start.slice(0,7)}. Los alumnos diarios quedaron sin fechas para revisión manual.`);
     } catch (err) {
       console.error(err);
@@ -1073,7 +1068,7 @@ export default function RouteBuilder() {
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
           <button type="button" onClick={clearGenerator} className="btn-admin-ghost"><X size={14}/> Limpiar</button>
-          <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l.startDate)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
+          <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
           <div className="relative w-full max-w-lg">
             <button
               type="button"
@@ -1099,7 +1094,7 @@ export default function RouteBuilder() {
                 >
                   Abrir lista existente…
                 </button>
-                {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l.startDate) === listMonth)).map((l) => {
+                {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l) === listMonth)).map((l) => {
                   const reviewed = isListReviewed(l);
                   const label = l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`;
                   return (

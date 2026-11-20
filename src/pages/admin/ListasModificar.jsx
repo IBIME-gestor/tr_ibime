@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, RefreshCw, Save, Search, Trash2, UserRoundCog, Route as RouteIcon, AlertTriangle, FolderOpen } from 'lucide-react';
 import { Drivers, FinanceRecords, RouteLists, Routes, Schools } from '../../firebase/services';
 import { medioExtras } from './RouteBuilder';
+import { recordMonth } from '../../utils/dates';
 
 function dateString(date) {
   const d = new Date(date);
@@ -20,7 +21,7 @@ function datesBetween(start, end) {
   }
   return out;
 }
-function monthKey(value) { return String(value || '').slice(0, 7); }
+function monthKey(list) { return recordMonth(list); }
 
 export default function ListasModificar() {
   const [lists, setLists] = useState([]);
@@ -56,7 +57,7 @@ export default function ListasModificar() {
   const visibleLists = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('es-MX');
     return lists
-      .filter((item) => !month || monthKey(item.startDate) === month)
+      .filter((item) => !month || monthKey(item) === month)
       .filter((item) => {
         if (!q) return true;
         const routeName = routes.find((r) => r.id === item.routeId)?.name || '';

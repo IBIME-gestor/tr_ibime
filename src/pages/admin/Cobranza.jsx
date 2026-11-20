@@ -4,7 +4,7 @@ import {
   PhoneCall, Search, Download, Printer, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Users,
 } from 'lucide-react';
 import { FinanceRecords, Routes, Schools, Students } from '../../firebase/services';
-import { fmtDateOnly } from '../../utils/dates';
+import { fmtDateOnly, recordMonth } from '../../utils/dates';
 
 /* ------------------------------------------------------------------ */
 /*  Cobranza (Contraloría)                                             */
@@ -48,12 +48,12 @@ function buildRow(student, records, ctx) {
   const serviceStart = startFromRecords || tsDate(student.createdAt) || '';
 
   // Un mes cuenta cuando ya inició y tiene monto a cobrar.
-  const listedMonths = new Set(all.filter((r) => r.listId && r.periodoInicio).map((r) => r.periodoInicio.slice(0, 7)));
+  const listedMonths = new Set(all.filter((r) => r.listId && r.periodoInicio).map((r) => recordMonth(r)));
   const billed = all.filter((r) => Number(r.montoEstimado || 0) > 0 && r.periodoInicio && r.periodoInicio <= today
-    && !(r.sinLista && listedMonths.has(r.periodoInicio.slice(0, 7)))); // pago aplicado «solo al mes»: no duplicar si ya existe la lista
+    && !(r.sinLista && listedMonths.has(recordMonth(r)))); // pago aplicado «solo al mes»: no duplicar si ya existe la lista
   const byMonth = new Map();
   billed.forEach((r) => {
-    const ym = r.periodoInicio.slice(0, 7);
+    const ym = recordMonth(r);
     if (!byMonth.has(ym)) byMonth.set(ym, []);
     byMonth.get(ym).push(r);
   });

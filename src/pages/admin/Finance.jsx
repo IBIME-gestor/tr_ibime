@@ -3,6 +3,7 @@ import { Check, RefreshCw, Download, CalendarClock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { FinanceRecords, Students, Schools, RouteLists } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
+import { recordMonth } from '../../utils/dates';
 
 const EMPTY = { school:'', nivel:'', grado:'', service:'', month:'' };
 const money = (n) => `$${Number(n || 0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
@@ -85,7 +86,7 @@ export default function Finance() {
 
   const studentMap=useMemo(()=>new Map(students.map(s=>[s.id,s])),[students]);
   const schoolMap=useMemo(()=>new Map(schoolRows.map(s=>[s.id,s])),[schoolRows]);
-  const enriched=useMemo(()=>records.map(r=>{ const st=studentMap.get(r.studentId)||{}; const school=schoolMap.get(st.schoolId); return {...r, _student:st, currentSchoolId:st.schoolId||r.schoolId||'', currentSchoolName:school?.name||st.schoolName||r.schoolName||'', currentNivel:st.nivel||r.nivel||'', currentGrado:st.grado||r.grado||'', currentStatus:effectiveStatus(r), currentMonth:String(r.periodoInicio || '').slice(0,7)}; }),[records,studentMap,schoolMap]);
+  const enriched=useMemo(()=>records.map(r=>{ const st=studentMap.get(r.studentId)||{}; const school=schoolMap.get(st.schoolId); return {...r, _student:st, currentSchoolId:st.schoolId||r.schoolId||'', currentSchoolName:school?.name||st.schoolName||r.schoolName||'', currentNivel:st.nivel||r.nivel||'', currentGrado:st.grado||r.grado||'', currentStatus:effectiveStatus(r), currentMonth:recordMonth(r)}; }),[records,studentMap,schoolMap]);
   const schools=useMemo(()=>[...new Set(enriched.map(r=>r.currentSchoolName).filter(Boolean))].sort(),[enriched]);
   const niveles=useMemo(()=>[...new Set(enriched.filter(r=>!filters.school||r.currentSchoolName===filters.school).map(r=>r.currentNivel).filter(Boolean))].sort(),[enriched,filters.school]);
   const grados=useMemo(()=>[...new Set(enriched.filter(r=>(!filters.school||r.currentSchoolName===filters.school)&&(!filters.nivel||r.currentNivel===filters.nivel)).map(r=>r.currentGrado).filter(Boolean))].sort(),[enriched,filters]);

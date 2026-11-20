@@ -63,3 +63,44 @@ export function monthBounds(date = new Date()) {
   const until = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
   return { since, until };
 }
+
+/**
+ * Mes de cobro (YYYY-MM) de un periodo. Es el mes que contiene la MAYORÍA de los
+ * días del periodo, no el mes de la fecha de inicio. Así un periodo 31-ago → 30-sep
+ * cuenta como septiembre y un periodo 15-ago → 30-ago sigue siendo agosto.
+ * Si `override` (p. ej. list.billingMonth) viene en formato YYYY-MM, manda sobre el cálculo.
+ */
+export function periodMonth(startStr, endStr, override) {
+  if (override && /^\d{4}-\d{2}$/.test(override)) return override;
+  const s = String(startStr || '');
+  if (!s) return '';
+  const e = String(endStr || s);
+  if (e < s) return s.slice(0, 7);
+  const counts = new Map();
+  let cur = new Date(`${s}T12:00:00`);
+  const end = new Date(`${e}T12:00:00`);
+  let guard = 0;
+  while (cur <= end && guard++ < 400) {
+    const ym = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
+    counts.set(ym, (counts.get(ym) || 0) + 1);
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  let best = s.slice(0, 7), bestN = -1;
+  for (const [ym, n] of counts) if (n > bestN || (n === bestN && ym > best)) { best = ym; bestN = n; }
+  return best;
+}
+
+/** Mes de cobro de una lista o de un registro financiero (acepta startDate/endDate o periodoInicio/periodoFin). */
+export function recordMonth(x) {
+  if (!x) return '';
+  return periodMonth(x.startDate || x.periodoInicio, x.endDate || x.periodoFin, x.billingMonth);
+}
+
+/** Mes siguiente a 'YYYY-MM' → rango { start, end } en 'YYYY-MM-DD'. */
+export function nextMonthRangeOf(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y, nm = m === 12 ? 1 : m + 1;
+  const last = new Date(ny, nm, 0).getDate();
+  const mm = String(nm).padStart(2, '0');
+  return { start: `${ny}-${mm}-01`, end: `${ny}-${mm}-${String(last).padStart(2, '0')}` };
+}

@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { CometaBank, Drivers, FinanceRecords, RouteLists, Routes, Students } from '../../firebase/services';
 import { listTripsBetween } from '../../firebase/trips';
+import { recordMonth } from '../../utils/dates';
 
 const currentMonth = () => {
   const d = new Date();
@@ -58,7 +59,7 @@ const fmtStamp = (v) => {
 
 function PaymentHistory({ item, row, cometa, cometaError, manual, loading, otherLists, routeNames }) {
   const matk = matKey(row.matricula);
-  const listMonth = String(item.startDate || '').slice(0, 7);
+  const listMonth = recordMonth(item);
   const byApplied = (a, b) => String(a.appliedAt || a.fechaPago || '').localeCompare(String(b.appliedAt || b.fechaPago || ''));
   const mine = (cometa || []).filter((p) => p.studentId === row.studentId || p.linkedStudentId === row.studentId);
   const applied = mine.filter((p) => p.status === 'asignado' && p.studentId === row.studentId);
@@ -597,7 +598,7 @@ export default function ListasConsulta() {
                     <p className="text-xs text-navy-400 mt-1">{item.startDate || '—'} al {item.endDate || '—'} · {rows.length} alumno(s) · {money(listAmount(item))} · Pagados {paidCount}/{rows.length}</p>
                   </div>
                   {item.status === 'eliminada' && <span className="text-xs rounded-full px-2 py-1 whitespace-nowrap bg-red-100 text-red-800">Eliminada</span>}
-                  {String(item.startDate || '').slice(0, 7) !== month && <span className="text-xs rounded-full px-2 py-1 whitespace-nowrap bg-sky-100 text-sky-800">Periodo {fmtDay(item.startDate)} – {fmtDay(item.endDate)}</span>}
+                  {recordMonth(item) !== month && <span className="text-xs rounded-full px-2 py-1 whitespace-nowrap bg-sky-100 text-sky-800">Periodo {fmtDay(item.startDate)} – {fmtDay(item.endDate)}</span>}
                   <span className={`text-xs rounded-full px-2 py-1 whitespace-nowrap ${item.reviewed ? 'bg-green-100 text-green-800' : 'bg-amber-50 text-amber-800'}`}>{item.reviewed ? 'Revisada' : 'Pendiente de revisión'}</span>
                   {isOpen ? <ChevronUp size={17}/> : <ChevronDown size={17}/>}
                 </button>

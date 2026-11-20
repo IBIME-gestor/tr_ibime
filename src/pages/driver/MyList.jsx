@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Routes, RouteLists } from '../../firebase/services';
 import { listTripsByRouteBetween, getTripStopsOnce, todayString } from '../../firebase/trips';
 import LoadingOverlay from '../../components/LoadingOverlay';
+import { recordMonth } from '../../utils/dates';
 
 /* ------------------------------------------------------------------ */
 /*  Mi lista (operador)                                                */
@@ -66,12 +67,12 @@ export default function MyList() {
   }, [routeId, month, tick]);
 
   const months = useMemo(() => {
-    const set = new Set(lists.map((l) => monthOf(l.startDate)).filter(Boolean));
+    const set = new Set(lists.map((l) => monthOf(recordMonth(l))).filter(Boolean));
     set.add(monthOf(today));
     return [...set].sort();
   }, [lists, today]);
 
-  const monthLists = lists.filter((l) => monthOf(l.startDate) === month);
+  const monthLists = lists.filter((l) => monthOf(recordMonth(l)) === month);
   const list = monthLists.find((l) => l.operatorId && l.operatorId === profile?.staffId) || monthLists[0] || null;
   const dates = useMemo(() => [...(list?.dates || [])].sort(), [list]);
 

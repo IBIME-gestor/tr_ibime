@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { X, Plus, AlertTriangle } from 'lucide-react';
 import Drawer from '../../components/Drawer';
+import { recordMonth } from '../../utils/dates';
 import { Students, RouteLists, FinanceRecords } from '../../firebase/services';
 import { buildStudentRow, financePayload, invalidateListReviewPatch, priorityCompare, DAY_META, SERVICE_OPTIONS, dayHeader } from './RouteBuilder';
 
@@ -14,7 +15,7 @@ import { buildStudentRow, financePayload, invalidateListReviewPatch, priorityCom
 const MONTH_NAMES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const monthLabel = (ym) => { const [y, m] = String(ym).split('-').map(Number); return `${MONTH_NAMES[(m || 1) - 1]} de ${y}`; };
 const money = (n) => Number(n || 0).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
-const monthOf = (l) => String(l.startDate || '').slice(0, 7);
+const monthOf = (l) => recordMonth(l);
 
 export default function QuickAddToList({ student, months, hintTipo, lists, routes, units, concepts, schools, profile, user, onClose, onDone }) {
   const [routeId, setRouteId] = useState(student.routeId || '');

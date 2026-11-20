@@ -7,7 +7,7 @@ import {
 import { CometaBank, FinanceRecords, RouteLists, Routes, Units, PricingConcepts, Schools, Students } from '../../firebase/services';
 import QuickAddToList from './QuickAddToList';
 import { useAuth } from '../../context/AuthContext';
-import { fmtDateOnly } from '../../utils/dates';
+import { fmtDateOnly, recordMonth } from '../../utils/dates';
 import { readWorkbook } from '../../utils/xlsxRead';
 
 /* ------------------------------------------------------------------ */
@@ -330,7 +330,7 @@ export default function CometaBanco() {
 
   /** Lista del alumno en ese mes (si hay varias, la que aún no está pagada). */
   function destinationFor(student, ym) {
-    const ls = listsOf(student).filter((l) => String(l.startDate || '').slice(0, 7) === ym && rowOf(l, student));
+    const ls = listsOf(student).filter((l) => recordMonth(l) === ym && rowOf(l, student));
     const list = ls.find((l) => !rowOf(l, student).paid) || ls[0] || null;
     return { list, row: list ? rowOf(list, student) : null };
   }
@@ -344,6 +344,23 @@ export default function CometaBanco() {
     const hint = tipos.includes('dia') ? 'diario' : tipos.includes('medio') ? 'medio' : 'completo';
     setQuick({ student, months, hintTipo: hint });
   }
+
+  /** Pagos aplicados «solo al mes» cuyo alumno YA tiene lista de ese mes (p. ej. periodo 31-ago → 30-sep). Se pueden pasar a su lista. */
+  const relinkGroups = (() => {
+    const m = new Map();
+    payments.forEach((p) => {
+      if (p.status !== 'asignado' || !p.noList || !p.studentId || !p.appliedMonth) return;
+      const k = `${p.studentId}|${p.appliedMonth}`;
+      if (!m.has(k)) m.set(k, { student: ctx.byId.get(p.studentId), ym: p.appliedMonth, pays: [] });
+      m.get(k).pays.push(p);
+    });
+    return [...m.values()].filter((g) => {
+      if (!g.student) return false;
+      const { list, row } = destinationFor(g.student, g.ym);
+      // Diarios o pagos «por día» se dejan para hacerlos a mano (necesitan elegir fechas).
+      return !!(list && row && row.tipoServicio !== 'diario' && !row.paid && !g.pays.some(isDia));
+    });
+  })();
 
   function openApply(group) {
     if (apply?.key === group.key) { setApply(null); return; }
@@ -466,6 +483,41 @@ export default function CometaBanco() {
     } finally { setBusy(''); }
   }
 
+  /** Pasa a su lista los pagos «solo al mes» que ya tienen lista de ese mes. Quita el cargo suelto y aplica el pago en la lista. */
+  async function relinkAll() {
+    const groups = relinkGroups;
+    if (!groups.length) return;
+    const lines = groups.slice(0, 15).map((g) => `• ${g.student.name} · ${g.ym} · ${g.pays.length} pago(s) · ${money(g.pays.reduce((n, x) => n + Number(x.monto || 0), 0))}`);
+    const more = groups.length > 15 ? `\n… y ${groups.length - 15} más` : '';
+    if (!window.confirm(`Se pasarán a su lista ${groups.length} alumno(s):\n\n${lines.join('\n')}${more}\n\nSe quita el cargo «solo al mes» y el pago queda aplicado en la lista del periodo. ¿Continuar?`)) return;
+    setBusy('relink'); setError(''); setNotice('');
+    const localLists = new Map(lists.map((l) => [l.id, l]));
+    let ok = 0; const fails = [];
+    for (const g of groups) {
+      try {
+        const { list: l0 } = destinationFor(g.student, g.ym);
+        const list = localLists.get(l0.id) || l0;
+        const row = rowOf(list, g.student);
+        if (!row || row.paid) { fails.push(`${g.student.name} (${g.ym})`); continue; }
+        const oldPid = g.pays[0]?.paymentId;
+        if (oldPid) await Students.cancelPayment(g.student.id, oldPid, `Cometa re-vinculado a la lista ${list.startDate} al ${list.endDate}`, profile?.name);
+        await FinanceRecords.remove(`cometa_${g.student.id}_${g.ym}`);
+        const cometaSum = g.pays.reduce((n, x) => n + Number(x.monto || 0), 0);
+        const res = await applyToList(g.student, { list, row, pays: g.pays, dates: [], diario: false, cometaSum, ym: g.ym });
+        localLists.set(list.id, { ...list, rows: res.rows });
+        await CometaBank.updateEach(res.entries).catch((be) => console.error(be));
+        setPayments((prev) => prev.map((x) => { const y = res.entries.find((z) => z.id === x.id); return y ? { ...x, ...y.patch } : x; }));
+        setLists((prev) => prev.map((l) => (l.id === res.listId ? { ...l, rows: res.rows } : l)));
+        ok += 1;
+      } catch (e) {
+        console.error(e); fails.push(`${g.student.name} (${g.ym})`);
+      }
+    }
+    setBusy('');
+    if (ok) setNotice(`${ok} alumno(s) pasaron a su lista.`);
+    if (fails.length) setError(`No se pudo pasar: ${fails.join(', ')}. Presiona Actualizar para ver el estado real y revísalos con «Deshacer».`);
+  }
+
   async function undoApply(p) {
     if (!window.confirm(`¿Deshacer la aplicación del pago ${p.folioOrden} (${money(p.monto)})? Se quitará de ${p.noList ? 'su mes' : 'la lista'} y el pago volverá a «Por asignar».`)) return;
     setBusy('undo'); setError(''); setNotice('');
@@ -570,6 +622,13 @@ export default function CometaBanco() {
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex gap-2"><AlertTriangle size={18} className="shrink-0"/>{error}</div>}
       {notice && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800 flex gap-2"><CheckCircle2 size={18} className="shrink-0"/>{notice}</div>}
+
+      {relinkGroups.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex flex-wrap items-center justify-between gap-3">
+          <p><b>{relinkGroups.length}</b> alumno(s) tienen pagos aplicados «solo al mes» pero ya existe su lista de ese mes. Pásalos a su lista para que se vean pagados ahí.</p>
+          <button className="btn-admin-primary" onClick={relinkAll} disabled={!!busy}>{busy === 'relink' ? 'Pasando…' : 'Pasar a su lista'}</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="admin-card"><p className="text-xs text-navy-400">Pagos en el banco</p><p className="text-xl font-bold">{stats.total}</p><p className="text-[11px] text-navy-400">{money(stats.monto)}</p></div>

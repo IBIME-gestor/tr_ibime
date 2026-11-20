@@ -252,21 +252,21 @@ export default function AdminLayout() {
   return (
     <div className="h-screen flex flex-col bg-paper overflow-hidden">
       <header className="shrink-0 bg-navy-900 text-white relative z-40 shadow-panel">
-        <div className="max-w-[1600px] mx-auto px-3 sm:px-5 h-14 flex items-center gap-3">
+        <div className="max-w-[1600px] mx-auto px-3 sm:px-5 h-14 flex items-center gap-2 2xl:gap-3">
           {/* Marca */}
           <NavLink to={role === 'cashier' ? '/admin/caja' : '/admin'} className="flex items-center gap-2.5 shrink-0">
             <img src="/ibime-shield.png" alt="IBIME" className="w-8 h-8" />
             <div className="leading-tight">
               <p className="font-display text-sm sm:text-base font-semibold">Ruta Segura</p>
-              <p className="hidden sm:block text-navy-300 text-[0.65rem]">
+              <p className="hidden 2xl:block text-navy-300 text-[0.65rem]">
                 {role === 'cashier' ? 'Caja' : 'Gestión de transporte escolar'}
               </p>
             </div>
           </NavLink>
 
           {/* Navegación de escritorio */}
-          <nav ref={navRef} className="hidden xl:flex items-center gap-0.5 ml-4 flex-1 min-w-0" aria-label="Módulos">
-            {visibleGroups.map((g) => {
+          <nav ref={navRef} className="hidden xl:flex items-center gap-0 2xl:gap-0.5 ml-1 2xl:ml-4 flex-1 min-w-0 flex-nowrap" aria-label="Módulos">
+            {visibleGroups.map((g, gIdx) => {
               const GroupIcon = g.icon;
               const active = g.items.some((i) => isItemActive(i, location.pathname));
               const isOpen = openGroup === g.key;
@@ -280,7 +280,7 @@ export default function AdminLayout() {
                     to={item.to}
                     end={item.end}
                     className={({ isActive }) =>
-                      `relative flex items-center gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
+                      `relative flex items-center gap-2 px-2 2xl:px-2.5 py-2 rounded-md text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors ${
                         isActive ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : 'text-navy-100 hover:text-white hover:bg-white/10'
                       }`
                     }
@@ -302,7 +302,7 @@ export default function AdminLayout() {
                     aria-haspopup="true"
                     aria-expanded={isOpen}
                     onClick={() => setOpenGroup(isOpen ? null : g.key)}
-                    className={`relative flex items-center gap-1.5 2xl:gap-2 px-2.5 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`relative flex items-center gap-1 2xl:gap-2 px-2 2xl:px-2.5 py-2 rounded-md text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors ${
                       active ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : isOpen ? 'text-white bg-white/10' : 'text-navy-100 hover:text-white hover:bg-white/10'
                     }`}
                   >
@@ -312,7 +312,7 @@ export default function AdminLayout() {
                   </button>
 
                   {isOpen && (
-                    <div className="absolute left-0 top-full pt-2 min-w-[240px] z-50">
+                    <div className={`absolute top-full pt-2 min-w-[240px] max-w-[calc(100vw-1.5rem)] z-50 ${gIdx >= visibleGroups.length - 3 ? 'right-0' : 'left-0'}`}>
                       <ul className="bg-white text-navy-800 rounded-xl border border-navy-100 shadow-panel py-1.5 overflow-hidden">
                         {g.items.map((item, idx) => (item.heading ? (
                           <li key={`h-${item.heading}`} className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-navy-400 select-none">
@@ -363,16 +363,16 @@ export default function AdminLayout() {
           )}
 
           {/* Usuario (escritorio) */}
-          <div className="hidden xl:flex items-center gap-3 shrink-0">
+          <div className="hidden xl:flex items-center gap-2 2xl:gap-3 shrink-0">
             <p className="hidden 2xl:block text-xs text-navy-100 max-w-[160px] truncate">{profile?.name || 'Administrador'}</p>
             <span className="hidden 2xl:inline-block text-[0.65rem] font-extrabold uppercase tracking-wide text-navy-100 bg-white/10 border border-white/15 px-2 py-0.5 rounded-full">
               {role === 'cashier' ? 'Caja' : 'Administrador'}
             </span>
             <button
               onClick={logout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-navy-100 border border-white/15 bg-white/5 hover:text-white hover:bg-white/10"
+              title="Cerrar sesión" className="flex items-center gap-1.5 px-2 2xl:px-3 py-1.5 rounded-lg text-xs font-bold text-navy-100 border border-white/15 bg-white/5 hover:text-white hover:bg-white/10"
             >
-              <LogOut size={14} /> Salir
+              <LogOut size={14} /> <span className="hidden 2xl:inline">Salir</span>
             </button>
           </div>
 
