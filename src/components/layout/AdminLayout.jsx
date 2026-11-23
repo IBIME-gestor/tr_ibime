@@ -37,6 +37,7 @@ import {
   Pencil,
   Bell,
   MessageSquare,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
@@ -107,6 +108,7 @@ const groups = [
       { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: Truck, roles: A },
       { to: '/admin/corregir-recorridos', label: 'Corregir recorridos', icon: Pencil, roles: A },
       { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: A },
+      { to: '/admin/kpis-personal', label: 'KPIs operadores y nannies', icon: TrendingUp, roles: A },
     ],
   },
   {

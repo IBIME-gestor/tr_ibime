@@ -58,6 +58,7 @@ import TripRunner from './pages/driver/TripRunner';
 import TripSummary from './pages/driver/TripSummary';
 import TripHistory from './pages/driver/TripHistory';
 import ReferenceRoute from './pages/driver/ReferenceRoute';
+import KpisPersonal from './pages/admin/KpisPersonal';
 
 import PublicTrack from './pages/PublicTrack';
 import OperatorPortal from './pages/OperatorPortal';
@@ -84,6 +85,7 @@ export default function App() {
         <Route path="unidades" element={<Units />} />
         <Route path="rutas" element={<RoutesAdmin />} />
         <Route path="reportes" element={<Reports />} />
+        <Route path="kpis-personal" element={<KpisPersonal />} />
         <Route path="en-vivo" element={<FleetLive />} />
         <Route path="recorridos-activos" element={<ActiveTrips />} />
         <Route path="vista-operador" element={<OperatorRouteView />} />

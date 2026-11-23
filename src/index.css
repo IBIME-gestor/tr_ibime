@@ -520,3 +520,18 @@ main { scrollbar-width: thin; scrollbar-color: #c9d3db transparent; }
   min-width: 24px; min-height: 24px; padding: 4px; border-radius: 6px; margin: 0 !important;
 }
 .row-actions > button:hover, .row-actions > a:hover { background: rgb(var(--c-navy-50)); }
+
+/* ------------------------------------------------------------------ */
+/*  KPIs de personal: animaciones de gráficas y paneles                  */
+/* ------------------------------------------------------------------ */
+@keyframes kpi-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.kpi-grow { animation: kpi-grow 0.6s cubic-bezier(.2,.8,.2,1) both; transform-box: view-box; }
+@keyframes kpi-draw { from { stroke-dasharray: 0 100; } }
+.kpi-draw { animation: kpi-draw 0.9s ease-out both; }
+@keyframes kpi-fade { from { opacity: 0; } to { opacity: 1; } }
+.kpi-fade { animation: kpi-fade 0.6s ease-out 0.3s both; }
+@keyframes kpi-slide-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
+.kpi-slide-in { animation: kpi-slide-in 0.45s cubic-bezier(.2,.8,.2,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .kpi-grow, .kpi-draw, .kpi-fade, .kpi-slide-in { animation: none; }
+}
