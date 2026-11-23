@@ -356,6 +356,36 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // ------------------------------------------------------------------
+    // KPIs: indicadores personalizados con evidencia (fotos en Google Drive).
+    //  - kpiIndicators: los ve todo el personal (para mostrar «Mis tareas»); solo el admin los crea.
+    //  - kpiEvidence: cada persona crea la SUYA (queda «en revisión») y solo puede
+    //    reenviarla si el admin la rechazó; el admin revisa y borra.
+    //  - kpiSettings: URL y clave del script de Drive; la leen operadores para subir fotos.
+    // ------------------------------------------------------------------
+    match /kpiIndicators/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
+    match /kpiEvidence/{id} {
+      allow read: if isAdmin() || (isStaff() && resource.data.personId == myStaffId());
+      allow create: if isStaff() &&
+        request.resource.data.personId == myStaffId() &&
+        request.resource.data.status == 'revision';
+      allow update: if isAdmin() ||
+        (isStaff() && resource.data.personId == myStaffId() &&
+         resource.data.status == 'rechazada' &&
+         request.resource.data.personId == resource.data.personId &&
+         request.resource.data.status == 'revision');
+      allow delete: if isAdmin();
+    }
+
+    match /kpiSettings/{id} {
+      allow read: if isStaff();
+      allow write: if isAdmin();
+    }
+
     match /auditLog/{id} {
       allow create: if hasUserProfile();
       allow read: if isAdmin();
