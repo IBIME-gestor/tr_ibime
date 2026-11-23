@@ -38,6 +38,7 @@ import {
   Bell,
   MessageSquare,
   TrendingUp,
+  Camera,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
@@ -109,6 +110,7 @@ const groups = [
       { to: '/admin/corregir-recorridos', label: 'Corregir recorridos', icon: Pencil, roles: A },
       { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: A },
       { to: '/admin/kpis-personal', label: 'KPIs operadores y nannies', icon: TrendingUp, roles: A },
+      { to: '/admin/kpis-indicadores', label: 'Indicadores y tareas (fotos)', icon: Camera, roles: A },
     ],
   },
   {

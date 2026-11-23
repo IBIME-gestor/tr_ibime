@@ -136,7 +136,7 @@ export function prepareTrips(trips, { kmGap = 100 } = {}) {
 /* ------------------------------------------------------------------ */
 /*  2) KPIs de una persona                                              */
 /* ------------------------------------------------------------------ */
-export function computeKpis(tripsOfPerson, role, peerAvg, { bucket = 'day' } = {}) {
+export function computeKpis(tripsOfPerson, role, peerAvg, { bucket = 'day', extras = [] } = {}) {
   const trips = tripsOfPerson;
   const total = trips.length;
   const completed = trips.filter((t) => t._completed);
@@ -209,7 +209,9 @@ export function computeKpis(tripsOfPerson, role, peerAvg, { bucket = 'day' } = {
     sinCorrecciones: total ? 1 - corrected / total : null,
     resueltos: stDen ? stResolved / stDen : null,
   };
-  const spec = WEIGHTS[role === 'nanny' ? 'nanny' : 'operador'];
+  // Indicadores personalizados (tareas con evidencia): [{ key, label, weight, value 0..1 | null }]
+  extras.forEach((x) => { values[x.key] = x.value; });
+  const spec = [...WEIGHTS[role === 'nanny' ? 'nanny' : 'operador'], ...extras.map((x) => ({ key: x.key, label: x.label, weight: x.weight }))];
   const available = spec.filter((c) => values[c.key] != null);
   const wSum = available.reduce((n, c) => n + c.weight, 0);
   const components = spec.map((c) => {

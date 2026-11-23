@@ -1,16 +1,18 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Home, History, ListChecks, Bus, Bell } from 'lucide-react';
+import { Home, History, ListChecks, Bus, Bell, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useNotices from '../../hooks/useNotices';
 import NoticeGate from '../NoticeGate';
 import OperatorPending from '../OperatorPending';
 import OperatorNav from '../OperatorNav';
+import useMyTasks from '../../hooks/useMyTasks';
 
 export default function DriverLayout() {
   const { logout, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { pending, ack } = useNotices();
+  const { actionable: tasksPending } = useMyTasks(profile);
 
   return (
     <div className="min-h-screen bg-paper flex flex-col">
@@ -44,6 +46,7 @@ export default function DriverLayout() {
             { to: '/chofer', label: 'Inicio', icon: Home, end: true },
             { to: '/chofer/lista', label: 'Mi lista', icon: ListChecks },
             { to: '/chofer/viajes-especiales', label: 'Viajes especiales', icon: Bus },
+            { to: '/chofer/tareas', label: 'Mis tareas', icon: ClipboardCheck, badge: tasksPending },
             { to: '/chofer/avisos', label: 'Avisos', icon: Bell, badge: pending.length },
             { to: '/chofer/historial', label: 'Mis recorridos', icon: History },
           ]}

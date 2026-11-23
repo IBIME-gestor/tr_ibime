@@ -3,12 +3,15 @@ import { RefreshCw, Truck, Users, X } from 'lucide-react';
 import { Drivers, Routes, Units } from '../../firebase/services';
 import { listTripsBetween, getTripStopsOnce, KM_GAP_ALERT } from '../../firebase/trips';
 import { listStaffLogRange } from '../../firebase/staffLogs';
+import { KpiIndicators, listEvidenceBetween } from '../../firebase/kpiTasks';
+import { personTasks, EVIDENCE_STATES } from '../../utils/kpiTasks';
 import { cascadeStyle } from '../../utils/cascade';
 import {
   prepareTrips, computeKpis, analyzeStops, staffSummary, daysBetween, eachDate,
   levelOf, LEVEL_COLORS, LEVEL_LABELS,
 } from '../../utils/staffKpis';
 import { Donut, Bars, ScoreRing } from '../../components/kpi/Charts';
+import { DriveImg, PhotoLightbox } from '../../components/kpi/Photos';
 
 /* ------------------------------------------------------------------ */
 /*  Utilidades                                                          */
@@ -93,7 +96,9 @@ function PersonCard({ person, role, compact, selected, onClick, registerRef, ind
         <div className="min-w-0 flex-1">
           <p className={`font-bold text-navy-900 truncate ${compact ? 'text-[13px]' : 'text-sm'}`}>{person.name}</p>
           <p className="text-[11px] text-navy-400 truncate">
-            {role === 'nanny' ? 'Nannie' : 'Operador'} · {k.total} recorrido{k.total === 1 ? '' : 's'}
+            {role === 'nanny' ? 'Nannie' : 'Operador'} · {k.total
+              ? `${k.total} recorrido${k.total === 1 ? '' : 's'}`
+              : person.assigned ? `sin recorridos (${person.assigned} ruta${person.assigned === 1 ? '' : 's'} asignada${person.assigned === 1 ? '' : 's'})` : 'sin recorridos ni ruta asignada'}
           </p>
         </div>
         {!compact && <LevelBadge level={k.level} />}
@@ -126,6 +131,8 @@ export default function KpisPersonal() {
   const [units, setUnits] = useState([]);
   const [trips, setTrips] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [indicators, setIndicators] = useState([]);
+  const [evidence, setEvidence] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedId, setSelectedId] = useState(null);
@@ -138,6 +145,7 @@ export default function KpisPersonal() {
   useEffect(() => Drivers.subscribe(setDrivers), []);
   useEffect(() => Routes.subscribe(setRoutes), []);
   useEffect(() => Units.subscribe(setUnits), []);
+  useEffect(() => KpiIndicators.subscribe(setIndicators), []);
 
   /* Recorridos del periodo */
   useEffect(() => {
@@ -161,6 +169,16 @@ export default function KpisPersonal() {
     return () => { active = false; };
   }, [from, to]);
 
+  /* Evidencias (fotos) del periodo */
+  useEffect(() => {
+    if (!from || !to || from > to) return undefined;
+    let active = true;
+    listEvidenceBetween(from, to)
+      .then((rows) => { if (active) setEvidence(rows); })
+      .catch((e) => { console.error(e); if (active) setEvidence([]); });
+    return () => { active = false; };
+  }, [from, to]);
+
   const driversById = useMemo(() => new Map(drivers.map((d) => [d.id, d])), [drivers]);
   const routesById = useMemo(() => new Map(routes.map((r) => [r.id, r])), [routes]);
   const unitsById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units]);
@@ -177,14 +195,27 @@ export default function KpisPersonal() {
       if (!groups.has(id)) groups.set(id, []);
       groups.get(id).push(t);
     });
+    // Todo el personal activo del catálogo aparece, tenga o no recorridos en el periodo
+    drivers.forEach((d) => {
+      const isNannyDoc = d.role === 'nanny';
+      const isOperatorDoc = d.role !== 'nanny' && d.role !== 'cashier';
+      if ((role === 'nanny' && isNannyDoc) || (role !== 'nanny' && isOperatorDoc)) {
+        if (!groups.has(d.id)) groups.set(d.id, []);
+      }
+    });
     const list = [...groups.entries()].map(([id, rows]) => {
       const d = driversById.get(id);
+      const assigned = routes.filter((r) => (role === 'nanny' ? r.nannyId : r.driverId) === id).length;
+      const tasks = personTasks(indicators, role, evidence.filter((e) => e.personId === id), from, to);
+      const extras = tasks.map(({ ind, comp }) => ({ key: `ind_${ind.id}`, label: ind.name, weight: Number(ind.weight) || 10, value: comp.value }));
       return {
         id,
         name: d?.name || '(persona dada de baja)',
         phone: d?.phone || '',
+        assigned,
         trips: rows,
-        kpis: computeKpis(rows, role, prepared.peerAvg, { bucket }),
+        tasks,
+        kpis: computeKpis(rows, role, prepared.peerAvg, { bucket, extras }),
       };
     });
     const byScore = (a, b) => (a.kpis.score ?? 101) - (b.kpis.score ?? 101);
@@ -194,7 +225,7 @@ export default function KpisPersonal() {
       return byScore(a, b) || a.name.localeCompare(b.name);
     });
     return list;
-  }, [prepared, shift, role, sort, driversById, bucket]);
+  }, [prepared, shift, role, sort, drivers, driversById, routes, bucket, indicators, evidence, from, to]);
 
   const selected = useMemo(() => people.find((p) => p.id === selectedId) || null, [people, selectedId]);
 
@@ -328,7 +359,7 @@ export default function KpisPersonal() {
       {/* Resumen general (solo cuando no hay una tarjeta abierta) */}
       {!selected && !loading && people.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Tile index={0} label={role === 'nanny' ? 'Nannies evaluadas' : 'Operadores evaluados'} value={people.length} />
+          <Tile index={0} label={role === 'nanny' ? 'Nannies evaluadas' : 'Operadores evaluados'} value={`${people.filter((p) => p.kpis.score != null).length} de ${people.length}`} sub="las demás no tienen recorridos en el periodo" />
           <Tile index={1} label="Calificación promedio" value={overview.avg == null ? '—' : Math.round(overview.avg)} tone={LEVEL_COLORS[levelOf(overview.avg)]} />
           <Tile index={2} label="En verde" value={overview.green} tone={LEVEL_COLORS.green} sub="85 o más" />
           <Tile index={3} label="En atención / crítico" value={`${overview.amber} / ${overview.red}`} tone={overview.red ? LEVEL_COLORS.red : LEVEL_COLORS.amber} sub="70–84 / menos de 70" />
@@ -337,7 +368,7 @@ export default function KpisPersonal() {
 
       {loading && <p className="text-sm text-navy-400">Cargando recorridos…</p>}
       {!loading && !people.length && !error && (
-        <div className="admin-card text-sm text-navy-500">No hay recorridos de {role === 'nanny' ? 'nannies' : 'operadores'} en este periodo.</div>
+        <div className="admin-card text-sm text-navy-500">No hay {role === 'nanny' ? 'nannies' : 'operadores'} en el catálogo ni recorridos en este periodo.</div>
       )}
 
       {/* Tarjetas + detalle */}
@@ -389,6 +420,7 @@ export default function KpisPersonal() {
 /*  Detalle de una persona                                              */
 /* ------------------------------------------------------------------ */
 function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsById, onClose }) {
+  const [lightbox, setLightbox] = useState(null);
   const k = person.kpis;
   const color = LEVEL_COLORS[k.level];
   const a = detail.analysis;
@@ -526,6 +558,39 @@ function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsBy
           </>
         )}
       </div>
+
+      {/* Tareas con evidencia (fotos en Drive) */}
+      {person.tasks.length > 0 && person.tasks.map(({ ind, comp }, ti) => {
+        const photos = comp.items.flatMap((it) => (it.ev?.photos || []).map((photo) => ({
+          photo, state: it.state, date: it.date,
+          caption: `${ind.name} · ${it.date}${it.ev?.unitId && unitsById.get(it.ev.unitId) ? ` · ${unitsById.get(it.ev.unitId).plate}` : ''} · ${EVIDENCE_STATES[it.state].label}`,
+        })));
+        const donut = Object.entries(EVIDENCE_STATES).map(([key, st]) => ({ label: st.label, value: comp.counts[key], color: st.color }));
+        return (
+          <section key={ind.id} className="cascade-item admin-card !p-4" style={cascadeStyle(8 + ti, 70, 700)}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-bold text-navy-800">{ind.name}</h3>
+              <p className="text-[11px] text-navy-400">
+                {comp.expected ? `${comp.expected} día(s) programados · cumplimiento ${fmtPct(comp.value)}` : 'Sin días vencidos en el periodo'} · peso {ind.weight}
+              </p>
+            </div>
+            {comp.expected > 0 && (
+              <div className="mt-2"><Donut data={donut} centerTop={fmtPct(comp.value)} centerBottom="cumplimiento" /></div>
+            )}
+            {photos.length > 0 ? (
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 mt-3">
+                {photos.map((ph, i) => (
+                  <figure key={ph.photo.fileId} className="relative">
+                    <DriveImg photo={ph.photo} width={300} className="w-full aspect-square" onClick={() => setLightbox({ items: photos, index: i })} />
+                    <span className="absolute bottom-1 left-1 text-[9px] font-bold text-white rounded px-1" style={{ background: EVIDENCE_STATES[ph.state].color }}>{ph.date.slice(5)}</span>
+                  </figure>
+                ))}
+              </div>
+            ) : <p className="text-xs text-navy-400 mt-3">Sin fotos en el periodo.</p>}
+          </section>
+        );
+      })}
+      {lightbox && <PhotoLightbox items={lightbox.items} index={lightbox.index} onIndex={(i) => setLightbox((l) => ({ ...l, index: i }))} onClose={() => setLightbox(null)} />}
 
       {/* Cómo se calcula la calificación */}
       <section className="cascade-item admin-card !p-4" style={cascadeStyle(9, 70, 700)}>

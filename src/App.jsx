@@ -59,6 +59,8 @@ import TripSummary from './pages/driver/TripSummary';
 import TripHistory from './pages/driver/TripHistory';
 import ReferenceRoute from './pages/driver/ReferenceRoute';
 import KpisPersonal from './pages/admin/KpisPersonal';
+import KpiIndicadores from './pages/admin/KpiIndicadores';
+import MyTasks from './pages/driver/MyTasks';
 
 import PublicTrack from './pages/PublicTrack';
 import OperatorPortal from './pages/OperatorPortal';
@@ -86,6 +88,7 @@ export default function App() {
         <Route path="rutas" element={<RoutesAdmin />} />
         <Route path="reportes" element={<Reports />} />
         <Route path="kpis-personal" element={<KpisPersonal />} />
+        <Route path="kpis-indicadores" element={<KpiIndicadores />} />
         <Route path="en-vivo" element={<FleetLive />} />
         <Route path="recorridos-activos" element={<ActiveTrips />} />
         <Route path="vista-operador" element={<OperatorRouteView />} />
@@ -137,6 +140,7 @@ export default function App() {
         <Route path="historial" element={<TripHistory />} />
         <Route path="viajes-especiales" element={<DriverSpecialTrips />} />
         <Route path="avisos" element={<DriverNotices />} />
+        <Route path="tareas" element={<MyTasks />} />
         <Route path="lista" element={<MyList />} />
         <Route path="lista/:routeId" element={<MyList />} />
         <Route path="referencia/:routeId/:shift" element={<ReferenceRoute />} />
