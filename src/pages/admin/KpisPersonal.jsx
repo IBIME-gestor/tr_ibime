@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, Truck, Users, X } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Truck, Users, X } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { Drivers, Routes, Units } from '../../firebase/services';
-import { listTripsBetween, getTripStopsOnce, KM_GAP_ALERT } from '../../firebase/trips';
+import { listTripsBetween, getTripStopsOnce, adminReassignTrips, KM_GAP_ALERT } from '../../firebase/trips';
 import { listStaffLogRange } from '../../firebase/staffLogs';
 import { KpiIndicators, listEvidenceBetween } from '../../firebase/kpiTasks';
 import { personTasks, EVIDENCE_STATES } from '../../utils/kpiTasks';
@@ -95,6 +96,7 @@ function PersonCard({ person, role, compact, selected, onClick, registerRef, ind
         <ScoreRing score={k.score} color={color} size={compact ? 38 : 58} stroke={compact ? 5 : 6} />
         <div className="min-w-0 flex-1">
           <p className={`font-bold text-navy-900 truncate ${compact ? 'text-[13px]' : 'text-sm'}`}>{person.name}</p>
+          {person.orphan && <p className="text-[10px] font-semibold text-amber-700 truncate">ID …{String(person.id).slice(-6)} · revisar y reasignar</p>}
           <p className="text-[11px] text-navy-400 truncate">
             {role === 'nanny' ? 'Nannie' : 'Operador'} · {k.total
               ? `${k.total} recorrido${k.total === 1 ? '' : 's'}`
@@ -137,6 +139,8 @@ export default function KpisPersonal() {
   const [error, setError] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState({ loading: false, analysis: null });
+  const [reloadKey, setReloadKey] = useState(0);
+  const { profile } = useAuth();
 
   const cardRefs = useRef(new Map());
   const prevRects = useRef(new Map());
@@ -157,7 +161,7 @@ export default function KpisPersonal() {
       .catch((e) => { console.error(e); if (active) { setTrips([]); setError('No se pudieron cargar los recorridos.'); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [from, to]);
+  }, [from, to, reloadKey]);
 
   /* Bitácora de Nómina del periodo (máx. 62 días) */
   useEffect(() => {
@@ -212,7 +216,9 @@ export default function KpisPersonal() {
       const extras = tasks.map(({ ind, comp }) => ({ key: `ind_${ind.id}`, label: ind.name, weight: Number(ind.weight) || 10, value: comp.value }));
       return {
         id,
-        name: d?.name || '(persona dada de baja)',
+        name: d?.name || (d ? '(sin nombre en el catálogo)' : '(no existe en el catálogo)'),
+        orphan: !d?.name,
+        inCatalog: !!d,
         phone: d?.phone || '',
         assigned,
         nannyLed: role === 'nanny' ? rows.filter((t) => t._nannyLed).length : (nannyLedByOperator.get(id) || 0),
@@ -231,6 +237,12 @@ export default function KpisPersonal() {
   }, [prepared, shift, role, sort, drivers, driversById, routes, bucket, indicators, evidence, from, to]);
 
   const selected = useMemo(() => people.find((p) => p.id === selectedId) || null, [people, selectedId]);
+  /* Todos los recorridos del periodo ligados a la persona abierta (sin filtro de turno ni de «llevados por nannie») */
+  const allTripsOfSelected = useMemo(() => {
+    if (!selected) return [];
+    const field = role === 'nanny' ? 'nannyId' : 'driverId';
+    return prepared.rows.filter((t) => t[field] === selected.id);
+  }, [selected, prepared, role]);
 
   /* Si el filtro deja fuera a la persona abierta, se cierra el detalle */
   useEffect(() => {
@@ -407,6 +419,10 @@ export default function KpisPersonal() {
             routesById={routesById}
             unitsById={unitsById}
             onClose={() => pick(selected.id)}
+            catalog={drivers}
+            allTrips={allTripsOfSelected}
+            by={profile}
+            onReassigned={() => { setSelectedId(null); setReloadKey((n) => n + 1); }}
           />
         )}
       </div>
@@ -422,7 +438,80 @@ export default function KpisPersonal() {
 /* ------------------------------------------------------------------ */
 /*  Detalle de una persona                                              */
 /* ------------------------------------------------------------------ */
-function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsById, onClose }) {
+/* ------------------------------------------------------------------ */
+/*  Persona sin nombre: reasignar sus recorridos                        */
+/* ------------------------------------------------------------------ */
+function OrphanPanel({ person, role, catalog, allTrips, routesById, by, onDone }) {
+  const isNanny = role === 'nanny';
+  const field = isNanny ? 'nannyId' : 'driverId';
+  const candidates = useMemo(
+    () => catalog.filter((d) => d.name && (isNanny ? d.role === 'nanny' : d.role !== 'nanny' && d.role !== 'cashier')),
+    [catalog, isNanny],
+  );
+  // Sugerencia: quien tiene asignada hoy la ruta donde más aparece este id
+  const suggested = useMemo(() => {
+    const count = new Map();
+    allTrips.forEach((t) => count.set(t.routeId, (count.get(t.routeId) || 0) + 1));
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+    const id = top ? routesById.get(top[0])?.[field] : '';
+    return candidates.some((d) => d.id === id) ? id : '';
+  }, [allTrips, routesById, candidates, field]);
+  const [target, setTarget] = useState(suggested);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const routeNames = [...new Set(allTrips.map((t) => routesById.get(t.routeId)?.name).filter(Boolean))];
+
+  async function apply(newId) {
+    const msg = newId
+      ? `¿Pasar ${allTrips.length} recorrido(s) a ${candidates.find((d) => d.id === newId)?.name}? Sus KPIs se recalcularán.`
+      : `¿Quitar ${isNanny ? 'la nannie' : 'el operador'} de ${allTrips.length} recorrido(s)? Dejarán de contar en los KPIs de cualquier persona.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true); setError('');
+    try { await adminReassignTrips(allTrips, field, newId, by); onDone(); }
+    catch (e) { console.error(e); setError(e?.message || 'No se pudo reasignar.'); }
+    setBusy(false);
+  }
+
+  return (
+    <section className="admin-card !p-4 border border-amber-300 bg-amber-50/60 space-y-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={18} className="text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-sm text-amber-900">
+          <p className="font-bold">
+            {person.inCatalog
+              ? 'Este registro existe en el catálogo pero no tiene nombre.'
+              : 'Estos recorridos apuntan a un id que ya no existe en el catálogo (persona dada de baja o cruce erróneo).'}
+          </p>
+          <p className="mt-1 text-xs">
+            ID: <code className="font-mono">{person.id}</code> · {allTrips.length} recorrido(s) en el periodo
+            {routeNames.length ? ` · rutas: ${routeNames.join(', ')}` : ''}.
+            {person.inCatalog && ' Puedes ponerle nombre en Operadores y nannies, o reasignar sus recorridos aquí.'}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <label className="admin-label">Reasignar a</label>
+          <select className="admin-select" value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy}>
+            <option value="">— elige —</option>
+            {candidates.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <button type="button" className="btn-admin-primary" disabled={!target || busy || !allTrips.length} onClick={() => apply(target)}>
+          {busy ? 'Guardando…' : 'Reasignar recorridos'}
+        </button>
+        <button type="button" className="btn-admin-ghost" disabled={busy || !allTrips.length} onClick={() => apply('')}>
+          Quitar de los recorridos
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-700">{error}</p>}
+      <p className="text-[11px] text-amber-800">Se guarda el id original en cada recorrido y no cuenta como «corrección de Dirección» para nadie.</p>
+    </section>
+  );
+}
+
+function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsById, onClose, catalog, allTrips, by, onReassigned }) {
   const [lightbox, setLightbox] = useState(null);
   const k = person.kpis;
   const color = LEVEL_COLORS[k.level];
@@ -508,6 +597,10 @@ function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsBy
         </div>
         <button type="button" className="btn-admin-ghost" onClick={onClose}><X size={15} /> Cerrar</button>
       </div>
+
+      {person.orphan && (
+        <OrphanPanel person={person} role={role} catalog={catalog} allTrips={allTrips} routesById={routesById} by={by} onDone={onReassigned} />
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {tiles.map(([label, value, sub], i) => <Tile key={label} index={i} label={label} value={value} sub={sub} />)}
