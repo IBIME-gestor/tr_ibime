@@ -92,7 +92,7 @@ service cloud.firestore {
       allow create, delete: if isAdmin();
       // El operador solo puede dejar el último km (odómetro) al cerrar un recorrido o viaje.
       allow update: if isAdmin() ||
-        (isDriver() && request.resource.data.diff(resource.data).affectedKeys()
+        ((isDriver() || isNanny()) && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['lastKm', 'lastKmAt', 'lastKmTripId']));
     }
 
@@ -197,10 +197,11 @@ service cloud.firestore {
     match /routes/{id} {
       allow read: if isStaff();
       allow update: if isAdmin() ||
-        (isDriver() && resource.data.driverId == myStaffId() &&
+        ((isDriver() && resource.data.driverId == myStaffId()) ||
+         (isNanny() && resource.data.nannyId == myStaffId())) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['studentOrderMorning', 'studentOrderAfternoon',
-                      'avgStopMinutesMorning', 'avgStopMinutesAfternoon', 'updatedAt']));
+                      'avgStopMinutesMorning', 'avgStopMinutesAfternoon', 'updatedAt']);
       allow create, delete: if isAdmin();
     }
 
@@ -276,10 +277,19 @@ service cloud.firestore {
     match /trips/{tripId} {
       allow read: if isStaff();
 
-      allow create: if isDriver() && request.resource.data.driverId == myStaffId();
+      // La nannie puede iniciar el viaje si el operador no puede entrar a su app (queda marcado startedByRole).
+      allow create: if (isDriver() && request.resource.data.driverId == myStaffId())
+        || (isNanny() && request.resource.data.nannyId == myStaffId() &&
+            request.resource.data.startedByRole == 'nanny' &&
+            request.resource.data.startedByStaffId == myStaffId());
       allow delete: if isAdmin();
 
       allow update: if isAdmin()
+        // Viaje que ella inició: puede llevarlo hasta cerrarlo (sin cambiar de quién es).
+        || (isNanny() && resource.data.nannyId == myStaffId() &&
+            resource.data.startedByRole == 'nanny' &&
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['driverId', 'nannyId', 'routeId', 'startedByRole', 'startedByStaffId', 'controlMode']))
         || (isDriver() && resource.data.driverId == myStaffId())
         || (isNanny() && resource.data.nannyId == myStaffId() &&
             request.resource.data.diff(resource.data).affectedKeys()
