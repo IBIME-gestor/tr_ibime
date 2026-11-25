@@ -580,7 +580,8 @@ function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsBy
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-sm font-bold text-navy-800">{ind.name}</h3>
               <p className="text-[11px] text-navy-400">
-                {comp.expected ? `${comp.expected} día(s) programados · cumplimiento ${fmtPct(comp.value)}` : 'Sin días vencidos en el periodo'} · peso {ind.weight}
+                {comp.expected ? `${comp.expected} día(s) programados · cumplimiento ${fmtPct(comp.value)}` : 'Sin días vencidos en el periodo'}
+                {comp.items.some((it) => it.ev?.manual) ? ` · ${comp.items.filter((it) => it.ev?.manual).length} capturado(s) manualmente` : ''} · peso {ind.weight}
               </p>
             </div>
             {comp.expected > 0 && (

@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, onSnapshot, serverTimestamp,
+  query, where, orderBy, onSnapshot, serverTimestamp, writeBatch,
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -13,7 +13,8 @@ import { db } from './config';
  *                       deadline ('HH:MM'|''), weight, active
  *  kpiEvidence/{id}     id = `${indicatorId}_${date}_${personId}` (una por persona y día)
  *                       photos[{fileId,url}], note, unitId, status ('revision'|'aprobada'|'rechazada'),
- *                       onTime, submittedAt, reviewedAt, reviewedBy, reviewNote
+ *                       onTime, submittedAt, reviewedAt, reviewedBy, reviewNote,
+ *                       manual (true = la capturó Dirección a mano, p. ej. el operador no tuvo red)
  *  kpiSettings/drive    url (Apps Script /exec), token
  *
  * Las fotos NO se guardan aquí: se suben a Google Drive con el script y solo se
@@ -76,6 +77,60 @@ export function reviewEvidence(id, status, reviewNote, byName) {
     reviewedBy: byName || '',
     reviewedAt: serverTimestamp(),
   });
+}
+
+/**
+ * Captura manual de Dirección: marca como cumplida una tarea para varias personas y varios días
+ * (p. ej. el operador no tuvo red). Queda aprobada y cuenta en su calificación.
+ * Si ya existía evidencia de ese día se conservan sus fotos.
+ * people: [{ id, name, role }], dates: ['YYYY-MM-DD'], existing: Map(evidenceId -> evidencia)
+ */
+export async function markManualEvidence({ indicator, people, dates, onTime = true, note = '', byName = '', existing = new Map() }) {
+  const writes = [];
+  people.forEach((person) => {
+    dates.forEach((date) => {
+      const id = evidenceId(indicator.id, date, person.id);
+      const prev = existing.get(id);
+      // Ya está aprobada igual que como se quiere dejar: no hay nada que cambiar
+      if (prev && prev.status === 'aprobada' && (prev.onTime !== false) === !!onTime) return;
+      writes.push({ id, person, date, prev });
+    });
+  });
+  for (let i = 0; i < writes.length; i += 400) {
+    const batch = writeBatch(db);
+    writes.slice(i, i + 400).forEach(({ id, person, date, prev }) => {
+      batch.set(doc(db, 'kpiEvidence', id), {
+        indicatorId: indicator.id,
+        indicatorName: indicator.name,
+        date,
+        personId: person.id,
+        personName: person.name || '',
+        personRole: person.role === 'nanny' ? 'nanny' : 'operador',
+        unitId: prev?.unitId || '',
+        photos: prev?.photos || [],
+        note: note || prev?.note || '',
+        onTime: !!onTime,
+        status: 'aprobada',
+        manual: true,
+        reviewNote: 'Captura manual de Dirección',
+        reviewedBy: byName || '',
+        reviewedAt: serverTimestamp(),
+        submittedAt: prev?.submittedAt || serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+  return writes.length;
+}
+
+/** Quita SOLO las marcas manuales (nunca borra evidencias que envió la persona). */
+export async function removeManualEvidence(ids) {
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = writeBatch(db);
+    ids.slice(i, i + 400).forEach((id) => batch.delete(doc(db, 'kpiEvidence', id)));
+    await batch.commit();
+  }
+  return ids.length;
 }
 
 export const removeEvidence = (id) => deleteDoc(doc(db, 'kpiEvidence', id));

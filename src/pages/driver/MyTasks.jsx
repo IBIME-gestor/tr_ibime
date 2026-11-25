@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, ClipboardCheck, Clock, XCircle, Trash2 } from 'lucide-react';
+import { Camera, Image as ImageIcon, CheckCircle2, ClipboardCheck, Clock, XCircle, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Units } from '../../firebase/services';
 import { submitEvidence, uploadEvidencePhoto } from '../../firebase/kpiTasks';
 import useMyTasks from '../../hooks/useMyTasks';
 import LoadingOverlay from '../../components/LoadingOverlay';
 import { DriveImg } from '../../components/kpi/Photos';
+import CameraCapture from '../../components/CameraCapture';
 import { todayStr } from '../../utils/kpiTasks';
 
 const fmtDay = (date) => {
@@ -27,7 +28,11 @@ function TaskCard({ task, profile, units, cfg }) {
   const [unitId, setUnitId] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const inputRef = useRef(null);
+  const inputRef = useRef(null); // galería
+  const camRef = useRef(null); // cámara del teléfono (modo «cámara o galería»)
+  const [camOpen, setCamOpen] = useState(false);
+  // 'camera' (por defecto): solo cámara en vivo · 'both': cámara o galería
+  const cameraOnly = ind.photoSource !== 'both';
   const need = ind.kind === 'check' ? 0 : Math.max(1, Number(ind.photosRequired) || 1);
   const ui = STATE_UI[state];
   const canSend = state === 'pendiente' || state === 'rechazada';
@@ -39,6 +44,10 @@ function TaskCard({ task, profile, units, cfg }) {
     e.target.value = '';
     if (!picked.length) return;
     setFiles((cur) => [...cur, ...picked.map((file) => ({ file, url: URL.createObjectURL(file) }))].slice(0, need));
+  }
+  function onShot(file) {
+    setCamOpen(false);
+    setFiles((cur) => [...cur, { file, url: URL.createObjectURL(file) }].slice(0, need));
   }
   function removeFile(i) {
     setFiles((cur) => { URL.revokeObjectURL(cur[i].url); return cur.filter((_, k) => k !== i); });
@@ -97,7 +106,13 @@ function TaskCard({ task, profile, units, cfg }) {
           )}
           {need > 0 && (
             <>
-              <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={onPick} />
+              {!cameraOnly && (
+                <>
+                  <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPick} />
+                  <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={onPick} />
+                </>
+              )}
+              {camOpen && <CameraCapture onCapture={onShot} onClose={() => setCamOpen(false)} />}
               <div className="flex gap-2 flex-wrap">
                 {files.map((f, i) => (
                   <div key={f.url} className="relative">
@@ -106,8 +121,13 @@ function TaskCard({ task, profile, units, cfg }) {
                   </div>
                 ))}
                 {files.length < need && (
-                  <button type="button" onClick={() => inputRef.current?.click()} className="w-20 h-20 rounded-lg border-2 border-dashed border-navy-200 text-navy-500 flex flex-col items-center justify-center text-[11px] gap-1">
+                  <button type="button" onClick={() => (cameraOnly ? setCamOpen(true) : camRef.current?.click())} className="w-20 h-20 rounded-lg border-2 border-dashed border-navy-200 text-navy-500 flex flex-col items-center justify-center text-[11px] gap-1">
                     <Camera size={20} /> Tomar foto
+                  </button>
+                )}
+                {files.length < need && !cameraOnly && (
+                  <button type="button" onClick={() => inputRef.current?.click()} className="w-20 h-20 rounded-lg border-2 border-dashed border-navy-200 text-navy-500 flex flex-col items-center justify-center text-[11px] gap-1">
+                    <ImageIcon size={20} /> Galería
                   </button>
                 )}
               </div>
