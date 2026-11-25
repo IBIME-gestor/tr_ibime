@@ -22,8 +22,9 @@ export default function useMyTasks(profile) {
   const [evidence, setEvidence] = useState([]);
   const [cfg, setCfg] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => KpiIndicators.subscribe(setIndicators), []);
+  useEffect(() => KpiIndicators.subscribe(setIndicators, () => setError(true)), []);
   useEffect(() => {
     if (!staffId) { setLoading(false); return undefined; }
     return subscribeMyEvidence(staffId, (rows) => { setEvidence(rows); setLoading(false); });
@@ -48,6 +49,19 @@ export default function useMyTasks(profile) {
     return out.sort((a, b) => b.date.localeCompare(a.date) || a.ind.name.localeCompare(b.ind.name));
   }, [indicators, evidence, role]);
 
+  // Próximas tareas (siguientes 7 días): para que se vea que SÍ están programadas aunque hoy no toquen
+  const upcoming = useMemo(() => {
+    const today = todayStr();
+    const out = [];
+    indicators.filter((i) => appliesToRole(i, role)).forEach((ind) => {
+      for (let ahead = 1; ahead <= 7; ahead += 1) {
+        const date = addDays(today, ahead);
+        if (isScheduled(ind, date)) out.push({ key: `${ind.id}_${date}`, ind, date });
+      }
+    });
+    return out.sort((a, b) => a.date.localeCompare(b.date) || a.ind.name.localeCompare(b.ind.name));
+  }, [indicators, role]);
+
   const actionable = tasks.filter((t) => t.state === 'pendiente' || t.state === 'rechazada').length;
-  return { tasks, actionable, loading, cfg, role };
+  return { tasks, upcoming, actionable, loading, error, cfg, role };
 }

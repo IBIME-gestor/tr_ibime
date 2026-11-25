@@ -188,11 +188,13 @@ export default function KpisPersonal() {
 
   const people = useMemo(() => {
     const groups = new Map();
+    const nannyLedByOperator = new Map(); // viajes del operador que llevó la nannie (no se le califican)
     prepared.rows.forEach((t) => {
       if (shift !== 'all' && t.shift !== shift) return;
       const id = role === 'nanny' ? t.nannyId : t.driverId;
       if (!id) return;
       if (!groups.has(id)) groups.set(id, []);
+      if (role !== 'nanny' && t._nannyLed) { nannyLedByOperator.set(id, (nannyLedByOperator.get(id) || 0) + 1); return; }
       groups.get(id).push(t);
     });
     // Todo el personal activo del catálogo aparece, tenga o no recorridos en el periodo
@@ -213,6 +215,7 @@ export default function KpisPersonal() {
         name: d?.name || '(persona dada de baja)',
         phone: d?.phone || '',
         assigned,
+        nannyLed: role === 'nanny' ? rows.filter((t) => t._nannyLed).length : (nannyLedByOperator.get(id) || 0),
         trips: rows,
         tasks,
         kpis: computeKpis(rows, role, prepared.peerAvg, { bucket, extras }),
@@ -479,6 +482,12 @@ function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsBy
         ['Ausentes en sus listas', fmt0(k.stAbsent), `de ${fmt0(k.stTotal)} alumnos`],
         ['Días en bitácora', fmt0(staffInfo?.days), `${fmt0(staffInfo?.substitutions)} suplencia(s) · ${fmt0(staffInfo?.withoutNanny)} día(s) sin nannie`],
       ];
+
+  if (person.nannyLed) {
+    tiles.push(isNanny
+      ? ['Viajes que inició ella', fmt0(person.nannyLed), 'operador sin acceso']
+      : ['Viajes llevados por la nannie', fmt0(person.nannyLed), 'no se te califican']);
+  }
 
   const recent = [...person.trips].sort((x, y) => String(y.date).localeCompare(String(x.date)) || (y._start || 0) - (x._start || 0)).slice(0, 15);
   const loadingNote = detail.loading ? <p className="text-xs text-navy-400">Cargando paradas…</p> : <p className="text-xs text-navy-400">Sin datos de paradas en el periodo.</p>;

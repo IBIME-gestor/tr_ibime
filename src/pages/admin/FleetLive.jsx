@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker } from 'react-leaflet';
 import AnimatedBus from '../../components/AnimatedBus';
 import useLiveLocations, { withLive } from '../../hooks/useLiveLocations';
 import 'leaflet/dist/leaflet.css';
@@ -9,7 +9,14 @@ import { Link } from 'react-router-dom';
 import { History, PhoneCall, AlertTriangle } from 'lucide-react';
 import { subscribeActiveTripsLive, todayString } from '../../firebase/trips';
 import { tsMs } from '../../utils/tripOrder';
-import { fmtAgo, signalState, SIGNAL_META } from '../../utils/tripStatus';
+import { fmtAgo, signalState, SIGNAL_META as BASE_SIGNAL_META } from '../../utils/tripStatus';
+
+// Viajes llevados por la nannie: la ubicación se guarda por parada, no en tiempo real.
+const SIGNAL_META = { ...BASE_SIGNAL_META, stop: { label: 'Ubicación por parada', dot: 'bg-sky-500', text: 'text-sky-700', chip: 'bg-sky-50 text-sky-800 border-sky-200' } };
+// Si ya hay ubicación, manda su modo (así, si el operador retoma el viaje, vuelve a verse en vivo).
+const isStopMode = (t) => (t.liveLocation?.mode ? t.liveLocation.mode === 'stop' : t.startedByRole === 'nanny');
+const lastStop = (t) => (Array.isArray(t.stopTrail) && t.stopTrail.length ? t.stopTrail[t.stopTrail.length - 1] : null);
+const fmtClock = (ms) => new Date(ms).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 import { startFlagIcon } from '../../utils/mapIcons';
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -111,8 +118,8 @@ export default function FleetLive() {
   const selectedPoint = points.find((p) => p.id === selectedId) || null;
 
   const counts = useMemo(() => {
-    const c = { live: 0, weak: 0, lost: 0, none: 0 };
-    todayTrips.forEach((t) => { c[signalState(tsMs(t.liveLocation?.updatedAt), now)] += 1; });
+    const c = { live: 0, weak: 0, lost: 0, none: 0, stop: 0 };
+    todayTrips.forEach((t) => { c[isStopMode(t) ? 'stop' : signalState(tsMs(t.liveLocation?.updatedAt), now)] += 1; });
     return c;
   }, [todayTrips, now]);
 
@@ -120,6 +127,7 @@ export default function FleetLive() {
   // salieron hace más de 3 min y nunca han transmitido ubicación.
   const lostTrips = useMemo(() => todayTrips
     .map((t) => {
+      if (isStopMode(t)) return null; // por parada: es normal pasar minutos sin actualizar
       const upd = tsMs(t.liveLocation?.updatedAt);
       const started = tsMs(t.startedAt);
       const sig = signalState(upd, now);
@@ -137,8 +145,9 @@ export default function FleetLive() {
   }, [lostTrips.length]);
 
   const flag = useMemo(() => startFlagIcon(), []);
-  const operatorOf = (trip) =>
-    staffById[trip.driverId]?.name || (trip.nannyId && staffById[trip.nannyId]?.name) || 'Operador';
+  const operatorOf = (trip) => (trip.startedByRole === 'nanny'
+    ? `Nannie ${staffById[trip.nannyId]?.name || ''} · inició ella (operador sin acceso)`
+    : staffById[trip.driverId]?.name || (trip.nannyId && staffById[trip.nannyId]?.name) || 'Operador');
 
   return (
     <div className="space-y-4">
@@ -206,8 +215,9 @@ export default function FleetLive() {
           )}
           {todayTrips.map((trip) => {
             const upd = tsMs(trip.liveLocation?.updatedAt);
-            const sig = signalState(upd, now);
+            const sig = isStopMode(trip) ? 'stop' : signalState(upd, now);
             const meta = SIGNAL_META[sig];
+            const last = lastStop(trip);
             const isMorning = trip.shift === 'morning';
             const selected = selectedId === trip.id;
             return (
@@ -225,6 +235,7 @@ export default function FleetLive() {
                   </span>
                 </div>
                 <p className="text-sm text-navy-600 mt-0.5 truncate">{operatorOf(trip)}</p>
+                {last && <p className="text-xs text-sky-800 mt-0.5 truncate">Última parada: {last.name || '—'} · {fmtClock(last.at)}</p>}
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className={`inline-flex items-center gap-1.5 text-[11px] font-medium border rounded-full px-2 py-0.5 ${meta.chip}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${meta.dot} ${sig === 'live' ? 'animate-pulse' : ''}`} />
@@ -254,6 +265,19 @@ export default function FleetLive() {
                   <p>{trip.shift === 'morning' ? 'Ida' : 'Vuelta'}</p>
                 </Popup>
               </Marker>
+            ))}
+            {todayTrips.filter((t) => Array.isArray(t.stopTrail) && t.stopTrail.length > 0).map((trip) => (
+              <span key={`trail-${trip.id}`}>
+                <Polyline positions={trip.stopTrail.map((p) => [p.lat, p.lng])} pathOptions={{ color: '#0284c7', weight: 3, dashArray: '6 6', opacity: selectedId === trip.id ? 0.9 : 0.5 }} />
+                {trip.stopTrail.map((p, i) => (
+                  <CircleMarker key={`${trip.id}-${i}`} center={[p.lat, p.lng]} radius={selectedId === trip.id ? 7 : 5} pathOptions={{ color: '#075985', fillColor: '#38bdf8', fillOpacity: 0.9, weight: 2 }}>
+                    <Popup>
+                      <p className="font-medium">{i + 1}. {p.name || 'Parada'}</p>
+                      <p className="text-xs">{fmtClock(p.at)} · {routesById[trip.routeId]?.name || 'Ruta'}</p>
+                    </Popup>
+                  </CircleMarker>
+                ))}
+              </span>
             ))}
             {withLocation.map((trip) => (
               <AnimatedBus

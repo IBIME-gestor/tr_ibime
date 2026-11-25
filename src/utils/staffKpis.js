@@ -104,7 +104,7 @@ export function prepareTrips(trips, { kmGap = 100 } = {}) {
     }
     const kmBadOrder = completed && kmI != null && kmF != null && kmF < kmI;
     const km = completed && kmI != null && kmF != null && kmF >= kmI ? kmF - kmI : null;
-    return { ...t, _start: start, _end: end, _dur: dur, _kmI: kmI, _kmF: kmF, _km: km, _kmBadOrder: kmBadOrder, _gap: false, _completed: completed };
+    return { ...t, _start: start, _end: end, _dur: dur, _kmI: kmI, _kmF: kmF, _km: km, _kmBadOrder: kmBadOrder, _gap: false, _completed: completed, _nannyLed: t.startedByRole === 'nanny' };
   });
 
   // Huecos: km inicial muy por encima del km final del recorrido anterior de la MISMA unidad.

@@ -365,7 +365,10 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     throw new Error('Elige la unidad que vas a usar en este recorrido de taller.');
   }
 
-  const roster = await loadRoster(route, date, driverId);
+  // Si la nannie inicia el viaje (operador sin acceso), el recorrido sigue ligado al operador asignado a la ruta.
+  const byNanny = !!opts.byNanny;
+  const effDriverId = byNanny ? (route.driverId || '') : driverId;
+  const roster = await loadRoster(route, date, effDriverId);
   const allStudents = roster.students;
   // Solo entran a la lista de hoy los alumnos que la lista del periodo marca
   // para este turno y esta fecha (o, sin lista, su servicio/calendario).
@@ -407,8 +410,9 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
   const tripData = {
     routeId: route.id,
     schoolId: route.schoolId,
-    driverId,
+    driverId: effDriverId,
     nannyId: route.nannyId || null,
+    ...(byNanny ? { controlMode: 'nanny', startedByRole: 'nanny', startedByStaffId: driverId, startedByName: opts.byName || '' } : {}),
     unitId,
     unitPlannedId: route.unitId || '',
     unitChosenByOperator: !!chosenUnitId && chosenUnitId !== (route.unitId || ''),
@@ -936,16 +940,34 @@ export async function applyOrderToTrip(tripId, orderedStudentIds, stops) {
  * Guarda la posición actual tanto en el trip privado como en su espejo
  * público, para que la vista del padre de familia la pueda leer sin login.
  */
-export async function updateLiveLocation(tripId, location) {
+export async function updateLiveLocation(tripId, location, extra = null) {
   if (!location) return;
   // UNA sola escritura (antes eran dos): la ubicación vive en el espejo público,
   // que leen las familias y también el mapa de administración. Así se cuida la
   // cuota diaria de escrituras de Firestore.
   await setDoc(
     doc(db, 'publicTracking', tripId),
-    { liveLocation: { ...location, updatedAt: serverTimestamp() } },
+    { liveLocation: { ...location, mode: 'live', ...(extra || {}), updatedAt: serverTimestamp() } },
     { merge: true }
   );
+}
+
+/**
+ * Viaje llevado por la nannie (el operador no pudo entrar a su app): no hay GPS continuo.
+ * En cada parada que ella marca se guarda DÓNDE está:
+ *  - publicTracking.liveLocation  → última posición (mode:'stop'), sin nombres de alumnos (es público);
+ *  - trips.stopTrail[]            → la secuencia de paradas con nombre y hora, solo visible para el personal.
+ */
+export async function publishNannyStop(tripId, location, name, kind = 'stop') {
+  if (!location || location.lat == null) return;
+  try {
+    await updateLiveLocation(tripId, { lat: location.lat, lng: location.lng }, { mode: 'stop' });
+    await updateDoc(doc(db, 'trips', tripId), {
+      stopTrail: arrayUnion({ lat: location.lat, lng: location.lng, at: Date.now(), name: name || '', kind }),
+    });
+  } catch (e) {
+    console.warn('No se pudo publicar la ubicación de la parada:', e?.message);
+  }
 }
 
 /** Administración: ubicaciones en vivo de los recorridos de HOY → { [tripId]: liveLocation }. */

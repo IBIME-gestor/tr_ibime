@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import Drawer from '../../components/Drawer';
 import { DriveImg, PhotoLightbox } from '../../components/kpi/Photos';
 import { cascadeStyle } from '../../utils/cascade';
-import { WEEKDAYS, scheduleText, todayStr, EVIDENCE_STATES, stateOfEvidence } from '../../utils/kpiTasks';
+import { WEEKDAYS, scheduleText, scheduledDates, todayStr, EVIDENCE_STATES, stateOfEvidence } from '../../utils/kpiTasks';
 import { DRIVE_SCRIPT_SOURCE } from '../../utils/driveScriptSource';
 
 function addDays(date, amount) {
@@ -19,10 +19,16 @@ function addDays(date, amount) {
 }
 
 const emptyForm = {
-  name: '', description: '', appliesTo: 'operador', kind: 'foto', photosRequired: 1, askUnit: true,
-  scheduleType: 'weekly', days: [1], dates: [], startDate: '', deadline: '', weight: 10, active: true,
+  name: '', description: '', appliesTo: 'ambos', kind: 'foto', photosRequired: 1, askUnit: true,
+  scheduleType: 'weekly', days: [1, 2, 3, 4, 5], dates: [], startDate: '', deadline: '', weight: 10, active: true,
 };
 const APPLIES = { operador: 'Operadores', nanny: 'Nannies', ambos: 'Operadores y nannies' };
+const fmtShort = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' });
+/** Próximas fechas en que aparecerá la tarea (para que Dirección vea si realmente le va a salir a la gente). */
+const nextDates = (ind, n = 5) => {
+  const t = todayStr();
+  return scheduledDates({ ...ind, startDate: ind.startDate && ind.startDate > t ? ind.startDate : t }, t, addDays(t, 60)).slice(0, n);
+};
 
 /* ------------------------------------------------------------------ */
 /*  Pestaña 1: catálogo de indicadores                                  */
@@ -97,6 +103,7 @@ function IndicatorsTab() {
               {r.description && <p className="text-sm text-navy-600 mt-2 line-clamp-3">{r.description}</p>}
               <dl className="text-xs text-navy-500 mt-3 space-y-0.5">
                 <div><b>Cuándo:</b> {scheduleText(r)}{r.deadline ? ` · antes de las ${r.deadline}` : ''}</div>
+                <div><b>Próxima:</b> {r.active === false ? 'pausado' : (nextDates(r, 1)[0] ? fmtShort(nextDates(r, 1)[0]) : 'sin fechas próximas')}</div>
                 <div><b>Evidencia:</b> {r.kind === 'foto' ? `${r.photosRequired} foto${r.photosRequired === 1 ? '' : 's'}${r.askUnit ? ' + unidad' : ''}` : 'solo confirmar'}</div>
               </dl>
               <div className="flex gap-2 mt-3 pt-3 border-t border-navy-100">
@@ -162,7 +169,9 @@ function IndicatorsTab() {
               ))}
             </div>
             {form.scheduleType === 'weekly' ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
+                <button type="button" className="btn-admin-ghost !h-9 text-xs" onClick={() => setForm({ ...form, days: [1, 2, 3, 4, 5] })}>Lun–Vie</button>
+                <button type="button" className="btn-admin-ghost !h-9 text-xs" onClick={() => setForm({ ...form, days: [0, 1, 2, 3, 4, 5, 6] })}>Todos los días</button>
                 {WEEKDAYS.map((d) => (
                   <button key={d.n} type="button" onClick={() => toggleDay(d.n)} className={`w-12 h-9 rounded-lg text-sm font-bold border ${form.days.includes(d.n) ? 'bg-navy-700 text-white border-navy-700' : 'bg-white text-navy-600 border-navy-200'}`}>{d.label}</button>
                 ))}
@@ -193,6 +202,17 @@ function IndicatorsTab() {
               </div>
             </div>
             <p className="text-[11px] text-navy-400">Lo entregado después de la hora límite o de un día posterior cuenta como «tarde» (50 %).</p>
+            {(() => {
+              const next = nextDates(form);
+              const t = todayStr();
+              return (
+                <div className={`rounded-lg px-3 py-2 text-xs ${next.length ? 'bg-sky-50 text-sky-900' : 'bg-amber-50 text-amber-900'}`}>
+                  {next.length === 0
+                    ? 'Con esta programación la tarea no le aparecerá a nadie en los próximos 60 días. Revisa los días o la fecha de inicio.'
+                    : <>Les aparecerá {next[0] === t ? <b>hoy</b> : <>por primera vez el <b>{fmtShort(next[0])}</b> (hoy no está programada)</>}. Próximas fechas: {next.map(fmtShort).join(' · ')}.</>}
+                </div>
+              );
+            })()}
           </fieldset>
 
           {error && <p className="text-sm text-red-700">{error}</p>}

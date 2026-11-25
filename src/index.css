@@ -535,3 +535,8 @@ main { scrollbar-width: thin; scrollbar-color: #c9d3db transparent; }
 @media (prefers-reduced-motion: reduce) {
   .kpi-grow, .kpi-draw, .kpi-fade, .kpi-slide-in { animation: none; }
 }
+@keyframes kpi-hgrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.kpi-hgrow { transform-origin: left center; animation: kpi-hgrow 0.7s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes kpi-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.kpi-line { stroke-dasharray: 1; animation: kpi-line 1s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .kpi-hgrow, .kpi-line { animation: none; } }

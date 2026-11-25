@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Download, TrendingUp, Users, Truck, Route as RouteIcon, CircleDollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Routes, Units, Students, RouteLists, FinanceRecords, UnitFuelLogs, UnitMaintenance } from '../../firebase/services';
@@ -253,9 +254,14 @@ export default function Reports() {
             Periodo {startDate} → {endDate}. El balance usa cobros registrados menos costo operativo estimado de las unidades.
           </p>
         </div>
-        <button onClick={exportExcel} className="btn-admin-ghost" disabled={!rows.length}>
-          <Download size={14} /> Exportar KPI a Excel
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/admin/indicadores-graficos" className="btn-admin-primary">
+            <TrendingUp size={14} /> Indicadores gráficos
+          </Link>
+          <button onClick={exportExcel} className="btn-admin-ghost" disabled={!rows.length}>
+            <Download size={14} /> Exportar KPI a Excel
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">

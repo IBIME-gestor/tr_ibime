@@ -60,6 +60,7 @@ import TripHistory from './pages/driver/TripHistory';
 import ReferenceRoute from './pages/driver/ReferenceRoute';
 import KpisPersonal from './pages/admin/KpisPersonal';
 import KpiIndicadores from './pages/admin/KpiIndicadores';
+import IndicadoresGraficos from './pages/admin/IndicadoresGraficos';
 import MyTasks from './pages/driver/MyTasks';
 
 import PublicTrack from './pages/PublicTrack';
@@ -87,6 +88,7 @@ export default function App() {
         <Route path="unidades" element={<Units />} />
         <Route path="rutas" element={<RoutesAdmin />} />
         <Route path="reportes" element={<Reports />} />
+        <Route path="indicadores-graficos" element={<IndicadoresGraficos />} />
         <Route path="kpis-personal" element={<KpisPersonal />} />
         <Route path="kpis-indicadores" element={<KpiIndicadores />} />
         <Route path="en-vivo" element={<FleetLive />} />

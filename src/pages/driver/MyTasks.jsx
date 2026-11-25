@@ -128,7 +128,7 @@ function TaskCard({ task, profile, units, cfg }) {
 /** Tareas programadas por Dirección (p. ej. limpieza de la unidad) con evidencia en foto. */
 export default function MyTasks() {
   const { profile } = useAuth();
-  const { tasks, loading, cfg } = useMyTasks(profile);
+  const { tasks, upcoming, loading, error, cfg } = useMyTasks(profile);
   const [units, setUnits] = useState([]);
   useEffect(() => Units.subscribe(setUnits), []);
 
@@ -139,8 +139,27 @@ export default function MyTasks() {
         <h1 className="font-display font-bold text-lg text-navy-900">Mis tareas</h1>
         <p className="text-xs text-navy-400">Tareas que programa Dirección. Toma la foto en el momento y envíala.</p>
       </div>
-      {tasks.length === 0 && <div className="card text-sm text-navy-400 text-center">No tienes tareas pendientes.</div>}
+      {error && (
+        <div className="card text-sm text-red-700 bg-red-50 border border-red-200">
+          No se pudieron cargar las tareas (falta de permisos). Avisa a Dirección para que publique las reglas de seguridad nuevas.
+        </div>
+      )}
+      {!error && tasks.length === 0 && (
+        <div className="card text-sm text-navy-500 text-center">
+          No tienes tareas para hoy ni atrasadas. Cuando Dirección programe una, aparecerá aquí el día que toque.
+        </div>
+      )}
       {tasks.map((t) => <TaskCard key={t.key} task={t} profile={profile} units={units} cfg={cfg} />)}
+      {!error && upcoming.length > 0 && (
+        <div className="card space-y-1">
+          <p className="text-xs font-bold text-navy-400 uppercase tracking-wide">Próximas tareas</p>
+          {upcoming.map((u) => (
+            <p key={u.key} className="text-sm text-navy-600 flex justify-between gap-2">
+              <span className="truncate">{u.ind.name}</span><span className="text-navy-400 shrink-0">{fmtDay(u.date)}</span>
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -263,8 +263,10 @@ function TripRescueCard({ trip, old, today, now, route, operatorName, isOpen, on
   const pendingCount = stops?.filter((s) => s.status === 'pending').length ?? null;
   const doneCount = total != null ? total - pendingCount : null;
   const isMorning = trip.shift === 'morning';
+  const stopMode = trip.liveLocation?.mode ? trip.liveLocation.mode === 'stop' : trip.startedByRole === 'nanny';
   const sig = signalState(tsMs(trip.liveLocation?.updatedAt), now);
-  const sigMeta = SIGNAL_META[sig];
+  const sigMeta = stopMode ? { label: 'Ubicación por parada', dot: 'bg-sky-500', chip: 'bg-sky-50 text-sky-800 border-sky-200' } : SIGNAL_META[sig];
+  const lastStopPt = Array.isArray(trip.stopTrail) && trip.stopTrail.length ? trip.stopTrail[trip.stopTrail.length - 1] : null;
 
   return (
     <div
@@ -294,6 +296,16 @@ function TripRescueCard({ trip, old, today, now, route, operatorName, isOpen, on
                 )}
               </div>
               <p className="text-sm text-navy-600">{operatorName}</p>
+              {trip.startedByRole === 'nanny' && (
+                <p className="inline-block text-[11px] font-semibold rounded-full px-2 py-0.5 bg-sky-100 text-sky-800">
+                  Lo inició la nannie (operador sin acceso)
+                </p>
+              )}
+              {lastStopPt && (
+                <p className="text-xs text-sky-800">
+                  Última parada: {lastStopPt.name || '—'} · {new Date(lastStopPt.at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
               <p className="text-xs text-navy-400">
                 {old ? `${fmtShortDay(trip.date)} · ` : ''}iniciado {fmtTime(trip.startedAt)}
                 {doneCount != null && ` · ${doneCount} de ${total} marcados`}

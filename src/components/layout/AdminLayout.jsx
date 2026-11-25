@@ -109,6 +109,7 @@ const groups = [
       { to: '/admin/historial-unidades', label: 'Historial por unidad', icon: Truck, roles: A },
       { to: '/admin/corregir-recorridos', label: 'Corregir recorridos', icon: Pencil, roles: A },
       { to: '/admin/reportes', label: 'Reportes', icon: FileBarChart, roles: A },
+      { to: '/admin/indicadores-graficos', label: 'Indicadores gráficos', icon: CircleDollarSign, roles: A },
       { to: '/admin/kpis-personal', label: 'KPIs operadores y nannies', icon: TrendingUp, roles: A },
       { to: '/admin/kpis-indicadores', label: 'Indicadores y tareas (fotos)', icon: Camera, roles: A },
     ],

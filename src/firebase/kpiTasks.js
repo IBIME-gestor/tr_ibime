@@ -23,11 +23,11 @@ import { db } from './config';
 const snapDocs = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
 export const KpiIndicators = {
-  subscribe(cb) {
+  subscribe(cb, onError) {
     return onSnapshot(
       query(collection(db, 'kpiIndicators'), orderBy('name')),
       (snap) => cb(snapDocs(snap)),
-      (err) => { console.error('kpiIndicators:', err); cb([]); },
+      (err) => { console.error('kpiIndicators:', err); cb([]); if (onError) onError(err); },
     );
   },
   create: (data) => addDoc(collection(db, 'kpiIndicators'), { ...data, createdAt: serverTimestamp() }),

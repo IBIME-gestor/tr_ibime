@@ -16,6 +16,7 @@ import {
   markStopManual,
   markStopAbsent,
   markArrived,
+  publishNannyStop,
   markAllBulk,
   addStudentToTrip,
   removeStudentFromTrip,
@@ -148,6 +149,10 @@ export default function TripRunner() {
 
   const [route, setRoute] = useState(null);
   const [trip, setTrip] = useState(null); // null mientras carga, undefined... (ver tripLoaded)
+  // La nannie puede iniciar y cerrar el viaje cuando el operador no puede entrar a su app.
+  const isNanny = profile?.role === 'nanny';
+  const nannyLed = isNanny && trip?.startedByRole === 'nanny';
+  const [nannyStart, setNannyStart] = useState(false);
   const [tripLoaded, setTripLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [ownStops, setOwnStops] = useState([]); // paradas del recorrido abierto
@@ -458,6 +463,7 @@ export default function TripRunner() {
       const isTaller = route.kind === 'taller';
       if (isTaller && !unitIdInput) throw new Error('Elige la unidad que vas a usar.');
       let opts = isTaller ? { unitId: unitIdInput } : {};
+      if (isNanny) opts = { ...opts, byNanny: true, byName: profile?.name || '' };
       const startingGroup = !isTaller && groupStartRoutes.length >= 2;
       let t = null;
       for (let i = 0; i < 3 && !t; i += 1) {
@@ -620,6 +626,7 @@ export default function TripRunner() {
     setBusy(true);
     const location = await getCurrentLocation();
     await markStopManual(tripIdOf(stop), stop.studentId, 'boarded', location);
+    if (nannyLed) await publishNannyStop(trip.id, location, `Subió ${stop.name}`, 'boarded');
     setBusy(false);
   }
 
@@ -636,6 +643,7 @@ export default function TripRunner() {
     setBusy(true);
     const location = await getCurrentLocation();
     await bulkMark('boarded', location);
+    if (nannyLed) await publishNannyStop(trip.id, location, 'Todos abordaron', 'bulk');
     setBusy(false);
   }
 
@@ -647,6 +655,7 @@ export default function TripRunner() {
     setBusy(true);
     const location = await getCurrentLocation();
     await bulkMark('delivered', location);
+    if (nannyLed) await publishNannyStop(trip.id, location, 'Llegaron al colegio', 'bulk');
     setBusy(false);
   }
 
@@ -654,6 +663,7 @@ export default function TripRunner() {
     setBusy(true);
     const location = await getCurrentLocation();
     await markStopManual(tripIdOf(stop), stop.studentId, 'delivered', location);
+    if (nannyLed) await publishNannyStop(trip.id, location, `Bajó ${stop.name}`, 'delivered');
     setBusy(false);
   }
 
@@ -667,6 +677,7 @@ export default function TripRunner() {
   // la pantalla para ella.
   async function handleArrive(stop) {
     await markArrived(tripIdOf(stop), stop.studentId);
+    if (nannyLed) getCurrentLocation().then((loc) => publishNannyStop(trip.id, loc, `Llegó con ${stop.name}`, 'arrived')).catch(() => null);
   }
 
   // ------------------------------------------------------------------
@@ -838,7 +849,7 @@ export default function TripRunner() {
   // aparece la lista de alumnos, ni para el operador ni para la nanny.
   // --------------------------------------------------------------
   if (!trip) {
-    if (!isDriver) {
+    if (!isDriver && !nannyStart) {
       return (
         <div className="card text-center mt-10 cascade-item">
           <p className="text-3xl mb-2">⏳</p>
@@ -847,6 +858,14 @@ export default function TripRunner() {
             El operador todavía no registra su kilometraje inicial para arrancar este recorrido.
             En cuanto lo haga, esta pantalla se actualiza sola.
           </p>
+          {isNanny && (
+            <div className="mt-5 pt-4 border-t border-navy-100">
+              <p className="text-navy-500 text-sm mb-3">¿El operador no puede entrar a su app y no podemos esperar más?</p>
+              <button type="button" className="btn-go w-full" onClick={() => setNannyStart(true)}>
+                Iniciar yo el viaje
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -865,7 +884,9 @@ export default function TripRunner() {
         <p className="text-navy-400 text-sm text-center mb-4">
           {groupStartRoutes.length >= 2
             ? 'Registra UN solo kilometraje inicial: se usa para todas las rutas y verás una sola lista fusionada.'
-            : 'Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.'}
+            : isNanny
+              ? 'Tú llevas el control de este viaje porque el operador no pudo iniciarlo. Registra el kilometraje inicial del vehículo (tablero). Dirección verá que lo iniciaste tú, y tu ubicación se guarda en cada parada que marques.'
+              : 'Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.'}
         </p>
         <form onSubmit={handleStartTrip} className="space-y-3">
           {route.kind === 'taller' && (
@@ -915,6 +936,14 @@ export default function TripRunner() {
           {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
         </h1>
       </div>
+
+      {trip.startedByRole === 'nanny' && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-sm text-sky-900 cascade-item">
+          <b>Viaje llevado por la nannie.</b> {nannyLed
+            ? 'La ubicación se guarda cada vez que marcas una parada (no es en tiempo real). Al terminar, registra tú el kilometraje final.'
+            : 'El operador no pudo iniciarlo; la nannie lo inició y la ubicación se registra por parada.'}
+        </div>
+      )}
 
       {isGroup && (
         <div className="rounded-xl border border-navy-100 bg-navy-50 px-3 py-2.5 text-sm text-navy-700 cascade-item">
@@ -1428,7 +1457,7 @@ export default function TripRunner() {
         })()}
       </div>
 
-      {allResolved && isDriver && (
+      {allResolved && (isDriver || nannyLed) && (
         <form onSubmit={handleFinish} className="card space-y-3">
           <p className="font-medium text-sm text-navy-600">
             Registra el kilometraje final para cerrar el recorrido
@@ -1452,7 +1481,7 @@ export default function TripRunner() {
         </form>
       )}
 
-      {allResolved && !isDriver && (
+      {allResolved && !isDriver && !nannyLed && (
         <p className="text-center text-navy-400 text-sm">
           Todos los alumnos están resueltos. El operador debe registrar el kilometraje final para
           cerrar el recorrido.
