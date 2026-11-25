@@ -380,9 +380,10 @@ service cloud.firestore {
 
     match /kpiEvidence/{id} {
       allow read: if isAdmin() || (isStaff() && resource.data.personId == myStaffId());
-      allow create: if isStaff() &&
+      // El admin también puede crearla (captura manual: p. ej. el operador no tuvo red).
+      allow create: if isAdmin() || (isStaff() &&
         request.resource.data.personId == myStaffId() &&
-        request.resource.data.status == 'revision';
+        request.resource.data.status == 'revision');
       allow update: if isAdmin() ||
         (isStaff() && resource.data.personId == myStaffId() &&
          resource.data.status == 'rechazada' &&
