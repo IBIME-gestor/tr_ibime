@@ -1466,6 +1466,33 @@ export async function adminReopenTrip(trip, by = null) {
 }
 
 /**
+ * Reasigna recorridos a otra persona (o los deja sin operador/nannie) cuando el
+ * recorrido quedó ligado a un id equivocado, p. ej. un operador dado de baja.
+ * field: 'driverId' | 'nannyId'. newId vacío = quitar la asignación.
+ * No marca el recorrido como «corregido» (eso penaliza al operador en sus KPIs);
+ * deja el id original y quién lo reasignó para poder auditarlo.
+ */
+export async function adminReassignTrips(trips, field, newId, by = null) {
+  if (field !== 'driverId' && field !== 'nannyId') throw new Error('Campo no válido.');
+  const empty = field === 'nannyId' ? null : '';
+  const target = newId || empty;
+  for (let i = 0; i < trips.length; i += 400) {
+    const batch = writeBatch(db);
+    trips.slice(i, i + 400).forEach((t) => {
+      batch.update(doc(db, 'trips', t.id), {
+        [field]: target,
+        [`${field}Original`]: t[`${field}Original`] ?? t[field] ?? '',
+        reassignedByAdmin: true,
+        reassignedAt: serverTimestamp(),
+        reassignedBy: by?.name || '',
+      });
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await batch.commit();
+  }
+}
+
+/**
  * Elimina un recorrido por completo (paradas, huella GPS, seguimiento público).
  * Úsalo solo cuando el recorrido tiene información errónea; no se puede deshacer.
  */
