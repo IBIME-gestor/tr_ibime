@@ -19,7 +19,6 @@ import {
   Landmark,
   Link2,
   Menu,
-  X,
   ChevronDown,
   LogOut,
   Compass,
@@ -182,20 +181,203 @@ function isItemActive(item, pathname) {
   return pathname === item.to || pathname.startsWith(`${item.to}/`);
 }
 
+
+/** Sin acentos y en minúsculas, para que "planeacion" encuentre "Planeación". */
+const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/**
+ * Contenido de la barra lateral (se usa fija en escritorio y como cajón en
+ * móvil/tablet). Lleva: marca, buscador de módulos, grupos desplegables,
+ * y la tarjeta del usuario abajo.
+ */
+function SidebarContent({ groups: visibleGroups, role, profile, agenda, pathname, onLogout, searchRef }) {
+  const [expanded, setExpanded] = useState(null); // null = solo el grupo activo abierto; '' = todos cerrados
+  const [q, setQ] = useState('');
+
+  // Al cambiar de página se limpia la búsqueda y se vuelve a abrir el grupo activo.
+  useEffect(() => {
+    setQ('');
+    setExpanded(null);
+  }, [pathname]);
+
+  const query = norm(q.trim());
+  const matches = useMemo(() => {
+    if (!query) return [];
+    const out = [];
+    visibleGroups.forEach((g) => {
+      realItems(g).forEach((it) => {
+        if (norm(it.label).includes(query) || norm(g.label).includes(query)) out.push({ ...it, group: g.label });
+      });
+    });
+    return out;
+  }, [query, visibleGroups]);
+
+  const linkCls = (isActive) =>
+    `group flex items-center gap-3 rounded-xl px-3 py-2 text-[13.5px] transition-colors ${
+      isActive
+        ? 'bg-signal-yellow text-navy-900 font-semibold shadow-[0_6px_16px_-6px_rgba(216,154,43,0.6)]'
+        : 'text-navy-100/90 hover:bg-white/10 hover:text-white'
+    }`;
+
+  return (
+    <>
+      {/* Marca + campana de la agenda */}
+      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+        <NavLink to={role === 'cashier' ? '/admin/caja' : '/admin'} className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="grid place-items-center w-10 h-10 rounded-xl bg-white/10 border border-white/10 shrink-0">
+            <img src="/ibime-shield.png" alt="IBIME" className="w-7 h-7" />
+          </span>
+          <span className="leading-tight min-w-0">
+            <span className="block font-display text-[15px] font-semibold text-white truncate">Ruta Segura</span>
+            <span className="block text-navy-300 text-[11px] truncate">
+              {role === 'cashier' ? 'Caja' : 'Transporte escolar IBIME'}
+            </span>
+          </span>
+        </NavLink>
+        {role === 'admin' && (
+          <NavLink
+            to="/admin/agenda"
+            title={agenda.count ? `${agenda.count} pendiente(s) por atender` : 'Mi agenda'}
+            className="relative shrink-0 grid place-items-center w-9 h-9 rounded-full bg-white/10 border border-white/10 text-navy-100 hover:text-white hover:bg-white/15"
+          >
+            <Bell size={16} />
+            {agenda.count > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-stop text-white text-[10px] font-bold flex items-center justify-center">
+                {agenda.count}
+              </span>
+            )}
+          </NavLink>
+        )}
+      </div>
+
+      {/* Buscador de módulos */}
+      {role !== 'cashier' && (
+        <div className="px-3 pb-2">
+          <label className="relative block">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-navy-300 pointer-events-none" />
+            <input
+              ref={searchRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar módulo…"
+              aria-label="Buscar módulo"
+              className="w-full h-10 rounded-xl bg-white/[0.06] border border-white/10 pl-9 pr-10 text-sm text-white placeholder:text-navy-300 focus:outline-none focus:border-signal-yellow/70 focus:bg-white/10"
+              style={{ paddingLeft: '2.25rem' }}
+            />
+            <kbd className="hidden lg:block absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-navy-300 bg-white/10 rounded px-1.5 py-0.5">
+              ⌘K
+            </kbd>
+          </label>
+        </div>
+      )}
+
+      {/* Navegación */}
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 pb-2 space-y-0.5 side-scroll" aria-label="Módulos">
+        {query ? (
+          matches.length ? (
+            matches.map((it) => (
+              <NavLink key={it.to} to={it.to} end={it.end} className={({ isActive }) => linkCls(isActive)}>
+                <it.icon size={16} className="shrink-0 opacity-80" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{it.label}</span>
+                  <span className="block text-[10.5px] opacity-60 truncate">{it.group}</span>
+                </span>
+              </NavLink>
+            ))
+          ) : (
+            <p className="px-3 py-6 text-center text-xs text-navy-300">Sin resultados para “{q}”.</p>
+          )
+        ) : (
+          visibleGroups.map((g) => {
+            const GroupIcon = g.icon;
+            const active = g.items.some((i) => isItemActive(i, pathname));
+            const isOpen = expanded === g.key || (expanded === null && active);
+
+            // Un solo módulo (Inicio, o Caja para el cajero): enlace directo.
+            if (realItems(g).length === 1) {
+              const item = realItems(g)[0];
+              return (
+                <NavLink key={g.key} to={item.to} end={item.end} className={({ isActive }) => linkCls(isActive)}>
+                  <GroupIcon size={17} className="shrink-0" />
+                  <span className="truncate">{visibleGroups.length === 1 ? item.label : g.label}</span>
+                </NavLink>
+              );
+            }
+
+            return (
+              <div key={g.key}>
+                <button
+                  type="button"
+                  onClick={() => setExpanded(isOpen ? '' : g.key)}
+                  aria-expanded={isOpen}
+                  className={`w-full flex items-center gap-3 rounded-xl px-3 py-2 text-[13.5px] font-medium transition-colors ${
+                    active ? 'text-white bg-white/[0.08]' : 'text-navy-100/90 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <GroupIcon size={17} className={`shrink-0 ${active ? 'text-signal-yellow' : ''}`} />
+                  <span className="flex-1 text-left truncate">{g.label}</span>
+                  <ChevronDown size={14} className={`shrink-0 opacity-60 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {isOpen && (
+                  <ul className="ml-[22px] mt-0.5 mb-1.5 pl-2.5 border-l border-white/10 space-y-0.5">
+                    {g.items.map((item, idx) =>
+                      item.heading ? (
+                        <li key={`h-${item.heading}`} className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-navy-300/80 select-none">
+                          {item.heading}
+                        </li>
+                      ) : (
+                        <li key={item.to} className="nav-cascade" style={{ animationDelay: `${idx * 22}ms` }}>
+                          <NavLink to={item.to} end={item.end} className={({ isActive }) => linkCls(isActive)}>
+                            <item.icon size={15} className="shrink-0 opacity-80" />
+                            <span className="truncate">{item.label}</span>
+                          </NavLink>
+                        </li>
+                      )
+                    )}
+                  </ul>
+                )}
+              </div>
+            );
+          })
+        )}
+      </nav>
+
+      {/* Usuario */}
+      <div className="m-3 mt-1 rounded-2xl bg-white/[0.06] border border-white/10 p-2.5 flex items-center gap-2.5">
+        <span className="grid place-items-center w-9 h-9 rounded-full bg-signal-yellow text-navy-900 text-xs font-bold shrink-0">
+          {(profile?.name || 'A').trim().slice(0, 2).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block text-[13px] font-medium text-white truncate">{profile?.name || 'Administrador'}</span>
+          <span className="block text-[10.5px] text-navy-300">{role === 'cashier' ? 'Caja' : 'Administrador'}</span>
+        </span>
+        <button
+          onClick={onLogout}
+          title="Cerrar sesión"
+          aria-label="Cerrar sesión"
+          className="shrink-0 grid place-items-center w-9 h-9 rounded-lg text-navy-100 hover:text-white hover:bg-white/10"
+        >
+          <LogOut size={16} />
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function AdminLayout() {
   const { logout, profile } = useAuth();
   const agenda = useAgendaAlerts();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openGroup, setOpenGroup] = useState(null); // desktop: grupo con el menú desplegado
-  const [expanded, setExpanded] = useState(null); // móvil: grupo expandido (acordeón)
   const location = useLocation();
   const navigate = useNavigate();
-  const navRef = useRef(null);
   const mainRef = useRef(null);
+  const searchRef = useRef(null);
 
   const role = profile?.role;
   // Las pantallas de listas conservan el diseño original de la app (ver .legacy-lists en index.css)
   const classicLists = /^\/admin\/(formar-ruta|listas\/|alumnos-quitados)/.test(location.pathname);
+  // El Resumen va directo sobre el fondo de cristal; los demás módulos van sobre una hoja clara.
+  const isHome = location.pathname === '/admin' || location.pathname === '/admin/';
 
   const visibleGroups = useMemo(
     () =>
@@ -214,34 +396,27 @@ export default function AdminLayout() {
     }
   }, [role, location.pathname, navigate]);
 
-  // Al navegar: cierra menús y regresa el contenido al inicio.
+  // Al navegar: cierra el cajón móvil y regresa el contenido al inicio.
   useEffect(() => {
-    setOpenGroup(null);
     setMobileOpen(false);
-    setExpanded(null);
     if (mainRef.current) mainRef.current.scrollTo({ top: 0 });
   }, [location.pathname]);
 
-  // Click fuera / Escape cierran el menú desplegado (desktop).
+  // Escape cierra el cajón; ⌘K / Ctrl+K enfoca el buscador de módulos.
   useEffect(() => {
-    function onDown(e) {
-      if (navRef.current && !navRef.current.contains(e.target)) setOpenGroup(null);
-    }
     function onKey(e) {
-      if (e.key === 'Escape') {
-        setOpenGroup(null);
-        setMobileOpen(false);
+      if (e.key === 'Escape') setMobileOpen(false);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && searchRef.current) {
+        e.preventDefault();
+        searchRef.current.focus();
+        searchRef.current.select();
       }
     }
-    document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // En móvil, bloquea el scroll del fondo mientras el menú está abierto.
+  // En móvil, bloquea el scroll del fondo mientras el cajón está abierto.
   useEffect(() => {
     if (!mobileOpen) return undefined;
     const prev = document.body.style.overflow;
@@ -251,251 +426,66 @@ export default function AdminLayout() {
     };
   }, [mobileOpen]);
 
-  // Si solo hay un grupo con un solo módulo (cajero), se muestra como enlace directo.
-  const flat = visibleGroups.length === 1 && realItems(visibleGroups[0]).length === 1;
+  const sidebarProps = { groups: visibleGroups, role, profile, agenda, pathname: location.pathname, onLogout: logout, searchRef };
 
   return (
-    <div className="h-screen flex flex-col bg-paper overflow-hidden">
-      <header className="shrink-0 bg-navy-900 text-white relative z-40 shadow-panel">
-        <div className="max-w-[1600px] mx-auto px-3 sm:px-5 h-14 flex items-center gap-2 2xl:gap-3">
-          {/* Marca */}
-          <NavLink to={role === 'cashier' ? '/admin/caja' : '/admin'} className="flex items-center gap-2.5 shrink-0">
-            <img src="/ibime-shield.png" alt="IBIME" className="w-8 h-8" />
-            <div className="leading-tight">
-              <p className="font-display text-sm sm:text-base font-semibold">Ruta Segura</p>
-              <p className="hidden 2xl:block text-navy-300 text-[0.65rem]">
-                {role === 'cashier' ? 'Caja' : 'Gestión de transporte escolar'}
-              </p>
-            </div>
+    <div className="admin-shell h-screen flex gap-3 p-2 lg:p-3 overflow-hidden">
+      {/* Barra lateral flotante (escritorio) */}
+      <aside className="side-panel hidden lg:flex w-[264px] shrink-0 flex-col">
+        <SidebarContent {...sidebarProps} />
+      </aside>
+
+      {/* Cajón (móvil / tablet) */}
+      {mobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-50">
+          <button type="button" aria-label="Cerrar menú" className="absolute inset-0 bg-navy-900/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <aside className="side-panel side-panel-solid absolute left-2 top-2 bottom-2 w-[min(300px,calc(100vw-1rem))] flex flex-col drawer-in">
+            <SidebarContent {...sidebarProps} />
+          </aside>
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0 flex flex-col gap-2 lg:gap-0">
+        {/* Barra superior (móvil / tablet) */}
+        <header className="lg:hidden shrink-0 side-panel flex items-center gap-2 px-3 h-14">
+          <button
+            type="button"
+            className="grid place-items-center w-10 h-10 -ml-1 rounded-xl text-white hover:bg-white/10"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Menú"
+            aria-expanded={mobileOpen}
+          >
+            <Menu size={22} />
+          </button>
+          <NavLink to={role === 'cashier' ? '/admin/caja' : '/admin'} className="flex items-center gap-2 min-w-0 flex-1">
+            <img src="/ibime-shield.png" alt="IBIME" className="w-7 h-7" />
+            <span className="font-display text-[15px] font-semibold text-white truncate">Ruta Segura</span>
           </NavLink>
-
-          {/* Navegación de escritorio */}
-          <nav ref={navRef} className="hidden xl:flex items-center gap-0 2xl:gap-0.5 ml-1 2xl:ml-4 flex-1 min-w-0 flex-nowrap" aria-label="Módulos">
-            {visibleGroups.map((g, gIdx) => {
-              const GroupIcon = g.icon;
-              const active = g.items.some((i) => isItemActive(i, location.pathname));
-              const isOpen = openGroup === g.key;
-
-              // Grupo de un solo módulo (Inicio, o Caja para el cajero): enlace directo.
-              if (realItems(g).length === 1) {
-                const item = realItems(g)[0];
-                return (
-                  <NavLink
-                    key={g.key}
-                    to={item.to}
-                    end={item.end}
-                    className={({ isActive }) =>
-                      `relative flex items-center gap-2 px-2 2xl:px-2.5 py-2 rounded-md text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors ${
-                        isActive ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : 'text-navy-100 hover:text-white hover:bg-white/10'
-                      }`
-                    }
-                  >
-                    <GroupIcon size={16} className="hidden 2xl:block" /> {flat ? item.label : g.label}
-                  </NavLink>
-                );
-              }
-
-              return (
-                <div
-                  key={g.key}
-                  className="relative"
-                  onMouseEnter={() => setOpenGroup(g.key)}
-                  onMouseLeave={() => setOpenGroup((cur) => (cur === g.key ? null : cur))}
-                >
-                  <button
-                    type="button"
-                    aria-haspopup="true"
-                    aria-expanded={isOpen}
-                    onClick={() => setOpenGroup(isOpen ? null : g.key)}
-                    className={`relative flex items-center gap-1 2xl:gap-2 px-2 2xl:px-2.5 py-2 rounded-md text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors ${
-                      active ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : isOpen ? 'text-white bg-white/10' : 'text-navy-100 hover:text-white hover:bg-white/10'
-                    }`}
-                  >
-                    <GroupIcon size={16} className="hidden 2xl:block" />
-                    {g.label}
-                    <ChevronDown size={14} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isOpen && (
-                    <div className={`absolute top-full pt-2 min-w-[240px] max-w-[calc(100vw-1.5rem)] z-50 ${gIdx >= visibleGroups.length - 3 ? 'right-0' : 'left-0'}`}>
-                      <ul className="bg-white text-navy-800 rounded-xl border border-navy-100 shadow-panel py-1.5 overflow-hidden">
-                        {g.items.map((item, idx) => (item.heading ? (
-                          <li key={`h-${item.heading}`} className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-navy-400 select-none">
-                            {item.heading}
-                          </li>
-                        ) : (
-                          <li key={item.to} className="nav-cascade" style={{ animationDelay: `${idx * 28}ms` }}>
-                            <NavLink
-                              to={item.to}
-                              end={item.end}
-                              className={({ isActive }) =>
-                                `flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-colors border-l-[3px] pl-[13px] ${
-                                  isActive
-                                    ? 'bg-signal-light text-navy-900 border-signal-yellow'
-                                    : 'text-navy-600 hover:bg-signal-light border-transparent'
-                                }`
-                              }
-                            >
-                              <item.icon size={16} className="text-navy-400 shrink-0" />
-                              {item.label}
-                            </NavLink>
-                          </li>
-                        )))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </nav>
-
-          <div className="flex-1 xl:hidden" />
-
-          {/* Campana de la agenda (24 / 12 / 6 / 1 h antes) */}
           {role === 'admin' && (
-            <NavLink
-              to="/admin/agenda"
-              title={agenda.count ? `${agenda.count} pendiente(s) por atender` : 'Mi agenda'}
-              className="relative shrink-0 p-2 rounded-md text-navy-100 hover:text-white hover:bg-white/10"
-            >
+            <NavLink to="/admin/agenda" aria-label="Mi agenda" className="relative grid place-items-center w-10 h-10 rounded-xl text-navy-100 hover:bg-white/10">
               <Bell size={18} />
               {agenda.count > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-stop text-white text-[10px] font-bold flex items-center justify-center">
                   {agenda.count}
                 </span>
               )}
             </NavLink>
           )}
+        </header>
 
-          {/* Usuario (escritorio) */}
-          <div className="hidden xl:flex items-center gap-2 2xl:gap-3 shrink-0">
-            <p className="hidden 2xl:block text-xs text-navy-100 max-w-[160px] truncate">{profile?.name || 'Administrador'}</p>
-            <span className="hidden 2xl:inline-block text-[0.65rem] font-extrabold uppercase tracking-wide text-navy-100 bg-white/10 border border-white/15 px-2 py-0.5 rounded-full">
-              {role === 'cashier' ? 'Caja' : 'Administrador'}
-            </span>
-            <button
-              onClick={logout}
-              title="Cerrar sesión" className="flex items-center gap-1.5 px-2 2xl:px-3 py-1.5 rounded-lg text-xs font-bold text-navy-100 border border-white/15 bg-white/5 hover:text-white hover:bg-white/10"
-            >
-              <LogOut size={14} /> <span className="hidden 2xl:inline">Salir</span>
-            </button>
+        <main
+          ref={mainRef}
+          className={
+            isHome
+              ? 'dash-main flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-0.5 py-0.5 lg:px-2 lg:py-1'
+              : `content-sheet flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6 lg:px-8 ibime-watermark${classicLists ? ' legacy-lists' : ''}`
+          }
+        >
+          <div className="max-w-[1600px] mx-auto">
+            <Outlet />
           </div>
-
-          {/* Botón de menú (móvil / tablet) */}
-          <button
-            type="button"
-            className="xl:hidden p-2 -mr-2 rounded-md hover:bg-white/10"
-            onClick={() => setMobileOpen((v) => !v)}
-            aria-label="Menú"
-            aria-expanded={mobileOpen}
-          >
-            {mobileOpen ? <X size={22} /> : <Menu size={22} />}
-          </button>
-        </div>
-
-        {/* Panel móvil / tablet */}
-        {mobileOpen && (
-          <div className="xl:hidden absolute left-0 right-0 top-full bg-navy-900 border-t border-navy-700 shadow-panel max-h-[calc(100vh-3.5rem)] overflow-y-auto">
-            <nav className="px-3 py-3 flex flex-col gap-1" aria-label="Módulos">
-              {visibleGroups.map((g, gi) => {
-                const GroupIcon = g.icon;
-                const active = g.items.some((i) => isItemActive(i, location.pathname));
-                const isOpen = expanded === g.key || (expanded === null && active);
-
-                if (realItems(g).length === 1) {
-                  const item = realItems(g)[0];
-                  return (
-                    <NavLink
-                      key={g.key}
-                      to={item.to}
-                      end={item.end}
-                      className={({ isActive }) =>
-                        `nav-cascade flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium ${
-                          isActive ? 'text-navy-900 bg-signal-yellow shadow-[0_4px_12px_rgba(216,154,43,0.2)]' : 'text-navy-100 hover:bg-white/10'
-                        }`
-                      }
-                      style={{ animationDelay: `${gi * 28}ms` }}
-                    >
-                      <GroupIcon size={18} /> {flat ? item.label : g.label}
-                    </NavLink>
-                  );
-                }
-
-                return (
-                  <div key={g.key} className="nav-cascade" style={{ animationDelay: `${gi * 28}ms` }}>
-                    <button
-                      type="button"
-                      onClick={() => setExpanded(isOpen ? '' : g.key)}
-                      aria-expanded={isOpen}
-                      className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-semibold ${
-                        active ? 'text-white bg-white/10' : 'text-navy-100 hover:bg-white/10'
-                      }`}
-                    >
-                      <GroupIcon size={18} />
-                      <span className="flex-1 text-left">{g.label}</span>
-                      <ChevronDown size={16} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {isOpen && (
-                      <ul className="ml-5 mt-1 mb-1 pl-3 border-l border-navy-600 flex flex-col gap-0.5">
-                        {g.items.map((item, idx) => (item.heading ? (
-                          <li key={`h-${item.heading}`} className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-navy-300 select-none">
-                            {item.heading}
-                          </li>
-                        ) : (
-                          <li key={item.to} className="nav-cascade" style={{ animationDelay: `${idx * 24}ms` }}>
-                            <NavLink
-                              to={item.to}
-                              end={item.end}
-                              className={({ isActive }) =>
-                                `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm ${
-                                  isActive
-                                    ? 'text-navy-900 bg-signal-yellow font-bold'
-                                    : 'text-navy-100 hover:text-white hover:bg-white/10'
-                                }`
-                              }
-                            >
-                              <item.icon size={16} className="shrink-0" />
-                              {item.label}
-                            </NavLink>
-                          </li>
-                        )))}
-                      </ul>
-                    )}
-                  </div>
-                );
-              })}
-            </nav>
-            <div className="px-4 py-3 border-t border-navy-700 flex items-center justify-between gap-3">
-              <p className="text-sm text-navy-200 truncate">{profile?.name || 'Administrador'}</p>
-              <button
-                onClick={logout}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-navy-100 border border-white/15 hover:bg-white/10"
-              >
-                <LogOut size={15} /> Cerrar sesión
-              </button>
-            </div>
-          </div>
-        )}
-      </header>
-
-      {/* Velo para cerrar el menú móvil tocando fuera */}
-      {mobileOpen && (
-        <button
-          type="button"
-          aria-label="Cerrar menú"
-          className="xl:hidden fixed inset-0 top-14 z-30 bg-navy-900/50"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-
-      <main
-        ref={mainRef}
-        className={`flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6 lg:px-8 ibime-watermark${classicLists ? ' legacy-lists' : ''}`}
-      >
-        <div className="max-w-[1600px] mx-auto">
-          <Outlet />
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
