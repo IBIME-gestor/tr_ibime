@@ -1,0 +1,1321 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, RefreshCw, ChevronDown } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import Drawer from '../../components/Drawer';
+import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
+import { tallerDatesFor, tallerDayApplies } from '../../firebase/trips';
+import { recordMonth, nextMonthRangeOf } from '../../utils/dates';
+import { syncStudentTaller } from '../../utils/tallerSync';
+
+export const SERVICE_OPTIONS = [
+  { key: 'completo', label: 'Completo — entrada y salida' },
+  { key: 'medio', label: 'Medio — entrada o salida' },
+  { key: 'diario', label: 'Diario — fechas específicas' },
+];
+
+export const DAY_META = [
+  { value: 1, short: 'L', name: 'Lunes' },
+  { value: 2, short: 'M', name: 'Martes' },
+  { value: 3, short: 'X', name: 'Miércoles' },
+  { value: 4, short: 'J', name: 'Jueves' },
+  { value: 5, short: 'V', name: 'Viernes' },
+];
+
+const emptyAddForm = {
+  tipoServicio: 'completo',
+  medioServicio: 'entrada',
+  diasSemana: [1, 2, 3, 4, 5],
+  fechasDiarias: [],
+};
+
+function localDateString(date) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 10);
+}
+
+function dateRange(start, end) {
+  if (!start || !end || start > end) return [];
+  const out = [];
+  const cursor = new Date(`${start}T12:00:00`);
+  const last = new Date(`${end}T12:00:00`);
+  while (cursor <= last) {
+    const jsDay = cursor.getDay();
+    if (jsDay >= 1 && jsDay <= 5) out.push(localDateString(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+function isoWeekday(date) {
+  const day = new Date(`${date}T12:00:00`).getDay();
+  return day === 0 ? 7 : day;
+}
+
+function expectedService(student, date) {
+  const tipo = student.tipoServicio || 'completo';
+  const weekday = isoWeekday(date);
+  if (tipo === 'completo') return 'ambas';
+  if (tipo === 'medio') {
+    // Servicio contratado (una pierna los días de contrato) + viajes extra por día
+    // (student.viajesExtra[fecha]: la otra pierna, o ambas, solo esa fecha).
+    const legs = new Set();
+    const add = (sv) => {
+      if (sv === 'ambas') { legs.add('entrada'); legs.add('salida'); } else if (sv) legs.add(sv);
+    };
+    if ((student.diasSemana || []).map(Number).includes(weekday)) add(student.medioServicio || 'entrada');
+    add((student.viajesExtra || {})[date]);
+    if (legs.size === 2) return 'ambas';
+    return legs.size === 1 ? [...legs][0] : null;
+  }
+  if (tipo === 'diario') {
+    return (student.fechasDiarias || []).includes(date)
+      ? (student.medioServicio || 'entrada')
+      : null;
+  }
+  return null;
+}
+
+/**
+ * Medio servicio con viajes extra: cada pierna que se usa FUERA de lo contratado
+ * (la otra pierna un día, o ir redondo un día puntual) se cobra como viaje por día
+ * y se suma al total del medio. Devuelve cuántas piernas extra hay y en qué fechas.
+ */
+export function medioExtras(row, days = row.days) {
+  const contract = row.medioServicio === 'salida' ? 'salida' : 'entrada';
+  const dias = (row.diasSemana || []).map(Number);
+  let extraLegs = 0;
+  const extraMap = {};
+  Object.entries(days || {}).forEach(([date, d]) => {
+    const contractDay = dias.length ? dias.includes(isoWeekday(date)) : true;
+    const legs = ['entrada', 'salida'].filter((leg) => d?.[leg] && !(contractDay && leg === contract));
+    if (legs.length) { extraLegs += legs.length; extraMap[date] = legs.length === 2 ? 'ambas' : legs[0]; }
+  });
+  return { extraLegs, extraMap };
+}
+
+function conceptFor(route, concepts, key) {
+  const map = route?.pricingConcepts || {};
+  const aliases = {
+    completo: ['completo', 'full', 'complete'],
+    medio_entrada: ['medio_entrada', 'medioEntrada', 'entrada', 'halfEntry'],
+    medio_salida: ['medio_salida', 'medioSalida', 'salida', 'halfExit'],
+    por_dia: ['por_dia', 'porDia', 'diario', 'daily'],
+  };
+  const id = (aliases[key] || [key]).map((k) => map[k]).find(Boolean);
+  if (id) {
+    const found = concepts.find((x) => x.id === id && x.active !== false);
+    if (found) return found;
+  }
+  // Compatibilidad con configuraciones antiguas: si la ruta ya tiene un concepto
+  // asociado directamente, o si existe un único concepto activo de esa modalidad,
+  // se puede resolver sin obligar al operador a volver a configurarlo.
+  const directId = route?.pricingConceptId;
+  if (directId) {
+    const found = concepts.find((x) => x.id === directId && x.active !== false);
+    if (found) return found;
+  }
+  const desiredMode = key === 'completo' ? 'mensual' : key === 'por_dia' ? 'por_evento' : 'por_dias';
+  const byMode = concepts.filter((x) => x.active !== false && x.mode === desiredMode);
+  if (byMode.length === 1) return byMode[0];
+  return null;
+}
+
+function buildDays(student, dates) {
+  const days = {};
+  let selectedCount = 0;
+  dates.forEach((date) => {
+    const service = expectedService(student, date);
+    const entrada = service === 'entrada' || service === 'ambas';
+    const salida = service === 'salida' || service === 'ambas';
+    if (service) selectedCount += 1;
+    days[date] = { entrada, salida, confirmado: false };
+  });
+  return { days, selectedCount };
+}
+
+/**
+ * Lista de una ruta NORMAL: los días en que el alumno va a taller su salida de las
+ * 17:30 se mueve al taller, así que se desmarca aquí (`tallerMoved` recuerda que
+ * fue por el taller, para poder devolverla si se quita o se cambia el taller).
+ * El cobro se calcula con los días SIN mover: el taller no cambia lo que paga.
+ */
+export function applyTallerToDays(student, days) {
+  const out = {};
+  Object.entries(days || {}).forEach(([date, d]) => {
+    const original = d?.tallerMoved ? { ...d, salida: true } : d;
+    const moved = tallerDayApplies(student, date) && original.salida;
+    const { tallerMoved: _drop, ...rest } = original;
+    out[date] = moved ? { ...rest, salida: false, tallerMoved: true } : rest;
+  });
+  return out;
+}
+
+export function buildStudentRow(student, dates, concepts, route) {
+  const { days: rawDays, selectedCount } = buildDays(student, dates);
+  // Cobro con los días originales; la lista muestra la salida movida al taller.
+  const days = route?.kind === 'taller' ? rawDays : applyTallerToDays(student, rawDays);
+  let conceptKey = 'completo';
+  if (student.tipoServicio === 'medio') conceptKey = student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada';
+  if (student.tipoServicio === 'diario') conceptKey = 'por_dia';
+
+  const concept = conceptFor(route, concepts, conceptKey);
+  const perDayAmount = Number(conceptFor(route, concepts, 'por_dia')?.amount ?? 0);
+  const baseAmount = Number(concept?.amount ?? student.billingBaseAmount ?? student.billingAmount ?? 0);
+  let estimatedAmount = 0;
+
+  if (student.tipoServicio === 'completo') {
+    estimatedAmount = baseAmount;
+  } else if (student.tipoServicio === 'medio') {
+    // Medio conserva siempre la cuota configurada para el servicio medio,
+    // aunque se utilice solo un día de la semana o todos. Si algún día va redondo
+    // (o usa la otra pierna), ese viaje adicional se suma a tarifa por día.
+    estimatedAmount = baseAmount + medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, rawDays).extraLegs * perDayAmount;
+  } else {
+    // Diario cobra la tarifa diaria de la ruta por cada tramo marcado:
+    // Entrada = 1, Salida = 1, Entrada + Salida = 2.
+    estimatedAmount = Object.values(rawDays).reduce(
+      (sum, day) => sum + (day.entrada ? 1 : 0) + (day.salida ? 1 : 0), 0
+    ) * baseAmount;
+  }
+
+  return {
+    studentId: student.id,
+    matricula: student.matricula || '',
+    name: student.name || '',
+    schoolId: student.schoolId || '',
+    nivel: student.nivel || '',
+    grado: student.grado || '',
+    routeId: route?.id || student.routeId || '',
+    tipoServicio: student.tipoServicio || 'completo',
+    medioServicio: student.medioServicio || 'entrada',
+    diasSemana: (student.diasSemana || []).map(Number),
+    fechasDiarias: student.fechasDiarias || [],
+    estimatedAmount: Number(estimatedAmount.toFixed(2)),
+    baseAmount,
+    perDayAmount,
+    ...(student.tipoServicio === 'medio' ? (() => {
+      const { extraLegs } = medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, rawDays);
+      return { extraLegs, extraAmount: Number((extraLegs * perDayAmount).toFixed(2)) };
+    })() : {}),
+    daysCount: selectedCount,
+    pricingConceptId: concept?.id || student.pricingConceptId || '',
+    concept: concept?.name || student.billingConcept || '',
+    billingMode: concept?.mode || student.billingMode || '',
+    paymentDays: Number(concept?.paymentDays ?? concept?.diasPago ?? student.paymentDays ?? 0),
+    paid: !!student.paid,
+    paymentId: student.paymentId || '',
+    days,
+  };
+}
+
+function hasBothSameDay(row) {
+  return Object.values(row.days || {}).some((d) => d.entrada && d.salida);
+}
+
+/**
+ * Fila de lista para una RUTA DE TALLER. Solo se cobran los días en que el taller
+ * es un viaje adicional (el alumno no habría salido en su ruta normal ese día):
+ * van como servicio diario de salida con la tarifa por día de la ruta de taller.
+ * Si solo se movió su salida normal, no genera cobro y no lleva fila.
+ */
+export function buildTallerRow(student, dates, concepts, route) {
+  const { billable } = tallerDatesFor(student, dates);
+  if (!billable.length) return null;
+  const row = buildStudentRow({
+    ...student, routeId: route.id, tipoServicio: 'diario', medioServicio: 'salida', fechasDiarias: billable, diasSemana: [],
+  }, dates, concepts, route);
+  return { ...row, paid: false, paymentId: '', tallerBilling: true };
+}
+
+export function priorityCompare(a, b) {
+  const bothA = hasBothSameDay(a);
+  const bothB = hasBothSameDay(b);
+  if (bothA !== bothB) return bothA ? -1 : 1;
+  return String(a.name).localeCompare(String(b.name), 'es', { sensitivity: 'base' });
+}
+
+/**
+ * Foto compacta de la lista tal como se generó (lista ORIGINAL). La vista del
+ * operador la compara contra la lista vigente para marcar altas, bajas y cambios.
+ * days[fecha]: 1 = entrada, 2 = salida, 3 = ambas.
+ */
+export function snapshotRows(rows) {
+  return (rows || []).map((r) => ({
+    studentId: r.studentId, name: r.name || '', matricula: r.matricula || '', tipoServicio: r.tipoServicio || '',
+    days: Object.fromEntries(Object.entries(r.days || {}).map(([d, v]) => [d, (v?.entrada ? 1 : 0) + (v?.salida ? 2 : 0)])),
+  }));
+}
+
+export function financePayload(row, listData, route, school, existing = {}) {
+  return {
+    listId: listData.id || '',
+    studentId: row.studentId,
+    studentName: row.name || '',
+    matricula: row.matricula || '',
+    schoolId: row.schoolId || route?.schoolId || '',
+    schoolName: school?.name || '',
+    nivel: row.nivel || '',
+    grado: row.grado || '',
+    routeId: route?.id || listData.routeId || '',
+    routeName: route?.name || '',
+    operatorId: listData.operatorId || '',
+    operatorName: listData.operatorName || '',
+    listName: listData.listName || '',
+    unitId: route?.unitId || '',
+    periodoInicio: listData.startDate || '',
+    periodoFin: listData.endDate || '',
+    tipoServicio: row.tipoServicio || '',
+    medioServicio: row.medioServicio || '',
+    diasSemana: row.diasSemana || [],
+    fechasDiarias: row.fechasDiarias || [],
+    conceptId: row.pricingConceptId || '',
+    conceptName: row.concept || '',
+    montoEstimado: Number(row.estimatedAmount || 0),
+    solicitudAtendida: existing?.solicitudAtendida ?? false,
+    servicioConfirmado: existing?.servicioConfirmado ?? false,
+    conceptoCargado: existing?.conceptoCargado ?? false,
+    // Cobrado solo puede venir de un registro financiero previamente pagado
+    // con folio; no se hereda de row.paid ni del expediente del alumno.
+    cobrado: existing?.cobrado === true && !!existing?.pagoId,
+    pagoId: existing?.pagoId || '',
+  };
+}
+
+function isListReviewed(list) {
+  return !!(list?.reviewedStudents && list?.reviewedPayments);
+}
+
+export function invalidateListReviewPatch() {
+  return {
+    reviewedStudents: false,
+    reviewedPayments: false,
+    reviewed: false,
+    reviewedAt: '',
+    reviewedByUid: '',
+    reviewedByName: '',
+  };
+}
+
+export function dayHeader(date) {
+  const d = new Date(`${date}T12:00:00`);
+  const day = d.getDay();
+  const meta = DAY_META.find((x) => x.value === day);
+  return `${meta?.short || ''}${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export default function RouteBuilder() {
+  const { profile, user } = useAuth();
+  const [routes, setRoutesState] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
+  const [schools, setSchools] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [concepts, setConcepts] = useState([]);
+  const [routeId, setRouteId] = useState('');
+  const [matricula, setMatricula] = useState('');
+  const [lookupError, setLookupError] = useState('');
+  const [lookupStudent, setLookupStudent] = useState(null);
+  const [addForm, setAddForm] = useState(emptyAddForm);
+  const [editingStudentId, setEditingStudentId] = useState(null);
+  const inputRef = useRef(null);
+
+  const [startDate, setStartDate] = useState(localDateString(new Date()));
+  const [endDate, setEndDate] = useState(localDateString(new Date()));
+  const [listId, setListId] = useState('');
+  const [lists, setLists] = useState([]);
+  const [currentList, setCurrentList] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [serviceFilters, setServiceFilters] = useState(['todos']);
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [operatorId, setOperatorId] = useState('');
+  const [movingRowId, setMovingRowId] = useState(null);
+  const [moveRouteId, setMoveRouteId] = useState('');
+  const [moveOperatorId, setMoveOperatorId] = useState('');
+  const [listMonth, setListMonth] = useState(localDateString(new Date()).slice(0, 7));
+  const [listName, setListName] = useState('');
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [showExistingLists, setShowExistingLists] = useState(false);
+
+  useEffect(() => Routes.subscribe(setRoutesState), []);
+  useEffect(() => Schools.subscribe(setSchools), []);
+  useEffect(() => Drivers.subscribe(setDrivers), []);
+  useEffect(() => Units.subscribe(setUnits), []);
+  useEffect(() => {
+    let active = true;
+    Promise.all([Students.list(), PricingConcepts.list(), RouteLists.list()])
+      .then(([studentRows, conceptRows, listRows]) => {
+        if (!active) return;
+        setAllStudents(studentRows || []);
+        setConcepts(conceptRows || []);
+        setLists(listRows || []);
+      })
+      .catch((err) => console.error('Error cargando listas:', err));
+    return () => { active = false; };
+  }, []);
+
+  const route = routes.find((r) => r.id === routeId) || null;
+  const school = schools.find((s) => s.id === route?.schoolId) || null;
+  const unit = units.find((u) => u.id === route?.unitId) || null;
+  const unitCapacity = Number(unit?.capacity || 0);
+  const dates = useMemo(() => dateRange(startDate, endDate), [startDate, endDate]);
+
+  const list = useMemo(() => {
+    let rows = [...(currentList?.rows || [])];
+    const filters = serviceFilters.includes('todos') ? ['todos'] : serviceFilters;
+    if (!filters.includes('todos') && filters.length) {
+      rows = rows.filter((row) => {
+        if (filters.includes('completo') && row.tipoServicio === 'completo') return true;
+        if (filters.includes('medio_entrada') && row.tipoServicio === 'medio' && row.medioServicio === 'entrada') return true;
+        if (filters.includes('medio_salida') && row.tipoServicio === 'medio' && row.medioServicio === 'salida') return true;
+        if (filters.includes('diario') && row.tipoServicio === 'diario') return true;
+        return false;
+      });
+    }
+    return rows.sort(priorityCompare);
+  }, [currentList, serviceFilters]);
+
+  const searchResults = useMemo(() => {
+    const q = String(matricula || '').trim().toLowerCase();
+    if (!q) return [];
+    return allStudents
+      .filter((s) => String(s.matricula || '').toLowerCase().includes(q) || String(s.name || '').toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [matricula, allStudents]);
+
+  function schoolName(id) { return schools.find((s) => s.id === id)?.name || '—'; }
+
+  function getRowUsage(row, date) {
+    const day = row?.days?.[date] || {};
+    return { entrada: !!day.entrada, salida: !!day.salida };
+  }
+
+  function capacitySnapshot(rows, dateList = dates, ignoreStudentId = '') {
+    const result = {};
+    (dateList || []).forEach((date) => {
+      let entrada = 0;
+      let salida = 0;
+      (rows || []).forEach((row) => {
+        if (row.studentId === ignoreStudentId) return;
+        const usage = getRowUsage(row, date);
+        if (usage.entrada) entrada += 1;
+        if (usage.salida) salida += 1;
+      });
+      result[date] = { entrada, salida };
+    });
+    return result;
+  }
+
+  function capacityIssues(rows, dateList = dates, ignoreStudentId = '') {
+    if (!(unitCapacity > 0)) return [];
+    const snapshot = capacitySnapshot(rows, dateList, ignoreStudentId);
+    return Object.entries(snapshot)
+      .filter(([, v]) => v.entrada > unitCapacity || v.salida > unitCapacity)
+      .map(([date, v]) => ({
+        date,
+        entrada: v.entrada,
+        salida: v.salida,
+        entradaOver: v.entrada > unitCapacity,
+        salidaOver: v.salida > unitCapacity,
+      }));
+  }
+
+  function capacityForPreview(rows, previewRow, dateList = dates, ignoreStudentId = '') {
+    const combined = [...(rows || []).filter((r) => r.studentId !== ignoreStudentId), previewRow].filter(Boolean);
+    return capacityIssues(combined, dateList);
+  }
+
+  function capacityLabel(date, snapshot) {
+    const v = snapshot?.[date] || { entrada: 0, salida: 0 };
+    if (!(unitCapacity > 0)) return `${date}: E ${v.entrada} · S ${v.salida}`;
+    return `${dayHeader(date)}: E ${v.entrada}/${unitCapacity} · S ${v.salida}/${unitCapacity}`;
+  }
+
+  function capacityMessage(issues) {
+    if (!issues.length) return '';
+    const lines = issues.slice(0, 8).map((x) => {
+      const parts = [];
+      if (x.entradaOver) parts.push(`entrada ${x.entrada}/${unitCapacity}`);
+      if (x.salidaOver) parts.push(`salida ${x.salida}/${unitCapacity}`);
+      return `${dayHeader(x.date)}: ${parts.join(' y ')}`;
+    });
+    return `La unidad ${unit?.plate || ''} tiene capacidad de ${unitCapacity} lugares. La operación excede la capacidad en:\n${lines.join('\n')}${issues.length > 8 ? '\n…' : ''}`;
+  }
+
+  function toggleServiceFilter(key) {
+    if (key === 'todos') {
+      setServiceFilters(['todos']);
+      return;
+    }
+    setServiceFilters((prev) => {
+      const current = prev.includes('todos') ? [] : prev;
+      const next = current.includes(key) ? current.filter((x) => x !== key) : [...current, key];
+      return next.length ? next : ['todos'];
+    });
+  }
+
+  function resetAddFlow(close = true) {
+    setMatricula('');
+    setLookupStudent(null);
+    setLookupError('');
+    setAddForm(emptyAddForm);
+    setEditingStudentId(null);
+    if (close) setShowAddStudent(false);
+    if (!close) setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  function selectLookupStudent(student, editing = false) {
+    setLookupError('');
+    setLookupStudent(student);
+    setEditingStudentId(editing ? student.id : null);
+    setAddForm({
+      tipoServicio: student.tipoServicio || 'completo',
+      medioServicio: student.medioServicio || 'entrada',
+      diasSemana: (student.diasSemana || [1, 2, 3, 4, 5]).map(Number),
+      fechasDiarias: (student.fechasDiarias || []).filter((d) => dates.includes(d)),
+    });
+    setMatricula(student.matricula || '');
+  }
+
+  function toggleDiaSemana(dia) {
+    const diasSemana = addForm.diasSemana.includes(dia)
+      ? addForm.diasSemana.filter((d) => d !== dia)
+      : [...addForm.diasSemana, dia].sort((a, b) => a - b);
+    setAddForm({ ...addForm, diasSemana });
+  }
+
+  function toggleFechaDiaria(fecha) {
+    const fechasDiarias = addForm.fechasDiarias.includes(fecha)
+      ? addForm.fechasDiarias.filter((d) => d !== fecha)
+      : [...addForm.fechasDiarias, fecha].sort();
+    setAddForm({ ...addForm, fechasDiarias });
+  }
+
+  // Lista de una RUTA DE TALLER: el alumno conserva su ruta normal. Solo se le
+  // asigna el taller (tallerRouteId + días), igual que en el módulo «Talleres».
+  async function saveTallerStudentToRoster() {
+    const days = addForm.tipoServicio === 'medio' && addForm.diasSemana.length
+      ? addForm.diasSemana.map(Number).filter((d) => d >= 1 && d <= 5)
+      : (lookupStudent.tallerRouteId === route.id && lookupStudent.tallerDias?.length
+        ? lookupStudent.tallerDias.map(Number) : [1, 2, 3, 4, 5]);
+    // Un alumno de taller esporádico conserva sus fechas; solo el fijo se guarda por días.
+    const keepSporadic = lookupStudent.tallerRouteId === route.id && lookupStudent.tallerModo === 'esporadico';
+    const data = keepSporadic
+      ? { tallerRouteId: route.id }
+      : { tallerRouteId: route.id, tallerModo: 'fijo', tallerDias: days, tallerFechas: [] };
+    setSaving(true);
+    try {
+      await Students.update(lookupStudent.id, data);
+      const refreshed = { ...lookupStudent, ...data };
+      setAllStudents((prev) => prev.map((s) => (s.id === refreshed.id ? refreshed : s)));
+      if (currentList && currentList.routeId === route.id) {
+        const built = buildTallerRow(refreshed, currentList.dates || dates, concepts, route);
+        const previousRow = (currentList.rows || []).find((x) => x.studentId === refreshed.id);
+        const others = (currentList.rows || []).filter((x) => x.studentId !== refreshed.id);
+        const rows = built
+          ? [...others, { ...built, paid: !!previousRow?.paid, paymentId: previousRow?.paymentId || '' }].sort(priorityCompare)
+          : others;
+        const reviewReset = invalidateListReviewPatch();
+        await RouteLists.update(currentList.id, { rows, ...reviewReset });
+        if (built) {
+          const financeId = `${currentList.id}_${refreshed.id}`;
+          const existingFinance = await FinanceRecords.get(financeId);
+          await FinanceRecords.upsert(financeId, financePayload(built, currentList, route, school, existingFinance || {}));
+        }
+        const updated = { ...currentList, rows, ...reviewReset };
+        setCurrentList(updated);
+        setLists((prev) => prev.map((x) => (x.id === currentList.id ? updated : x)));
+        if (!built) {
+          window.alert(`${lookupStudent.name} ya tiene registro en una ruta normal: su salida de las 17:30 se movió al taller y NO genera cobro extra, por eso no lleva fila en esta lista. Ya aparece en el módulo Talleres y en el viaje del operador de taller.`);
+        }
+      }
+      // También la lista de su ruta normal: su salida de esos días se mueve al taller.
+      try { await syncStudentTaller(refreshed); } catch (e) { console.error('syncStudentTaller', e); }
+      resetAddFlow();
+    } catch (err) {
+      console.error(err);
+      setLookupError(err?.message || 'No se pudo guardar el alumno.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveStudentToRoster() {
+    if (!lookupStudent || !route) return;
+    if (route.kind === 'taller') { await saveTallerStudentToRoster(); return; }
+    if (addForm.tipoServicio === 'medio' && !addForm.diasSemana.length) {
+      window.alert('Selecciona al menos un día de lunes a viernes.');
+      return;
+    }
+    if (addForm.tipoServicio === 'diario' && !addForm.fechasDiarias.length) {
+      window.alert('Selecciona al menos una fecha del calendario.');
+      return;
+    }
+
+    const data = {
+      routeId: route.id,
+      tipoServicio: addForm.tipoServicio,
+      medioServicio: addForm.medioServicio,
+      diasSemana: addForm.tipoServicio === 'medio' ? addForm.diasSemana : [1, 2, 3, 4, 5],
+      fechasDiarias: addForm.tipoServicio === 'diario' ? addForm.fechasDiarias.filter((d) => dates.includes(d)) : [],
+    };
+
+    const preview = buildStudentRow({ ...lookupStudent, ...data }, dates, concepts, route);
+    if (currentList) {
+      const issues = capacityForPreview(currentList.rows || [], preview, currentList.dates || dates, editingStudentId || '');
+      if (issues.length) {
+        window.alert(`No se puede guardar el alumno.\n\n${capacityMessage(issues)}\n\nRevisa los días o el tipo de servicio.`);
+        return;
+      }
+    }
+    if (!preview.pricingConceptId || !(preview.baseAmount > 0)) {
+      const key = addForm.tipoServicio === 'completo' ? 'completo' : addForm.tipoServicio === 'medio' ? `medio_${addForm.medioServicio}` : 'por_dia';
+      window.alert(`La ruta no tiene un concepto válido para: ${key}. Ve a Rutas y revisa la configuración de conceptos de esta ruta.`);
+      return;
+    }
+
+    data.billingAmount = preview.estimatedAmount;
+    data.billingBaseAmount = preview.baseAmount;
+    data.billingConcept = preview.concept;
+    data.billingMode = preview.billingMode;
+    data.pricingConceptId = preview.pricingConceptId;
+    data.billingDaysCount = preview.daysCount;
+    data.billingUpdatedAt = new Date().toISOString();
+
+    setSaving(true);
+    try {
+      await Students.update(lookupStudent.id, data);
+      const refreshed = { ...lookupStudent, ...data };
+      setAllStudents((prev) => prev.map((s) => s.id === refreshed.id ? refreshed : s));
+
+      if (currentList && currentList.routeId === route.id) {
+        const rebuiltRow = buildStudentRow(refreshed, currentList.dates || dates, concepts, route);
+        const previousRow = (currentList.rows || []).find((x) => x.studentId === rebuiltRow.studentId);
+        const row = {
+          ...rebuiltRow,
+          paid: editingStudentId ? !!previousRow?.paid : false,
+          paymentId: editingStudentId ? (previousRow?.paymentId || '') : '',
+        };
+        const rows = [...(currentList.rows || []).filter((x) => x.studentId !== row.studentId), row].sort(priorityCompare);
+        const reviewReset = invalidateListReviewPatch();
+        await RouteLists.update(currentList.id, { rows, ...reviewReset });
+        const financeId = `${currentList.id}_${row.studentId}`;
+        const existingFinance = await FinanceRecords.get(financeId);
+        await FinanceRecords.upsert(financeId, financePayload(row, currentList, route, school, existingFinance || {}));
+        const updated = { ...currentList, rows, ...reviewReset };
+        setCurrentList(updated);
+        setLists((prev) => prev.map((x) => x.id === currentList.id ? updated : x));
+      }
+      resetAddFlow();
+    } catch (err) {
+      console.error(err);
+      setLookupError(err?.message || 'No se pudo guardar el alumno.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function operatorName(id) { return drivers.find((d) => d.id === id)?.name || ''; }
+  function routeNomenclature(r) {
+    const raw = String(r?.name || 'RUTA').trim().toUpperCase().replace(/[^A-Z0-9ÁÉÍÓÚÑ ]/g, ' ');
+    return raw.split(/\s+/).filter(Boolean).map(x => x[0]).join('').slice(0, 8) || 'RUTA';
+  }
+  function defaultListName(r, operator) {
+    return `${startDate} ${endDate} | R-${routeNomenclature(r)}-${String(operator || '').trim() || 'SIN-OPERADOR'}`;
+  }
+  function monthKey(list) { return recordMonth(list); }
+  function nextMonthRange(list) { return nextMonthRangeOf(recordMonth(list)); }
+
+  function addDays(dateString, days) {
+    if (!dateString) return '';
+    const d = new Date(`${dateString}T12:00:00`);
+    d.setDate(d.getDate() + Number(days || 0));
+    return localDateString(d);
+  }
+
+  async function syncListFinance(listData, listRows = listData.rows || [], listRoute = route, listSchool = school) {
+    await Promise.all(listRows.map(async (row) => {
+      const financeId = `${listData.id}_${row.studentId}`;
+      const existingFinance = await FinanceRecords.get(financeId);
+      return FinanceRecords.upsert(financeId, financePayload(row, listData, listRoute, listSchool, existingFinance || {}));
+    }));
+  }
+
+  async function saveListReview(field, checked) {
+    if (!currentList) return;
+    const next = {
+      reviewedStudents: field === 'students' ? checked : !!currentList.reviewedStudents,
+      reviewedPayments: field === 'payments' ? checked : !!currentList.reviewedPayments,
+    };
+    const fullyReviewed = next.reviewedStudents && next.reviewedPayments;
+    const patch = {
+      ...next,
+      reviewed: fullyReviewed,
+      reviewedAt: fullyReviewed ? new Date().toISOString() : '',
+      reviewedByUid: fullyReviewed ? (user?.uid || '') : '',
+      reviewedByName: fullyReviewed ? (profile?.name || user?.email || '') : '',
+    };
+
+    setReviewSaving(true);
+    try {
+      await RouteLists.update(currentList.id, patch);
+      const updated = { ...currentList, ...patch };
+      setCurrentList(updated);
+      setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo guardar la revisión de la lista.');
+    } finally {
+      setReviewSaving(false);
+    }
+  }
+
+  async function createList() {
+    if (!route || !startDate || !endDate || startDate > endDate || !dates.length) return;
+    // Evita generar accidentalmente dos listas para la misma ruta, operador y periodo.
+    const effectiveOperatorId = operatorId || route.driverId || '';
+    const duplicate = lists.find((item) =>
+      item.routeId === route.id &&
+      (item.operatorId || '') === effectiveOperatorId &&
+      item.startDate === startDate && item.endDate === endDate &&
+      item.status !== 'eliminada'
+    );
+    if (duplicate) {
+      window.alert(`Ya existe una lista para esta ruta, operador y periodo: ${duplicate.listName || duplicate.id}. Selecciónala en las listas existentes para modificarla, en lugar de generar otra.`);
+      setCurrentList(duplicate);
+      setListId(duplicate.id);
+      return;
+    }
+    setSaving(true);
+    try {
+      const isTaller = route.kind === 'taller';
+      const source = isTaller
+        ? allStudents.filter((s) => s.tallerRouteId === route.id)
+        : allStudents.filter((s) => s.routeId === route.id);
+      const rows = (isTaller
+        ? source.map((s) => buildTallerRow(s, dates, concepts, route)).filter(Boolean)
+        : source.map((s) => ({ ...buildStudentRow(s, dates, concepts, route), paid: false, paymentId: '' }))
+      ).sort(priorityCompare);
+      const issues = capacityIssues(rows, dates);
+      if (issues.length) {
+        window.alert(`No se puede generar la lista porque la unidad está sobre su capacidad.\n\n${capacityMessage(issues)}`);
+        return;
+      }
+      const data = {
+        routeId: route.id,
+        startDate,
+        endDate,
+        weekdays: [1, 2, 3, 4, 5],
+        dates,
+        rows,
+        originalRows: snapshotRows(rows),
+        status: 'abierta',
+        createdByUid: user?.uid || '',
+        createdByName: profile?.name || '',
+        operatorId: effectiveOperatorId,
+        operatorName: operatorName(effectiveOperatorId),
+        listName: (listName.trim() || defaultListName(route, operatorName(effectiveOperatorId))),
+      };
+      const id = await RouteLists.create(data);
+      const created = { id, ...data };
+      await Promise.all(rows.map((row) => FinanceRecords.upsert(`${id}_${row.studentId}`, financePayload(row, created, route, school))));
+      setLists((prev) => [created, ...prev]);
+      setCurrentList(created);
+      setListId(id);
+      setServiceFilters(['todos']);
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo crear la lista.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Deja el generador como recién abierto (sin recargar la página) para empezar con otra ruta/lista.
+  function clearGenerator() {
+    setRouteId('');
+    setListId('');
+    setCurrentList(null);
+    setStartDate(localDateString(new Date()));
+    setEndDate(localDateString(new Date()));
+    setOperatorId('');
+    setListName('');
+    setListMonth(localDateString(new Date()).slice(0, 7));
+    setServiceFilters(['todos']);
+    setSelectedDay(null);
+    setMovingRowId(null);
+    setMoveRouteId('');
+    setMoveOperatorId('');
+    setShowExistingLists(false);
+    resetAddFlow();
+  }
+
+  function openList(id) {
+    const found = lists.find((x) => x.id === id);
+    if (!found) return;
+    setCurrentList(found);
+    setListId(found.id);
+    setRouteId(found.routeId || '');
+    setStartDate(found.startDate || startDate);
+    setEndDate(found.endDate || endDate);
+    setOperatorId(found.operatorId || '');
+    setListName(found.listName || '');
+    setListMonth(monthKey(found));
+    setServiceFilters(['todos']);
+    setSelectedDay(null);
+  }
+
+  async function createNextMonthList() {
+    if (!currentList || !route) return;
+    const range = nextMonthRange(currentList);
+    const nextDates = dateRange(range.start, range.end);
+    const nextRows = (currentList.rows || []).map((row) => {
+      const clone = { ...row };
+      if (clone.tipoServicio === 'diario') {
+        // No trasladamos fechas diarias automáticamente para evitar cargos accidentales.
+        clone.fechasDiarias = [];
+        clone.days = {};
+        nextDates.forEach(d => { clone.days[d] = { entrada: false, salida: false, confirmado: false }; });
+        clone.daysCount = 0;
+        clone.estimatedAmount = 0;
+      } else {
+        const rebuilt = buildStudentRow(clone, nextDates, concepts, route);
+        return { ...rebuilt, paid: false, paymentId: '' };
+      }
+      return { ...clone, paid: false, paymentId: '' };
+    });
+    const operator = currentList.operatorName || operatorName(currentList.operatorId);
+    const data = {
+      routeId: currentList.routeId,
+      startDate: range.start,
+      endDate: range.end,
+      weekdays: [1,2,3,4,5],
+      dates: nextDates,
+      rows: nextRows,
+      originalRows: snapshotRows(nextRows),
+      status: 'abierta',
+      createdByUid: user?.uid || '',
+      createdByName: profile?.name || '',
+      operatorId: currentList.operatorId || '',
+      operatorName: operator,
+      listName: `${range.start} ${range.end} | R-${routeNomenclature(route)}-${operator || 'SIN-OPERADOR'}`,
+    };
+    setSaving(true);
+    try {
+      const id = await RouteLists.create(data);
+      const created = { id, ...data };
+      await Promise.all(nextRows.map(row => FinanceRecords.upsert(`${id}_${row.studentId}`, financePayload(row, created, route, school))));
+      setLists(prev => [created, ...prev]);
+      openList(id);
+      setCurrentList(created);
+      setListName(created.listName);
+      setListMonth(monthKey(created));
+      window.alert(`Se creó la lista de ${range.start.slice(0,7)}. Los alumnos diarios quedaron sin fechas para revisión manual.`);
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo crear la lista del siguiente mes.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteCurrentList() {
+    if (!currentList) return;
+    const ok = window.confirm(`¿Eliminar esta lista del ${currentList.startDate} al ${currentList.endDate}? También se eliminarán sus registros de Finanzas. Los alumnos NO se eliminarán.`);
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await FinanceRecords.removeByList(currentList.id);
+      await RouteLists.remove(currentList.id);
+      setLists((prev) => prev.filter((x) => x.id !== currentList.id));
+      setCurrentList(null); setListId(''); setShowAddStudent(false); setOperatorId(''); resetAddFlow();
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo eliminar la lista.'); }
+    finally { setSaving(false); }
+  }
+
+  async function saveListOperator(nextId) {
+    if (!currentList) return;
+    setOperatorId(nextId);
+    const reviewReset = invalidateListReviewPatch();
+    const updated = { ...currentList, operatorId: nextId || '', operatorName: operatorName(nextId), listName: listName.trim() || defaultListName(route, operatorName(nextId)), ...reviewReset };
+    setSaving(true);
+    try {
+      await RouteLists.update(currentList.id, { operatorId: updated.operatorId, operatorName: updated.operatorName, listName: listName.trim() || defaultListName(route, updated.operatorName), ...reviewReset });
+      await syncListFinance(updated, updated.rows || [], route, school);
+      setCurrentList(updated); setLists((prev) => prev.map((x) => x.id === updated.id ? updated : x));
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo actualizar el operador.'); }
+    finally { setSaving(false); }
+  }
+
+  async function updateRows(rows) {
+    const sorted = [...rows].sort(priorityCompare);
+    const reviewReset = invalidateListReviewPatch();
+    const updated = { ...currentList, rows: sorted, ...reviewReset };
+    await RouteLists.update(currentList.id, { rows: sorted, ...reviewReset });
+    setCurrentList(updated);
+    setLists((prev) => prev.map((x) => x.id === currentList.id ? updated : x));
+  }
+
+  async function toggleDay(studentId, date, key) {
+    if (!currentList) return;
+    let medioSync = null;
+    const rows = (currentList.rows || []).map((row) => {
+      if (row.studentId !== studentId) return row;
+      const day = row.days?.[date] || { entrada: false, salida: false, confirmado: false };
+      const nextDays = { ...row.days, [date]: { ...day, [key]: !day[key] } };
+      let estimatedAmount = Number(row.estimatedAmount || 0);
+      let extra = {};
+      if (row.tipoServicio === 'diario') {
+        const perDay = Number(row.baseAmount || 0);
+        estimatedAmount = Object.values(nextDays).reduce(
+          (sum, d) => sum + (d.entrada ? 1 : 0) + (d.salida ? 1 : 0), 0
+        ) * perDay;
+      } else if (row.tipoServicio === 'medio') {
+        // Medio + viaje(s) redondo(s) por día: el viaje adicional se cobra a tarifa por día.
+        const listRoute = routes.find((r) => r.id === currentList.routeId) || null;
+        const perDay = Number(row.perDayAmount ?? conceptFor(listRoute, concepts, 'por_dia')?.amount ?? 0);
+        const { extraLegs, extraMap } = medioExtras(row, nextDays);
+        estimatedAmount = Number(row.baseAmount || 0) + extraLegs * perDay;
+        extra = { perDayAmount: perDay, extraLegs, extraAmount: Number((extraLegs * perDay).toFixed(2)) };
+        medioSync = { studentId, extraMap, missingPerDay: extraLegs > 0 && !(perDay > 0) };
+      }
+      return { ...row, ...extra, days: nextDays, estimatedAmount: Number(estimatedAmount.toFixed(2)), daysCount: Object.values(nextDays).filter(d => d.entrada || d.salida).length };
+    });
+    const issues = capacityIssues(rows, currentList.dates || dates);
+    if (issues.length) {
+      window.alert(`No se puede marcar este servicio porque se excede la capacidad de la unidad.\n\n${capacityMessage(issues)}`);
+      return;
+    }
+    await updateRows(rows);
+    const changed = rows.find(r => r.studentId === studentId);
+    if (changed) {
+      const financeId = `${currentList.id}_${studentId}`;
+      const existing = await FinanceRecords.get(financeId);
+      await FinanceRecords.upsert(financeId, financePayload(changed, currentList, route, school, existing || {}));
+      // Si el diario cambia días, el importe financiero queda inmediatamente sincronizado.
+    }
+    if (medioSync) {
+      // El operador debe ver al alumno en el turno extra de esa fecha: se guarda en su ficha
+      // solo para las fechas de ESTA lista (las de otras listas se conservan).
+      const st = allStudents.find((x) => x.id === medioSync.studentId);
+      const listDates = new Set(currentList.dates || []);
+      const kept = Object.entries(st?.viajesExtra || {}).filter(([d]) => !listDates.has(d));
+      const nextExtra = Object.fromEntries([...kept, ...Object.entries(medioSync.extraMap)].sort(([a], [b]) => a.localeCompare(b)));
+      try {
+        await Students.update(medioSync.studentId, { viajesExtra: nextExtra });
+        setAllStudents((prev) => prev.map((x) => (x.id === medioSync.studentId ? { ...x, viajesExtra: nextExtra } : x)));
+      } catch (err) { console.error('No se pudo guardar el viaje extra en la ficha:', err); }
+      if (medioSync.missingPerDay) {
+        window.alert('Esta ruta no tiene un concepto de cobro «por día» configurado, así que el viaje extra se suma con $0. Configúralo en Tarifas y conceptos / Rutas.');
+      }
+    }
+  }
+
+  async function editRow(row) {
+    const student = allStudents.find((s) => s.id === row.studentId);
+    if (!student) return;
+    selectLookupStudent({ ...student, tipoServicio: row.tipoServicio, medioServicio: row.medioServicio, diasSemana: row.diasSemana, fechasDiarias: row.fechasDiarias }, true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function removeRow(row) {
+    if (!window.confirm(`¿Quitar a ${row.name} de esta lista? El alumno no se elimina.`)) return;
+    await updateRows((currentList.rows || []).filter((x) => x.studentId !== row.studentId));
+
+    // En rutas normales el operador ya lee esta misma lista, así que quitarlo
+    // aquí basta. En talleres el operador sigue usando el taller asignado al
+    // alumno: se pregunta si también se le quita.
+    const student = allStudents.find((x) => x.id === row.studentId);
+    const listRoute = routes.find((r) => r.id === currentList.routeId);
+    if (!student || listRoute?.kind !== 'taller' || student.tallerRouteId !== listRoute.id) return;
+    const alsoOperator = window.confirm(
+      `¿Quitarlo también del taller?\n\nAceptar: ${row.name} ya no aparecerá en el viaje de este taller.\nCancelar: solo se quita de esta lista de cobro.`
+    );
+    if (!alsoOperator) return;
+    const patch = { tallerRouteId: '', tallerModo: 'fijo', tallerDias: [], tallerFechas: [] };
+    await Students.update(student.id, patch);
+    setAllStudents((prev) => prev.map((x) => (x.id === student.id ? { ...x, ...patch } : x)));
+    // Su salida normal vuelve a su lista de ruta.
+    try { await syncStudentTaller({ ...student, ...patch }); } catch (e) { console.error('syncStudentTaller', e); }
+  }
+
+  async function moveStudent(row) {
+    if (!currentList || !moveRouteId || moveRouteId === currentList.routeId) { window.alert('Selecciona una ruta destino diferente.'); return; }
+    const targetRoute = routes.find((r) => r.id === moveRouteId);
+    if (!targetRoute) return;
+    const targetSchool = schools.find((s) => s.id === targetRoute.schoolId) || null;
+    setSaving(true);
+    try {
+      let targetList = lists.find((l) => l.routeId === moveRouteId && l.startDate === currentList.startDate && l.endDate === currentList.endDate);
+      if (!targetList) {
+        const targetRows = [];
+        const data = { routeId: moveRouteId, startDate: currentList.startDate, endDate: currentList.endDate, weekdays: [1,2,3,4,5], dates: currentList.dates || [], rows: targetRows, status: 'abierta', createdByUid: user?.uid || '', createdByName: profile?.name || '', operatorId: moveOperatorId || '', operatorName: operatorName(moveOperatorId) };
+        const id = await RouteLists.create(data); targetList = { id, ...data };
+      }
+      const student = allStudents.find((s) => s.id === row.studentId);
+      const movedStudent = { ...student, routeId: moveRouteId };
+      await Students.update(row.studentId, { routeId: moveRouteId });
+      const targetRow = buildStudentRow({ ...movedStudent, tipoServicio: row.tipoServicio, medioServicio: row.medioServicio, diasSemana: row.diasSemana, fechasDiarias: row.fechasDiarias }, targetList.dates || dates, concepts, targetRoute);
+      const targetUnit = units.find((u) => u.id === targetRoute.unitId) || null;
+      const targetCapacity = Number(targetUnit?.capacity || 0);
+      const targetIssues = (() => {
+        if (!(targetCapacity > 0)) return [];
+        const targetRowsPreview = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow];
+        const snap = {};
+        (targetList.dates || dates).forEach((date) => {
+          let entrada = 0; let salida = 0;
+          targetRowsPreview.forEach((r) => { const d = r.days?.[date] || {}; if (d.entrada) entrada += 1; if (d.salida) salida += 1; });
+          if (entrada > targetCapacity || salida > targetCapacity) snap[date] = { entrada, salida };
+        });
+        return Object.entries(snap);
+      })();
+      if (targetIssues.length) {
+        const detail = targetIssues.map(([date, v]) => `${dayHeader(date)}: E ${v.entrada}/${targetCapacity} · S ${v.salida}/${targetCapacity}`).join('\n');
+        window.alert(`No se puede mover a esta ruta. La unidad ${targetUnit?.plate || ''} tiene capacidad de ${targetCapacity} lugares y se excedería en:\n${detail}`);
+        return;
+      }
+      const targetRows = [...(targetList.rows || []).filter((x) => x.studentId !== row.studentId), targetRow].sort(priorityCompare);
+      const targetReviewReset = invalidateListReviewPatch();
+      await RouteLists.update(targetList.id, { rows: targetRows, ...targetReviewReset });
+      const targetUpdated = { ...targetList, rows: targetRows, ...targetReviewReset };
+      const targetFinanceId = `${targetList.id}_${row.studentId}`;
+      const existingTargetFinance = await FinanceRecords.get(targetFinanceId);
+      await FinanceRecords.upsert(targetFinanceId, financePayload(targetRow, targetUpdated, targetRoute, targetSchool, existingTargetFinance || {}));
+      await FinanceRecords.remove(`${currentList.id}_${row.studentId}`);
+      const currentRows = (currentList.rows || []).filter((x) => x.studentId !== row.studentId);
+      const currentReviewReset = invalidateListReviewPatch();
+      await RouteLists.update(currentList.id, { rows: currentRows, ...currentReviewReset });
+      const currentUpdated = { ...currentList, rows: currentRows, ...currentReviewReset };
+      setCurrentList(currentUpdated); setLists((prev) => { const exists = prev.some((x) => x.id === targetUpdated.id); return prev.map((x) => x.id === currentUpdated.id ? currentUpdated : x).concat(exists ? [] : [targetUpdated]); });
+      setMovingRowId(null); setMoveRouteId(''); setMoveOperatorId('');
+      window.alert(`${row.name} fue movido a ${targetRoute.name}.`);
+    } catch (err) { console.error(err); window.alert(err?.message || 'No se pudo mover al alumno.'); }
+    finally { setSaving(false); }
+  }
+
+  async function togglePaid(row) {
+    if (!currentList) return;
+    // El pago se puede marcar/desmarcar sin crear un segundo pago.
+    // Si ya existe paymentId, al volver a marcar se reutiliza ese registro.
+    if (row.paid) {
+      setSaving(true);
+      try {
+        const rows = (currentList.rows || []).map((x) => x.studentId === row.studentId ? { ...x, paid: false } : x);
+        await updateRows(rows);
+        await FinanceRecords.update(`${currentList.id}_${row.studentId}`, {
+          cobrado: false,
+          cobradoAt: '',
+          cobradoBy: ''
+        });
+      } catch (err) {
+        console.error(err);
+        window.alert(err?.message || 'No se pudo desmarcar el pago.');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    const amount = Number(row.estimatedAmount || 0);
+    if (!(amount > 0)) {
+      window.alert('Este alumno no tiene un monto calculado. Revisa el concepto de la ruta.');
+      return;
+    }
+    if (!window.confirm(`Registrar pago de $${amount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} para ${row.name}?`)) return;
+    setSaving(true);
+    try {
+      let paymentId = row.paymentId || '';
+      if (!paymentId) {
+        paymentId = await Students.registerPayment(row.studentId, {
+          amount,
+          method: 'lista',
+          note: `${row.concept || 'Servicio'} · lista ${currentList.startDate} al ${currentList.endDate}`,
+          nextDueDate: currentList.endDate,
+          byName: profile?.name,
+          byUid: user?.uid,
+          routeId: currentList.routeId,
+          unitId: route?.unitId,
+          listId: currentList.id,
+        });
+      }
+      const rows = (currentList.rows || []).map((x) => x.studentId === row.studentId ? { ...x, paid: true, paymentId } : x);
+      await updateRows(rows);
+      await FinanceRecords.update(`${currentList.id}_${row.studentId}`, { cobrado: true, pagoId: paymentId, cobradoAt: new Date().toISOString() });
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || 'No se pudo registrar el pago.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function moveRow(index, dir) {
+    const visibleIds = new Set(list.map((x) => x.studentId));
+    const visible = [...list];
+    const target = index + dir;
+    if (target < 0 || target >= visible.length) return;
+    [visible[index], visible[target]] = [visible[target], visible[index]];
+    const orderMap = new Map(visible.map((r, i) => [r.studentId, i]));
+    const rows = [...(currentList.rows || [])].sort((a, b) => {
+      if (visibleIds.has(a.studentId) && visibleIds.has(b.studentId)) return orderMap.get(a.studentId) - orderMap.get(b.studentId);
+      if (visibleIds.has(a.studentId)) return -1;
+      if (visibleIds.has(b.studentId)) return 1;
+      return 0;
+    });
+    updateRows(rows);
+  }
+
+  function typeLabel(row) {
+    if (row.tipoServicio === 'completo') return 'Completo';
+    if (row.tipoServicio === 'medio') return `Medio ${row.medioServicio === 'salida' ? 'S' : 'E'}`;
+    return 'Diario';
+  }
+
+  function filteredTotal() {
+    return list.reduce((sum, row) => sum + Number(row.estimatedAmount || 0), 0);
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="admin-h1 mb-1">Listas de alumnos</h1>
+          <p className="text-sm text-navy-400">Selecciona ruta y periodo. Los días hábiles se detectan automáticamente de lunes a viernes.</p>
+        </div>
+        <button onClick={() => { Promise.all([Students.list(), PricingConcepts.list(), RouteLists.list()]).then(([s,c,l]) => { setAllStudents(s); setConcepts(c); setLists(l); }); }} className="btn-admin-ghost"><RefreshCw size={14}/> Actualizar</button>
+      </div>
+
+      <div className="admin-card">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div><label className="admin-label">Ruta</label><select value={routeId} onChange={(e) => { setRouteId(e.target.value); setCurrentList(null); setListId(''); resetAddFlow(); }} className="admin-select"><option value="">Selecciona una ruta…</option>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label className="admin-label">Desde</label><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="admin-input" /></div>
+          <div><label className="admin-label">Hasta</label><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="admin-input" /></div>
+          <div><label className="admin-label">Nombre / nomenclatura</label><input value={listName} onChange={(e) => setListName(e.target.value)} placeholder={defaultListName(route, operatorName(operatorId))} className="admin-input" /></div>
+          <div><label className="admin-label">Días hábiles detectados</label><div className="admin-input bg-navy-50">{dates.length} días · Lunes a viernes</div></div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-4">
+          <button disabled={!route || !dates.length || saving} onClick={createList} className="btn-admin-primary"><Plus size={14}/> Generar lista</button>
+          <button type="button" onClick={clearGenerator} className="btn-admin-ghost"><X size={14}/> Limpiar</button>
+          <select value={listMonth} onChange={(e) => setListMonth(e.target.value)} className="admin-select max-w-[150px]"><option value="">Todos los meses</option>{[...new Set(lists.map(l => monthKey(l)).filter(Boolean))].sort().reverse().map(m => <option key={m} value={m}>{m}</option>)}</select>
+          <div className="relative w-full max-w-lg">
+            <button
+              type="button"
+              onClick={() => setShowExistingLists((v) => !v)}
+              className="admin-select w-full text-left flex items-center justify-between"
+            >
+              <span className={listId ? 'text-navy-700' : 'text-navy-500'}>
+                {listId
+                  ? (() => {
+                      const selected = lists.find((l) => l.id === listId);
+                      return selected?.listName || (selected ? `${selected.startDate} ${selected.endDate} | R-${routeNomenclature(routes.find(r=>r.id===selected.routeId))}-${selected.operatorName || 'SIN-OPERADOR'}` : 'Abrir lista existente…');
+                    })()
+                  : 'Abrir lista existente…'}
+              </span>
+              <ChevronDown size={15} />
+            </button>
+            {showExistingLists && (
+              <div className="absolute z-30 mt-1 w-full max-h-72 overflow-auto rounded border border-navy-200 bg-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => { setListId(''); setCurrentList(null); setShowExistingLists(false); }}
+                  className="w-full px-3 py-2 text-left text-xs border-b border-navy-100 hover:bg-navy-50 text-navy-600"
+                >
+                  Abrir lista existente…
+                </button>
+                {lists.filter((l) => (!routeId || l.routeId === routeId) && (!listMonth || monthKey(l) === listMonth)).map((l) => {
+                  const reviewed = isListReviewed(l);
+                  const label = l.listName || `${l.startDate} ${l.endDate} | R-${routeNomenclature(routes.find(r=>r.id===l.routeId))}-${l.operatorName || 'SIN-OPERADOR'}`;
+                  return (
+                    <button
+                      key={`existing-list-${l.id}`}
+                      type="button"
+                      onClick={() => { openList(l.id); setShowExistingLists(false); }}
+                      title={reviewed
+                        ? `Revisada por ${l.reviewedByName || 'usuario'}${l.reviewedAt ? ` · ${new Date(l.reviewedAt).toLocaleString('es-MX')}` : ''}`
+                        : 'Pendiente de revisión'}
+                      className={`w-full px-3 py-2 text-left text-xs border-b border-navy-100 last:border-b-0 transition ${
+                        reviewed
+                          ? 'bg-green-100 text-green-900 hover:bg-green-200'
+                          : 'bg-white text-navy-700 hover:bg-navy-50'
+                      }`}
+                    >
+                      {reviewed ? '✓ ' : ''}{label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <select value={operatorId} onChange={(e) => currentList ? saveListOperator(e.target.value) : setOperatorId(e.target.value)} className="admin-select max-w-xs"><option value="">Operador…</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select>{currentList && <><button disabled={saving} onClick={createNextMonthList} className="btn-admin-ghost">Continuar siguiente mes</button><button disabled={saving} onClick={deleteCurrentList} className="btn-admin-ghost text-stop"><Trash2 size={14}/> Eliminar lista</button></>}
+        </div>
+      </div>
+
+      {currentList && (
+        <div className="admin-card p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div><span className="font-display font-bold">{route?.name || 'Ruta'}</span><span className="text-navy-400 ml-2">{currentList.startDate} → {currentList.endDate} · {currentList.dates?.length || 0} días</span></div>
+            <div className="flex gap-2 print:hidden"><button onClick={() => { const next = !showAddStudent; setShowAddStudent(next); resetAddFlow(false); }} className="btn-admin-primary"><Plus size={14}/> Agregar alumnos</button><button onClick={() => window.print()} className="btn-admin-ghost"><Printer size={14}/> Imprimir</button></div>
+          </div>
+          <div className="mt-3 p-2.5 rounded-lg bg-navy-50 border border-navy-100 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span><b>Unidad:</b> {unit?.plate || 'Sin unidad'}{unit?.model ? ` · ${unit.model}` : ''} · <b>Capacidad:</b> {unitCapacity > 0 ? `${unitCapacity} lugares` : 'No configurada'}</span>
+              {unitCapacity > 0 && <span className="text-navy-500">La disponibilidad se calcula por día y por turno: <b>E</b> entrada / <b>S</b> salida.</span>}
+            </div>
+            {unitCapacity > 0 && (currentList.dates || []).length > 0 && (() => {
+              const snap = capacitySnapshot(currentList.rows || [], currentList.dates || dates);
+              return <div className="flex flex-wrap gap-1.5 mt-2">{(currentList.dates || []).map((date) => {
+                const v = snap[date] || { entrada: 0, salida: 0 };
+                const full = v.entrada >= unitCapacity || v.salida >= unitCapacity;
+                return <button type="button" key={date} onClick={() => setSelectedDay(date)} className={`px-2 py-1 rounded border ${selectedDay === date ? 'ring-2 ring-navy-400 ' : ''}${full ? 'border-signal-yellow/60 bg-signal-yellow/15 font-semibold' : 'border-navy-200 bg-white'}`}>{capacityLabel(date, snap)}</button>;
+              })}</div>;
+            })()}
+          </div>
+          {selectedDay && (
+            <div className="mt-3 p-3 rounded-lg border border-navy-100 bg-white">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <b>Lista del día {dayHeader(selectedDay)}</b>
+                <button type="button" onClick={() => setSelectedDay(null)} className="btn-admin-ghost"><X size={13}/> Cerrar</button>
+              </div>
+              <div className="space-y-1">
+                {(currentList.rows || []).filter(row => {
+                  const d = row.days?.[selectedDay] || {};
+                  return d.entrada || d.salida;
+                }).map(row => {
+                  const d = row.days?.[selectedDay] || {};
+                  return <div key={row.studentId} className="flex items-center justify-between gap-2 py-1.5 border-b border-navy-50 text-xs">
+                    <span><b>{row.name}</b> · {row.matricula} · {d.entrada && d.salida ? 'Entrada + salida' : d.entrada ? 'Entrada' : 'Salida'}</span>
+                    <button type="button" onClick={() => editRow(row)} className="link-action">Editar alumno</button>
+                  </div>;
+                })}
+                {(currentList.rows || []).filter(row => { const d=row.days?.[selectedDay]||{}; return d.entrada||d.salida; }).length === 0 &&
+                  <p className="text-navy-400 py-2">No hay alumnos marcados para este día.</p>}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <span className="text-xs font-semibold text-navy-500">MOSTRAR:</span>
+            {[['todos','Todos'],['completo','Completos'],['medio_entrada','Medio entrada'],['medio_salida','Medio salida'],['diario','Diarios']].map(([key,label]) => {
+              const active = serviceFilters.includes(key);
+              return <button key={key} onClick={() => toggleServiceFilter(key)} className={`px-2.5 py-1.5 rounded-md text-xs border ${active ? 'bg-navy-800 text-white border-navy-800' : 'border-navy-200 text-navy-500'}`}>{label}</button>;
+            })}
+            <span className="text-[11px] text-navy-400">Puedes seleccionar Medio entrada, Medio salida o ambos.</span>
+          </div>
+        </div>
+      )}
+
+      {route && (!currentList || showAddStudent) && (
+        <div className="admin-card">
+          <div className="flex items-center gap-2 mb-3"><Search size={15}/><span className="font-display font-semibold">Agregar alumno a la ruta</span></div>
+          <form onSubmit={(e) => { e.preventDefault(); const found = allStudents.find((s) => String(s.matricula || '').toLowerCase() === matricula.trim().toLowerCase()) || searchResults[0]; if (found) selectLookupStudent(found); else setLookupError('No encontramos ese alumno en el padrón.'); }}>
+            <div className="flex gap-2"><input ref={inputRef} value={matricula} onChange={(e) => { setMatricula(e.target.value); setLookupError(''); }} placeholder="Matrícula o nombre…" className="admin-input flex-1"/><button className="btn-admin-primary"><Search size={14}/> Buscar</button></div>
+          </form>
+          {searchResults.length > 0 && !lookupStudent && <div className="mt-2 border border-navy-100 rounded-lg overflow-hidden">{searchResults.map((s) => <button type="button" key={s.id} onClick={() => selectLookupStudent(s)} className="w-full text-left px-3 py-2 hover:bg-navy-50 border-b border-navy-100"><b>{s.name}</b><span className="block text-xs text-navy-400">{s.matricula} · {schoolName(s.schoolId)}</span></button>)}</div>}
+        </div>
+      )}
+
+      {route && (lookupStudent || editingStudentId) && (
+        <Drawer open onClose={() => resetAddFlow()} classic size="lg" title={editingStudentId ? 'Editar alumno en la lista' : 'Agregar alumno a la ruta'} subtitle={`${lookupStudent?.name || ''} · ${lookupStudent?.matricula || ''}`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div><label className="admin-label">Tipo de servicio</label><select value={addForm.tipoServicio} onChange={(e) => setAddForm({ ...addForm, tipoServicio: e.target.value })} className="admin-select">{SERVICE_OPTIONS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select></div>
+            {addForm.tipoServicio !== 'completo' && <div><label className="admin-label">{addForm.tipoServicio === 'diario' ? 'Servicio del día' : 'Entrada o salida'}</label><select value={addForm.medioServicio} onChange={(e) => setAddForm({ ...addForm, medioServicio: e.target.value })} className="admin-select"><option value="entrada">Solo entrada</option><option value="salida">Solo salida</option>{addForm.tipoServicio === 'diario' && <option value="ambas">Entrada + salida</option>}</select></div>}
+          </div>
+          {addForm.tipoServicio === 'medio' && <div className="mt-3"><label className="admin-label">¿Qué días?</label><div className="flex gap-2">{DAY_META.map((d) => <label key={d.value} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.diasSemana.includes(d.value) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.diasSemana.includes(d.value)} onChange={() => toggleDiaSemana(d.value)}/>{d.short}</label>)}</div></div>}
+          {addForm.tipoServicio === 'diario' && <div className="mt-3"><label className="admin-label">¿Qué fechas?</label><div className="flex flex-wrap gap-1.5">{dates.map((date) => <label key={date} className={`inline-flex items-center gap-1 px-2 py-1.5 rounded border text-xs cursor-pointer ${addForm.fechasDiarias.includes(date) ? 'bg-signal-yellow/20 border-signal-yellow/60' : 'border-navy-200'}`}><input type="checkbox" checked={addForm.fechasDiarias.includes(date)} onChange={() => toggleFechaDiaria(date)}/>{dayHeader(date)}</label>)}</div></div>}
+          {(() => { const preview = buildStudentRow({ ...lookupStudent, ...addForm }, dates, concepts, route); return <div className="mt-3 p-3 rounded bg-navy-50 text-xs"><b>Concepto:</b> {preview.concept || 'No configurado'} · <b>Monto:</b> ${preview.estimatedAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })} · <b>Días:</b> {preview.daysCount}</div>; })()}
+          {lookupError && <p className="text-stop text-xs mt-3">{lookupError}</p>}
+          <div className="drawer-actions"><button disabled={saving} onClick={saveStudentToRoster} className="btn-admin-primary"><Save size={14}/>{editingStudentId ? 'Guardar cambios' : 'Agregar alumno'}</button><button onClick={resetAddFlow} className="btn-admin-ghost">Cancelar</button></div>
+        </Drawer>
+      )}
+
+      {currentList && (
+        <div className="admin-card p-0 overflow-hidden">
+          <div className="px-3 py-3 border-b border-navy-100 flex flex-wrap justify-between gap-2"><div><b>{route?.name || 'Ruta'}</b><span className="text-xs text-navy-400 ml-2">{list.length} alumnos visibles</span></div><div className="text-xs text-navy-500">Estimado: <b>${filteredTotal().toLocaleString('es-MX', { minimumFractionDigits: 2 })}</b></div></div>
+          {movingRowId && (
+            <Drawer open onClose={() => setMovingRowId(null)} classic size="md" title="Mover alumno a otra ruta" subtitle={currentList.rows.find((x) => x.studentId === movingRowId)?.name || ''}>
+              <div className="space-y-3">
+                <div><label className="admin-label">Ruta destino</label><select value={moveRouteId} onChange={(e) => setMoveRouteId(e.target.value)} className="admin-select"><option value="">Selecciona…</option>{routes.filter((r) => r.id !== currentList.routeId).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+                <div><label className="admin-label">Operador</label><select value={moveOperatorId} onChange={(e) => setMoveOperatorId(e.target.value)} className="admin-select"><option value="">Sin operador</option>{drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+              </div>
+              <div className="drawer-actions"><button onClick={() => moveStudent(currentList.rows.find((x) => x.studentId === movingRowId))} disabled={saving} className="btn-admin-primary">Mover alumno</button><button onClick={() => setMovingRowId(null)} className="btn-admin-ghost">Cancelar</button></div>
+            </Drawer>
+          )}
+          <div className="overflow-x-auto">
+            <table className="table-admin text-[11px] min-w-[850px]">
+              <thead><tr><th className="w-10">#</th><th>Alumno</th><th>Matrícula</th><th>Tipo</th>{currentList.dates?.map((date) => <th key={date} className="text-center w-10 px-1">{dayHeader(date)}</th>)}<th className="text-right">Monto</th><th>Pago</th><th className="print:hidden"></th></tr></thead>
+              <tbody>
+                {list.map((row, i) => {
+                  const both = hasBothSameDay(row);
+                  return <tr key={row.studentId} className={`${both ? 'bg-signal-yellow/15' : ''}`}>
+                    <td className="font-semibold">{i + 1}</td>
+                    <td className="whitespace-nowrap font-medium">{row.name}{both && <span className="badge-amber ml-1">E+S</span>}</td>
+                    <td className="whitespace-nowrap text-navy-500">{row.matricula}</td>
+                    <td className="whitespace-nowrap">{typeLabel(row)}</td>
+                    {currentList.dates?.map((date) => {
+                      const day = row.days?.[date] || {};
+                      const active = day.entrada || day.salida;
+                      return <td key={date} className="text-center px-1 align-middle">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <button type="button" title="Entrada" onClick={() => toggleDay(row.studentId, date, 'entrada')} className={`w-5 h-4 rounded border text-[8px] leading-none font-bold ${day.entrada ? 'bg-signal-yellow/45 border-signal-yellow/70 text-navy-900' : 'border-navy-200 text-navy-300'}`}>E</button>
+                          <button type="button" title="Salida" onClick={() => toggleDay(row.studentId, date, 'salida')} className={`w-5 h-4 rounded border text-[8px] leading-none font-bold ${day.salida ? 'bg-signal-yellow/45 border-signal-yellow/70 text-navy-900' : 'border-navy-200 text-navy-300'}`}>S</button>
+                        </div>
+                      </td>;
+                    })}
+                    <td className="text-right font-semibold whitespace-nowrap">${Number(row.estimatedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}{row.extraLegs > 0 && <span className="block text-[10px] font-normal text-amber-700">incl. {row.extraLegs} viaje(s) extra × ${Number(row.perDayAmount || 0)}</span>}</td>
+                    <td className="text-center"><input type="checkbox" checked={!!row.paid} onChange={() => togglePaid(row)} disabled={saving} className="w-3.5 h-3.5"/></td>
+                    <td className="print:hidden whitespace-nowrap"><span className="row-actions"><button title="Editar" onClick={() => editRow(row)} className="link-action" aria-label="Editar"><Pencil size={12}/></button><button title="Mover de ruta" onClick={() => { setMovingRowId(row.studentId); setMoveRouteId(''); setMoveOperatorId(currentList.operatorId || operatorId || ''); }} className="link-action text-xs">Mover</button><button title="Subir" onClick={() => moveRow(i, -1)} className="text-navy-400 hover:text-navy-800" aria-label="Subir"><ArrowUp size={11}/></button><button title="Bajar" onClick={() => moveRow(i, 1)} className="text-navy-400 hover:text-navy-800" aria-label="Bajar"><ArrowDown size={11}/></button><button title="Quitar de lista" onClick={() => removeRow(row)} className="text-stop" aria-label="Quitar de lista"><Trash2 size={12}/></button></span></td>
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-3 py-2 border-t border-navy-100 bg-navy-50/50 text-xs flex flex-wrap gap-4"><span><b>{list.length}</b> alumnos</span><span>E+S mismo día: <b>{list.filter(hasBothSameDay).length}</b></span><span>Estimado: <b>${filteredTotal().toLocaleString('es-MX')}</b></span></div>
+
+          <div className={`px-3 py-3 border-t ${
+            isListReviewed(currentList) ? 'bg-green-100 border-green-200' : 'bg-navy-50/50 border-navy-100'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold">
+                  Revisión administrativa de la lista
+                  {isListReviewed(currentList) && <span className="ml-2 text-green-800">✓ Lista revisada</span>}
+                </div>
+                {isListReviewed(currentList) ? (
+                  <div className="text-xs text-green-800 mt-0.5">
+                    Revisada por <b>{currentList.reviewedByName || '—'}</b>
+                    {currentList.reviewedAt ? ` · ${new Date(currentList.reviewedAt).toLocaleString('es-MX')}` : ''}
+                  </div>
+                ) : (
+                  <div className="text-xs text-navy-500 mt-0.5">
+                    Marca ambos controles cuando hayas terminado la revisión completa.
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!currentList.reviewedStudents}
+                    disabled={reviewSaving || saving}
+                    onChange={(e) => saveListReview('students', e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Alumnos revisados
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!currentList.reviewedPayments}
+                    disabled={reviewSaving || saving}
+                    onChange={(e) => saveListReview('payments', e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  Pagos revisados
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

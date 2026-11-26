@@ -1,0 +1,654 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Estilo Servicios IBIME (canales RGB para que Tailwind pueda aplicar opacidad) */
+  --c-navy-50: 238 242 245;  --c-navy-100: 220 227 232; --c-navy-200: 201 211 219;
+  --c-navy-300: 169 192 206; --c-navy-400: 102 115 129; --c-navy-500: 40 124 168;
+  --c-navy-600: 23 85 120;   --c-navy-700: 18 64 95;    --c-navy-800: 13 48 74;
+  --c-navy-900: 10 34 54;
+  --c-signal-yellow: 216 154 43; --c-signal-amber: 185 120 22; --c-signal-light: 251 242 223;
+  --c-go: 37 116 74;    --c-go-light: 234 246 239;
+  --c-stop: 214 45 37;  --c-stop-light: 253 238 237;
+  --c-wait: 102 115 129; --c-wait-light: 238 242 245;
+  --shadow-panel: 0 7px 20px rgba(16, 43, 62, 0.09);
+  --shadow-ticket: 0 2px 8px rgba(16, 43, 62, 0.05), 0 12px 30px rgba(16, 43, 62, 0.035);
+}
+
+/* ------------------------------------------------------------------ */
+/* Listas (Generar, Consultar, Modificar, Compartidos, Banco, Quitados): */
+/* conservan el diseño ORIGINAL de la app — paleta, tipografía, botones,  */
+/* tablas y badges de antes. Se activa con la clase .legacy-lists que     */
+/* AdminLayout pone en <main> solo en esas rutas.                         */
+/* ------------------------------------------------------------------ */
+.legacy-lists {
+  --c-navy-50: 238 241 246;  --c-navy-100: 213 220 232;
+  --c-navy-400: 58 82 122;   --c-navy-600: 34 49 79;
+  --c-navy-700: 26 37 64;    --c-navy-800: 21 34 56;   --c-navy-900: 14 22 38;
+  --c-signal-yellow: 255 201 60; --c-signal-amber: 242 169 59;
+  --c-go: 46 125 87;    --c-go-light: 230 244 236;
+  --c-stop: 194 76 62;  --c-stop-light: 251 234 231;
+  --c-wait: 138 147 166; --c-wait-light: 238 240 243;
+  --shadow-panel: 0 8px 24px -12px rgba(14, 22, 38, 0.35);
+  --shadow-ticket: 0 1px 0 rgba(14, 22, 38, 0.04), 0 12px 30px -16px rgba(14, 22, 38, 0.25);
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: rgb(var(--c-navy-50));
+  color: rgb(var(--c-navy-800));
+}
+.legacy-lists h1, .legacy-lists h2, .legacy-lists h3, .legacy-lists .font-display {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  letter-spacing: normal;
+}
+.legacy-lists .admin-h1 {
+  position: relative; padding-left: 0.75rem;
+  font-size: 1.25rem; line-height: 1.75rem; font-weight: 700; letter-spacing: -0.025em;
+}
+.legacy-lists .admin-h1::before {
+  content: ''; position: absolute; left: 0; top: 0.15em; bottom: 0.15em; width: 4px; border-radius: 2px;
+  background: linear-gradient(180deg, #FFC93C 0%, #F2A93B 100%);
+}
+@media (max-width: 640px) { .legacy-lists .admin-h1 { font-size: 1.125rem; } }
+.legacy-lists .admin-card { border-radius: 0.5rem; }
+.legacy-lists .admin-label { font-weight: 500; }
+.legacy-lists .admin-input, .legacy-lists .admin-select { border-radius: 0.375rem; border-color: rgb(var(--c-navy-100)); }
+.legacy-lists .admin-input:hover, .legacy-lists .admin-select:hover { border-color: rgb(var(--c-navy-100)); }
+.legacy-lists .admin-input:focus, .legacy-lists .admin-select:focus {
+  border-color: rgb(var(--c-navy-600));
+  --tw-ring-color: rgb(var(--c-signal-yellow) / 0.4);
+}
+.legacy-lists .btn-admin { border-radius: 0.375rem; font-weight: 600; }
+.legacy-lists .btn-admin:hover { --tw-translate-y: 0px; }
+.legacy-lists .btn-admin-primary { background-color: rgb(var(--c-navy-800)); box-shadow: none; }
+.legacy-lists .btn-admin-primary:hover { background-color: rgb(var(--c-navy-700)); box-shadow: none; }
+.legacy-lists .btn-admin-ghost { background-color: transparent; border-color: rgb(var(--c-navy-100)); color: rgb(var(--c-navy-600)); }
+.legacy-lists .btn-admin-ghost:hover { border-color: rgb(var(--c-navy-400)); background-color: rgb(var(--c-navy-50)); }
+.legacy-lists .table-admin thead th {
+  text-transform: none; font-weight: 600; letter-spacing: 0.025em; border-bottom-width: 2px;
+}
+.legacy-lists .table-admin tbody tr:hover { background-color: rgb(var(--c-navy-50) / 0.7); }
+.legacy-lists .badge, .legacy-lists .badge-go, .legacy-lists .badge-stop, .legacy-lists .badge-amber {
+  border-radius: 0.375rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 0.75rem; font-weight: 600;
+}
+.legacy-lists :focus-visible { outline: 3px solid #FFC93C; outline-offset: 2px; }
+
+html, body, #root {
+  height: 100%;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  @apply font-body bg-paper antialiased;
+  color: #17212b;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3 {
+  @apply font-display;
+  letter-spacing: -0.025em;
+}
+
+/* Botones grandes pensados para usarse con el vehículo detenido, con el pulgar */
+.btn-huge {
+  @apply w-full flex items-center justify-center gap-3 rounded-xl px-6 py-6 text-xl font-display font-bold shadow-panel active:scale-[0.98] transition-transform select-none;
+  min-height: 84px;
+}
+
+.btn-primary {
+  @apply btn-huge bg-navy-800 text-white;
+}
+
+.btn-go {
+  @apply btn-huge bg-go text-white;
+}
+
+.btn-stop {
+  @apply btn-huge bg-stop text-white;
+}
+
+.btn-signal {
+  @apply btn-huge bg-signal-yellow text-navy-900;
+}
+
+.card {
+  @apply bg-white rounded-xl border border-navy-100 shadow-ticket p-4;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel administrativo: densidad compacta, pensado para escritorio    */
+/* pero responsivo. Deliberadamente MÁS COMPACTO que los .btn-huge/    */
+/* .card de arriba, que son para la app del operador en el celular.      */
+/*                                                                      */
+/* Lenguaje visual: "bitácora de despacho" — bordes finos tipo         */
+/* ticket/manifiesto en vez de sombra difusa gris de tarjeta de SaaS;  */
+/* un acento de color a la izquierda que se usa como luz de estado     */
+/* real, no como decoración.                                           */
+/* ------------------------------------------------------------------ */
+.admin-h1 {
+  @apply text-xl sm:text-2xl font-display font-bold text-navy-900;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.admin-card {
+  @apply relative bg-white rounded-xl border border-navy-100 p-5 shadow-ticket;
+}
+
+.admin-label {
+  @apply block text-xs font-semibold text-navy-400 mb-1;
+}
+
+.admin-input {
+  @apply w-full h-10 rounded-lg border border-navy-200 bg-white px-3 text-sm text-navy-800 placeholder:text-navy-400 hover:border-navy-300 focus:outline-none focus:border-signal-yellow focus:ring-2 focus:ring-signal-yellow/20 transition-shadow;
+}
+
+.admin-select {
+  @apply admin-input pr-8;
+}
+
+.btn-admin {
+  @apply inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg text-sm font-bold transition-all whitespace-nowrap hover:-translate-y-px active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0;
+}
+
+.btn-admin-primary {
+  @apply btn-admin bg-navy-700 text-white shadow-[0_2px_6px_rgba(18,64,95,0.16)] hover:bg-navy-900 hover:shadow-[0_5px_12px_rgba(18,64,95,0.18)];
+}
+
+.btn-admin-ghost {
+  @apply btn-admin border border-navy-200 bg-white text-navy-800 hover:border-signal-yellow hover:bg-signal-light;
+}
+
+.link-action {
+  @apply text-xs font-medium text-navy-600 underline decoration-navy-100 underline-offset-2 hover:decoration-navy-600;
+}
+
+.link-danger {
+  @apply text-xs font-medium text-stop underline decoration-stop/40 underline-offset-2 hover:decoration-stop;
+}
+
+.table-admin {
+  @apply w-full text-sm border-collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-admin thead th {
+  @apply text-left text-[0.7rem] font-bold uppercase text-navy-400 pb-2 pr-3 border-b border-navy-100 tracking-wider;
+}
+
+.table-admin tbody tr {
+  @apply border-b border-navy-50 hover:bg-navy-50/60 transition-colors;
+}
+
+.table-admin td {
+  @apply py-2.5 pr-3 align-middle;
+}
+
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-[0.7rem] font-bold bg-navy-50 text-navy-600 border border-navy-100;
+}
+
+.badge-go {
+  @apply badge bg-go-light text-go border-go/20;
+}
+
+.badge-stop {
+  @apply badge bg-stop-light text-stop border-stop/20;
+}
+
+.badge-amber {
+  @apply badge bg-signal-amber/15 text-signal-amber border-signal-amber/25;
+}
+
+/* Boleto de acceso (login): borde perforado como un pase de abordar,     */
+/* en vez de la tarjeta centrada genérica.                                */
+.ticket-card {
+  @apply relative bg-white rounded-2xl p-6 shadow-ticket;
+  --perf: 14px;
+  --gap: 10px;
+  -webkit-mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
+  mask-image: radial-gradient(circle var(--gap) at var(--perf) 0, transparent 0, transparent var(--gap), black calc(var(--gap) + 0.5px));
+}
+
+/* Login: tarjeta limpia sobre degradado azul marino (igual que Servicios IBIME) */
+.login-page {
+  background: linear-gradient(145deg, #0a2236, #12405f);
+}
+
+.login-card {
+  @apply relative bg-white rounded-xl p-7 border border-white/10;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
+}
+
+/* Marca de agua del escudo IBIME — de fondo, sutil, en las pantallas
+   principales (admin, operador, login). Se pone en el contenedor raíz
+   de cada layout, nunca sobre texto encima sin un fondo sólido debajo. */
+.ibime-watermark {
+  background-image: url('/escudo-ibime-watermark.png');
+  background-repeat: no-repeat;
+  background-position: bottom -60px right -60px;
+  background-size: 420px;
+}
+@media (max-width: 640px) {
+  .ibime-watermark {
+    background-position: bottom -40px right -80px;
+    background-size: 260px;
+  }
+}
+@media print {
+  .ibime-watermark { background-image: none; }
+}
+
+/* Impresión: boleto de Caja, mapa de referencia del operador y resumen
+   del recorrido. Al imprimir, solo se ve el bloque marcado como
+   imprimible — todo lo demás de la app (menú, botones, overlays) se
+   oculta, para que el papel salga limpio. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .ticket-print, .ticket-print *,
+  .route-print, .route-print *,
+  .summary-print, .summary-print *,
+  .roster-print, .roster-print * {
+    visibility: visible;
+  }
+  .ticket-print {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    max-width: 380px;
+    height: fit-content;
+  }
+  .route-print, .summary-print, .roster-print {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}
+
+/* Enfoque visible para accesibilidad de teclado */
+:focus-visible {
+  outline: 3px solid rgba(216, 154, 43, 0.55);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Loader de marca: el escudo IBIME "rellenándose" de color           */
+/* ------------------------------------------------------------------ */
+.ibime-loader {
+  position: relative;
+  width: 64px;
+  height: 64px;
+}
+
+.ibime-loader::before,
+.ibime-loader::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: url('/ibime-shield.png');
+  mask-image: url('/ibime-shield.png');
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+/* silueta base, tenue, siempre visible */
+.ibime-loader::before {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* capa que se va "llenando" de abajo hacia arriba, en bucle */
+.ibime-loader::after {
+  background: linear-gradient(180deg, #d89a2b 0%, #d62d25 100%);
+  animation: ibime-fill 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes ibime-fill {
+  0% { clip-path: inset(100% 0 0 0); }
+  50% { clip-path: inset(0% 0 0 0); }
+  100% { clip-path: inset(100% 0 0 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ibime-loader::after { animation: none; clip-path: inset(20% 0 0 0); }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Entradas "en cascada": listas, tarjetas y filas de tabla           */
+/* ------------------------------------------------------------------ */
+@keyframes cascade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cascade-item {
+  opacity: 0;
+  animation: cascade-in 0.35s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cascade-item { opacity: 1; animation: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Menú superior: cascada ligera                                      */
+/* ------------------------------------------------------------------ */
+@keyframes nav-cascade-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nav-cascade {
+  opacity: 0;
+  animation: nav-cascade-in 0.22s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-cascade { opacity: 1; animation: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ajustes responsivos del panel (cajones, tablas, formularios)       */
+/* ------------------------------------------------------------------ */
+/* Las tablas anchas se desplazan dentro de su tarjeta, nunca rompen la página */
+.admin-card { min-width: 0; }
+.table-scroll { @apply w-full overflow-x-auto; -webkit-overflow-scrolling: touch; }
+
+/* En celular los campos miden 16px para que iOS no haga zoom al enfocar,
+   y los botones tienen área táctil cómoda. */
+@media (max-width: 640px) {
+  .admin-input, .admin-select, select.admin-input, textarea.admin-input { font-size: 16px; }
+  .btn-admin { min-height: 44px; }
+  .admin-card { @apply p-4; }
+  .admin-h1 { @apply text-lg; }
+}
+
+/* Barra de desplazamiento discreta en el contenido principal */
+main { scrollbar-width: thin; scrollbar-color: #c9d3db transparent; }
+
+/* ------------------------------------------------------------------ */
+/*  Vista general (Resumen) y portal del operador                      */
+/* ------------------------------------------------------------------ */
+.hero-panel {
+  @apply relative overflow-hidden rounded-xl bg-navy-800 text-white p-5 sm:p-7;
+  background-image:
+    radial-gradient(circle at 100% 0%, rgba(216, 154, 43, 0.22), transparent 45%),
+    linear-gradient(135deg, #0a2236 0%, #12405f 100%);
+}
+
+.stat-tile {
+  @apply admin-card flex items-start gap-3 hover:border-navy-400 hover:shadow-panel transition-all;
+}
+
+.stat-icon {
+  @apply w-10 h-10 rounded-lg flex items-center justify-center shrink-0;
+}
+
+@media print {
+  header, .no-print { display: none !important; }
+}
+
+
+/* Leaflet usa z-index internos de hasta 1000 (paneles y controles +/-).
+   Sin aislar el mapa en su propio contexto de apilamiento, esos valores
+   compiten con el menú superior (z-40) y el mapa se pinta por encima de
+   los menús desplegables. Con z-index: 0 todo lo del mapa queda "encerrado"
+   dentro del contenedor. */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+/* ------------------------------------------------------------------ */
+/* Marcador del transporte en el mapa: anillo suave que late alrededor  */
+/* mientras el recorrido está en curso.                                */
+/* ------------------------------------------------------------------ */
+.bus-marker {
+  position: relative;
+  width: 58px;
+  height: 36px;
+}
+.bus-marker-pulse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 9999px;
+  background: rgba(216, 154, 43, 0.45);
+  animation: busPulse 2.4s ease-out infinite;
+}
+@keyframes busPulse {
+  0% { transform: scale(0.55); opacity: 0.9; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bus-marker-pulse { animation: none; opacity: 0.35; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Panel lateral derecho (Drawer): crear / editar sin salir de la lista */
+/* ------------------------------------------------------------------ */
+.drawer-root { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: flex-end; }
+.drawer-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(10, 34, 54, 0.42);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  animation: drawer-fade 0.18s ease-out both;
+}
+.drawer-panel {
+  position: relative; display: flex; flex-direction: column;
+  width: 100%; max-width: 100%; height: 100%;
+  background: #fff; color: #17212b;
+  box-shadow: -18px 0 50px rgba(10, 34, 54, 0.22);
+  animation: drawer-slide 0.22s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+.drawer-panel.legacy-lists { background-color: #fff; }
+@media (min-width: 641px) {
+  .drawer-md { width: 440px; }
+  .drawer-lg { width: 560px; }
+  .drawer-xl { width: 720px; }
+}
+.drawer-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.25rem; border-bottom: 1px solid rgb(var(--c-navy-100));
+  background: #fff; flex-shrink: 0;
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+.drawer-title { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; color: rgb(var(--c-navy-900)); line-height: 1.3; }
+.drawer-subtitle { font-size: 0.78rem; color: rgb(var(--c-navy-400)); margin-top: 0.15rem; }
+.drawer-close {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 8px; color: rgb(var(--c-navy-400));
+  border: 1px solid rgb(var(--c-navy-100)); background: #fff;
+}
+.drawer-close:hover { color: rgb(var(--c-navy-900)); border-color: rgb(var(--c-signal-yellow)); background: rgb(var(--c-signal-light)); }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 1.25rem 1.25rem 0; -webkit-overflow-scrolling: touch; }
+/* Botones Guardar / Cancelar: pegados abajo mientras el formulario se desplaza */
+.drawer-actions {
+  position: sticky; bottom: 0; z-index: 1;
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+  margin: 1.25rem -1.25rem 0; padding: 0.75rem 1.25rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: #fff; border-top: 1px solid rgb(var(--c-navy-100));
+}
+.drawer-body > form, .drawer-body > div > form { padding-bottom: 0; }
+@keyframes drawer-slide { from { transform: translateX(32px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes drawer-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer-panel, .drawer-backdrop { animation: none; } }
+
+/* Barra de título de página con acción principal a la derecha ("Nuevo …") */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.page-head > :first-child { min-width: 0; }
+.page-head h1 { margin-bottom: 0 !important; }
+
+/* ------------------------------------------------------------------ */
+/*  Iconos que no se encimen                                            */
+/* ------------------------------------------------------------------ */
+/* Lupa dentro de un campo de búsqueda: `.admin-input` define su propio padding y le ganaba a
+   `pl-8` / `pl-9`, por eso la lupa quedaba encima del texto. Aquí el espacio para el icono se
+   garantiza siempre que un icono absoluto precede al campo. */
+.relative > svg[class*='absolute'][class*='left-'] ~ input,
+.relative > svg[class*='absolute'][class*='left-'] ~ select {
+  padding-left: 2.25rem;
+}
+/* Iconos dentro de botones y enlaces: nunca se aplastan ni se montan sobre el texto */
+.btn-admin svg, .btn-huge svg, .link-action svg, .link-danger svg, .badge svg { flex-shrink: 0; }
+/* Columna de acciones de las tablas: iconos en fila, con aire y sin saltar de renglón */
+.table-admin td.actions-cell, .table-admin td:last-child .row-actions { white-space: nowrap; }
+.row-actions { display: inline-flex; align-items: center; gap: 0.625rem; }
+
+/* Formularios dentro del cajón: columnas que caben, campos a todo el ancho */
+.drawer-body .grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.drawer-body [class*='col-span-'] { grid-column: 1 / -1; }
+.drawer-body .admin-input, .drawer-body .admin-select { width: 100%; max-width: none; }
+@media (max-width: 480px) { .drawer-body .grid { grid-template-columns: minmax(0, 1fr) !important; } }
+.page-head p { margin-bottom: 0 !important; }
+
+/* Iconos de acción en fila: área táctil cómoda y nunca montados */
+.row-actions > button, .row-actions > a {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; padding: 4px; border-radius: 6px; margin: 0 !important;
+}
+.row-actions > button:hover, .row-actions > a:hover { background: rgb(var(--c-navy-50)); }
+
+/* ------------------------------------------------------------------ */
+/*  KPIs de personal: animaciones de gráficas y paneles                  */
+/* ------------------------------------------------------------------ */
+@keyframes kpi-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.kpi-grow { animation: kpi-grow 0.6s cubic-bezier(.2,.8,.2,1) both; transform-box: view-box; }
+@keyframes kpi-draw { from { stroke-dasharray: 0 100; } }
+.kpi-draw { animation: kpi-draw 0.9s ease-out both; }
+@keyframes kpi-fade { from { opacity: 0; } to { opacity: 1; } }
+.kpi-fade { animation: kpi-fade 0.6s ease-out 0.3s both; }
+@keyframes kpi-slide-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
+.kpi-slide-in { animation: kpi-slide-in 0.45s cubic-bezier(.2,.8,.2,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .kpi-grow, .kpi-draw, .kpi-fade, .kpi-slide-in { animation: none; }
+}
+@keyframes kpi-hgrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.kpi-hgrow { transform-origin: left center; animation: kpi-hgrow 0.7s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes kpi-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.kpi-line { stroke-dasharray: 1; animation: kpi-line 1s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .kpi-hgrow, .kpi-line { animation: none; } }
+
+/* ------------------------------------------------------------------ */
+/*  Panel admin — "cristal" sobre azul marino                          */
+/*                                                                      */
+/*  Solo lo usan AdminLayout y el Resumen. Son clases NUEVAS: no       */
+/*  tocan .admin-card, .btn-admin, .hero-panel ni .stat-tile, que       */
+/*  comparten la vista del operador/chofer y la del padre de familia.   */
+/*  Los colores salen de la misma paleta (navy, signal, route, go/stop).*/
+/* ------------------------------------------------------------------ */
+.admin-shell {
+  position: relative;
+  isolation: isolate;
+  background: rgb(var(--c-navy-900));
+  color: #fff;
+}
+/* Manchas de luz difuminadas detrás del cristal */
+.admin-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(560px 560px at 100% -4%, rgb(var(--c-signal-yellow) / 0.34), transparent 62%),
+    radial-gradient(620px 620px at -6% 78%, rgb(var(--c-navy-500) / 0.5), transparent 64%),
+    radial-gradient(520px 520px at 104% 104%, rgb(30 158 150 / 0.34), transparent 62%),
+    radial-gradient(380px 380px at 52% 108%, rgb(124 111 224 / 0.16), transparent 62%);
+}
+
+.side-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.5rem;
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: 0 24px 50px -28px rgba(0, 0, 0, 0.7);
+}
+.side-panel-solid { background: rgb(var(--c-navy-800) / 0.96); }
+.drawer-in { animation: drawer-in-left 0.22s cubic-bezier(0.22, 0.8, 0.3, 1) both; }
+@keyframes drawer-in-left { from { transform: translateX(-24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer-in { animation: none; } }
+
+/* Hoja clara donde viven los demás módulos (conservan sus tarjetas blancas) */
+.content-sheet {
+  background-color: rgb(246 247 249);
+  color: #17212b;
+  border-radius: 1.5rem;
+  box-shadow: 0 24px 50px -28px rgba(0, 0, 0, 0.7);
+}
+.content-sheet.legacy-lists { background-color: rgb(var(--c-navy-50)); color: rgb(var(--c-navy-800)); }
+
+/* Barras de desplazamiento discretas sobre fondo oscuro */
+.side-scroll, .dash-main { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+
+/* Tarjeta de cristal del Resumen */
+.glass {
+  position: relative;
+  min-width: 0;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 1.5rem;
+  padding: 1.25rem;
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 18px 40px -26px rgba(0, 0, 0, 0.65);
+}
+a.glass, button.glass { transition: border-color 0.15s, background-color 0.15s, transform 0.15s; }
+a.glass:hover, button.glass:hover { border-color: rgb(var(--c-signal-yellow) / 0.55); }
+.glass-title { font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 0.95rem; font-weight: 600; color: #fff; letter-spacing: -0.01em; }
+.glass-sub { font-size: 0.75rem; color: rgb(var(--c-navy-300)); margin-top: 0.1rem; }
+.glass-link { font-size: 0.75rem; font-weight: 600; color: rgb(var(--c-signal-yellow)); }
+.glass-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.glass-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.55rem 0.65rem; border-radius: 0.75rem;
+  font-size: 0.85rem; color: rgb(var(--c-navy-100));
+  transition: background-color 0.15s, color 0.15s;
+}
+.glass-row:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.glass-pill {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.15rem 0.55rem; border-radius: 9999px;
+  font-size: 0.68rem; font-weight: 700;
+  background: rgba(255, 255, 255, 0.08); color: rgb(var(--c-navy-100)); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.glass-pill-go { background: rgb(var(--c-go) / 0.22); color: #7fe0ae; border-color: rgb(var(--c-go) / 0.4); }
+.glass-pill-amber { background: rgb(var(--c-signal-yellow) / 0.2); color: rgb(var(--c-signal-yellow)); border-color: rgb(var(--c-signal-yellow) / 0.4); }
+.glass-pill-stop { background: rgb(var(--c-stop) / 0.22); color: #ff9a94; border-color: rgb(var(--c-stop) / 0.4); }
+.btn-glass-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  height: 2.5rem; padding: 0 1rem; border-radius: 9999px; white-space: nowrap;
+  font-size: 0.85rem; font-weight: 700; color: rgb(var(--c-navy-900)); background: rgb(var(--c-signal-yellow));
+  box-shadow: 0 10px 24px -10px rgb(var(--c-signal-yellow) / 0.7); transition: transform 0.15s, background-color 0.15s;
+}
+.btn-glass-primary:hover { background: rgb(var(--c-signal-amber)); transform: translateY(-1px); }
+.btn-glass {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  height: 2.5rem; padding: 0 1rem; border-radius: 9999px; white-space: nowrap;
+  font-size: 0.85rem; font-weight: 600; color: #fff; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: background-color 0.15s;
+}
+.btn-glass:hover { background: rgba(255, 255, 255, 0.14); }
+.glass .ring-track { stroke: rgba(255, 255, 255, 0.1); }
+
+/* Pantallas "ajustadas a la ventana": el encabezado y los filtros se quedan fijos y
+   solo se desplazan sus columnas (cada una con su propio overflow). En pantallas
+   chicas vuelven a fluir normal con el scroll de la página. 4.5rem = margen del
+   marco (1.5rem) + relleno de la hoja (3rem) en AdminLayout. */
+@media (min-width: 1024px) {
+  .page-fit { height: calc(100dvh - 4.5rem); min-height: 520px; }
+}
