@@ -27,6 +27,8 @@ import Planeacion from './pages/admin/Planeacion';
 import RecorridoReal from './pages/admin/RecorridoReal';
 import SpecialTripsAdmin from './pages/admin/SpecialTrips';
 import Talleres from './pages/admin/Talleres';
+import CalendarioEscolar from './pages/admin/CalendarioEscolar';
+import CoberturaRutas from './pages/admin/CoberturaRutas';
 import HistorialUnidad from './pages/admin/HistorialUnidad';
 import AgendaAdmin from './pages/admin/Agenda';
 import DriverSpecialTrips from './pages/driver/SpecialTrips';
@@ -108,6 +110,8 @@ export default function App() {
         <Route path="recorrido-real" element={<RecorridoReal />} />
         <Route path="viajes-especiales" element={<SpecialTripsAdmin />} />
         <Route path="talleres" element={<Talleres />} />
+        <Route path="calendario" element={<CalendarioEscolar />} />
+        <Route path="cobertura" element={<CoberturaRutas />} />
         <Route path="agenda" element={<AgendaAdmin />} />
         <Route path="avisos" element={<AvisosAdmin />} />
         <Route path="avisos-familias" element={<AvisosFamilias />} />

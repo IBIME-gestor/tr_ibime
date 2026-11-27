@@ -179,7 +179,7 @@ export default function TripRunner() {
   const [kmFinalInput, setKmFinalInput] = useState('');
   const [kmError, setKmError] = useState('');
   const [startingTrip, setStartingTrip] = useState(false);
-  const [units, setUnits] = useState([]); // solo en rutas de taller: el operador elige la unidad
+  const [units, setUnits] = useState([]); // el operador puede cambiar la unidad de hoy
   const [unitIdInput, setUnitIdInput] = useState('');
   const [finishing, setFinishing] = useState(false);
 
@@ -445,9 +445,10 @@ export default function TripRunner() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [trackingActive]);
 
-  // En rutas de taller el operador elige la unidad que toma ese día.
+  // En TODAS las rutas se propone la unidad asignada, pero el operador puede cambiarla
+  // si hoy lleva otra (así los km se cargan a la unidad correcta). En talleres la elige él.
   useEffect(() => {
-    if (route?.kind !== 'taller') return;
+    if (!route?.id) return;
     Units.list()
       .then((rows) => { setUnits(rows || []); setUnitIdInput((cur) => cur || route.unitId || ''); })
       .catch((err) => console.error('No se pudieron cargar las unidades:', err));
@@ -462,7 +463,7 @@ export default function TripRunner() {
       const startLoc = (await getCurrentLocation({ timeout: 6000 })) || myLocation;
       const isTaller = route.kind === 'taller';
       if (isTaller && !unitIdInput) throw new Error('Elige la unidad que vas a usar.');
-      let opts = isTaller ? { unitId: unitIdInput } : {};
+      let opts = unitIdInput ? { unitId: unitIdInput } : {};
       if (isNanny) opts = { ...opts, byNanny: true, byName: profile?.name || '' };
       const startingGroup = !isTaller && groupStartRoutes.length >= 2;
       let t = null;
@@ -889,21 +890,29 @@ export default function TripRunner() {
               : 'Antes de ver a tus alumnos, registra el kilometraje inicial del vehículo.'}
         </p>
         <form onSubmit={handleStartTrip} className="space-y-3">
-          {route.kind === 'taller' && (
+          <div>
+            <label className="block text-xs font-semibold text-navy-500 mb-1">
+              {route.kind === 'taller' ? '¿Qué unidad vas a usar?' : 'Unidad de hoy'}
+            </label>
             <select
               value={unitIdInput}
               onChange={(e) => setUnitIdInput(e.target.value)}
               className="w-full rounded-xl border border-navy-100 px-3 py-3 text-base bg-white"
-              required
+              required={route.kind === 'taller'}
             >
-              <option value="">¿Qué unidad vas a usar?</option>
+              {(route.kind === 'taller' || !route.unitId) && <option value="">{route.kind === 'taller' ? 'Selecciona…' : 'Sin unidad asignada'}</option>}
               {units.map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.plate}{u.model ? ` — ${u.model}` : ''}{u.capacity ? ` (${u.capacity} lugares)` : ''}
+                  {u.plate}{u.model ? ` — ${u.model}` : ''}{u.capacity ? ` (${u.capacity} lugares)` : ''}{u.id === route.unitId ? ' · asignada' : ''}
                 </option>
               ))}
             </select>
-          )}
+            {route.unitId && unitIdInput && unitIdInput !== route.unitId && (
+              <p className="text-[11px] text-amber-700 mt-1">
+                Llevas una unidad distinta a la asignada: los km de este recorrido se cargarán a {units.find((u) => u.id === unitIdInput)?.plate || 'esa unidad'}.
+              </p>
+            )}
+          </div>
           <input
             value={kmInicialInput}
             onChange={(e) => setKmInicialInput(e.target.value)}

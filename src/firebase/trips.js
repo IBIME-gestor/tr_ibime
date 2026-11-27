@@ -20,6 +20,8 @@ import {
 import { db } from './config';
 import { getOne } from './db';
 import { Routes, Students, RouteLists } from './services';
+import { getCalendarDay, studentAttends } from './schoolCalendar';
+import { getCoverageFor } from './coverages';
 import { optimizeStopOrder } from '../utils/routeOptimizer';
 import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActualOrder } from '../utils/tripOrder';
 
@@ -210,9 +212,16 @@ function baseStudentApplies(student, dateStr, shift) {
 /* ------------------------------------------------------------------ */
 const dowOf = (dateStr) => new Date(`${dateStr}T12:00:00`).getDay();
 
-/** ¿El alumno tiene taller ese día de la semana? */
+/**
+ * ¿El alumno tiene taller en esa fecha?
+ *  · Fijo (por defecto): se repite todas las semanas en los días de `tallerDias`
+ *    (1 = lunes … 5 = viernes).
+ *  · Esporádico (`tallerModo: 'esporadico'`): solo en las fechas exactas de
+ *    `tallerFechas` (AAAA-MM-DD); nunca se repite solo.
+ */
 export function tallerDayApplies(student, dateStr) {
   if (!student?.tallerRouteId) return false;
+  if (student.tallerModo === 'esporadico') return (student.tallerFechas || []).includes(dateStr);
   return (student.tallerDias || []).map(Number).includes(dowOf(dateStr));
 }
 
@@ -298,18 +307,21 @@ async function fetchStudentsByIds(ids) {
  * Devuelve { students, listRows (studentId → fila) | null, listId }.
  */
 export async function loadRoster(route, date, driverId = '') {
+  // Calendario escolar: los alumnos de niveles sin labores ese día ni aparecen en la lista.
+  const calendarDay = await getCalendarDay(date);
+  const attending = (rows) => rows.filter((s) => studentAttends(s, calendarDay));
   if (route.kind === 'taller') {
-    return { students: await Students.listByTallerRoute(route.id), listRows: null, listId: '' };
+    return { students: attending(await Students.listByTallerRoute(route.id)), listRows: null, listId: '', calendarDay };
   }
   const lists = await RouteLists.listByRoute(route.id);
   const list = pickListForDate(lists, date, driverId || route.driverId || '');
   if (!list) {
-    return { students: await Students.listByRoute(route.id), listRows: null, listId: '' };
+    return { students: attending(await Students.listByRoute(route.id)), listRows: null, listId: '', calendarDay };
   }
   const listRows = {};
   (list.rows || []).forEach((r) => { if (r.studentId) listRows[r.studentId] = r; });
-  const students = await fetchStudentsByIds(Object.keys(listRows));
-  return { students, listRows, listId: list.id };
+  const students = attending(await fetchStudentsByIds(Object.keys(listRows)));
+  return { students, listRows, listId: list.id, calendarDay };
 }
 
 export function subscribeTodayTrip(routeId, shift, callback, onError) {
@@ -358,9 +370,22 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
     return { id: tripRef.id, ...existing.data() };
   }
 
+  // Cobertura de un día: si otro operador cubre este turno, solo él puede iniciarlo;
+  // y quien no es el operador de la ruta necesita que esté cubriéndola.
+  if (!opts.byNanny) {
+    const cover = await getCoverageFor(route.id, date, shift);
+    if (cover && cover.driverId !== driverId) {
+      throw new Error(`Hoy este turno lo cubre ${cover.driverName || 'otro operador'}.`);
+    }
+    if (!cover && route.driverId && driverId !== route.driverId) {
+      throw new Error('Esta ruta no está asignada a ti hoy. Si vas a cubrirla, pide a Dirección que te la asigne por hoy.');
+    }
+  }
+
   const isTaller = route.kind === 'taller';
   const chosenUnitId = opts.unitId || '';
   const unitId = chosenUnitId || route.unitId || '';
+  const changedUnit = !!chosenUnitId && chosenUnitId !== (route.unitId || '');
   if (isTaller && !unitId) {
     throw new Error('Elige la unidad que vas a usar en este recorrido de taller.');
   }
@@ -373,6 +398,9 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
   // Solo entran a la lista de hoy los alumnos que la lista del periodo marca
   // para este turno y esta fecha (o, sin lista, su servicio/calendario).
   const students = allStudents.filter((s) => studentAppliesToday(s, date, shift, route, roster.listRows));
+  if (roster.calendarDay && students.length === 0) {
+    throw new Error(`Hoy no hay alumnos con labores en esta ruta${roster.calendarDay.reason ? ` (${roster.calendarDay.reason})` : ''}. Es día inhábil para sus niveles.`);
+  }
 
   // Validaciones de la unidad (odómetro y capacidad).
   let kmAlert = null;
@@ -392,7 +420,7 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
       }
     }
     const capacity = Number(unitDoc?.capacity || 0);
-    if ((isTaller || chosenUnitId) && capacity > 0 && students.length > capacity && !opts.ignoreCapacity) {
+    if ((isTaller || changedUnit) && capacity > 0 && students.length > capacity && !opts.ignoreCapacity) {
       const err = new Error(`La unidad ${unitDoc?.plate || ''} tiene ${capacity} lugares y hoy van ${students.length} alumnos.`);
       err.code = 'CAPACITY';
       throw err;

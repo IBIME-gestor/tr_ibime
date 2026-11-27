@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw, Truck, Users, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Drivers, Routes, Units } from '../../firebase/services';
+import { listCalendar, closedDates } from '../../firebase/schoolCalendar';
 import { listTripsBetween, getTripStopsOnce, adminReassignTrips, KM_GAP_ALERT } from '../../firebase/trips';
 import { listStaffLogRange } from '../../firebase/staffLogs';
 import { KpiIndicators, listEvidenceBetween } from '../../firebase/kpiTasks';
@@ -156,8 +157,12 @@ export default function KpisPersonal() {
     if (!from || !to || from > to) return undefined;
     let active = true;
     setLoading(true); setError('');
-    listTripsBetween(from, to)
-      .then((rows) => { if (active) setTrips(rows); })
+    // Los días sin labores para todos (Calendario escolar) no cuentan en los KPIs.
+    Promise.all([listTripsBetween(from, to), listCalendar(from, to).catch(() => [])])
+      .then(([rows, cal]) => {
+        const closed = closedDates(cal);
+        if (active) setTrips(closed.size ? rows.filter((t) => !closed.has(t.date)) : rows);
+      })
       .catch((e) => { console.error(e); if (active) { setTrips([]); setError('No se pudieron cargar los recorridos.'); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -318,7 +323,9 @@ export default function KpisPersonal() {
   const staffInfo = useMemo(() => (selected ? staffSummary(staff, selected.name, role) : null), [selected, staff, role]);
 
   return (
-    <div className="space-y-4">
+    <div className="page-fit flex flex-col gap-4">
+      {/* Parte fija: título, filtros y resumen. Solo las tarjetas / el detalle se desplazan. */}
+      <div className="shrink-0 space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="admin-h1">KPIs de operadores y nannies</h1>
@@ -385,13 +392,14 @@ export default function KpisPersonal() {
       {!loading && !people.length && !error && (
         <div className="admin-card text-sm text-navy-500">No hay {role === 'nanny' ? 'nannies' : 'operadores'} en el catálogo ni recorridos en este periodo.</div>
       )}
+      </div>
 
-      {/* Tarjetas + detalle */}
-      <div className={selected ? 'flex flex-col lg:flex-row gap-4 items-start' : ''}>
+      {/* Tarjetas + detalle: cada columna se desplaza por su cuenta (en escritorio) */}
+      <div className={`flex-1 min-h-0 ${selected ? 'flex flex-col lg:flex-row gap-4 lg:overflow-hidden' : 'lg:overflow-y-auto lg:pr-1'}`}>
         <div
           className={selected
-            ? 'w-full lg:w-[300px] shrink-0 flex flex-col gap-2 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1'
-            : 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'}
+            ? 'w-full lg:w-[300px] shrink-0 flex flex-col gap-2 lg:overflow-y-auto lg:min-h-0 lg:pr-1'
+            : 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 content-start'}
         >
           {ordered.map((p, i) => (
             <PersonCard
@@ -427,10 +435,12 @@ export default function KpisPersonal() {
         )}
       </div>
 
-      <p className="text-[11px] text-navy-400">
+      {!selected && (
+      <p className="shrink-0 text-[11px] text-navy-400">
         Notas: la duración se compara contra el promedio de la misma ruta y turno entre todos los recorridos del periodo (se excluyen cierres hechos por Dirección y duraciones menores a 3 min o mayores a 6 h).
         Los avisos solo cuentan los que no se limpiaron al resolverse. La bitácora se relaciona por nombre exacto con Nómina.
       </p>
+      )}
     </div>
   );
 }
@@ -582,7 +592,7 @@ function Detail({ person, role, detail, staffInfo, from, to, routesById, unitsBy
   const loadingNote = detail.loading ? <p className="text-xs text-navy-400">Cargando paradas…</p> : <p className="text-xs text-navy-400">Sin datos de paradas en el periodo.</p>;
 
   return (
-    <div className="flex-1 min-w-0 w-full space-y-4 kpi-slide-in">
+    <div className="flex-1 min-w-0 w-full space-y-4 kpi-slide-in lg:overflow-y-auto lg:min-h-0 lg:pr-1">
       <div className="admin-card !p-4 flex flex-wrap items-center gap-4" style={{ borderTop: `4px solid ${color}` }}>
         <ScoreRing score={k.score} color={color} size={84} stroke={8} />
         <div className="min-w-0 flex-1">

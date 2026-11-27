@@ -644,3 +644,11 @@ a.glass:hover, button.glass:hover { border-color: rgb(var(--c-signal-yellow) / 0
 }
 .btn-glass:hover { background: rgba(255, 255, 255, 0.14); }
 .glass .ring-track { stroke: rgba(255, 255, 255, 0.1); }
+
+/* Pantallas "ajustadas a la ventana": el encabezado y los filtros se quedan fijos y
+   solo se desplazan sus columnas (cada una con su propio overflow). En pantallas
+   chicas vuelven a fluir normal con el scroll de la página. 4.5rem = margen del
+   marco (1.5rem) + relleno de la hoja (3rem) en AdminLayout. */
+@media (min-width: 1024px) {
+  .page-fit { height: calc(100dvh - 4.5rem); min-height: 520px; }
+}

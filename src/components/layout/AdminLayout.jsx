@@ -38,6 +38,8 @@ import {
   MessageSquare,
   TrendingUp,
   Camera,
+  CalendarX2,
+  Repeat,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import useAgendaAlerts from '../../hooks/useAgendaAlerts';
@@ -76,6 +78,8 @@ const groups = [
       { to: '/admin/planeacion', label: 'Planeación en mapa', icon: MapIcon, roles: A },
       { to: '/admin/talleres', label: 'Talleres (17:30)', icon: MapIcon, roles: A },
       { to: '/admin/viajes-especiales', label: 'Viajes especiales', icon: MapIcon, roles: A },
+      { to: '/admin/calendario', label: 'Calendario escolar', icon: CalendarX2, roles: A },
+      { to: '/admin/cobertura', label: 'Cobertura de rutas', icon: Repeat, roles: A },
     ],
   },
   {

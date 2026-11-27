@@ -66,8 +66,14 @@ const defaultShift = () => autoShift() || (new Date().getHours() < 12 ? 'morning
 // Si hoy el alumno va a taller (salida de las 17:30), su recorrido de la tarde es el del taller.
 function routeForShift(kid, shift) {
   if (!kid) return '';
-  const hoy = new Date().getDay();
-  if (shift === 'afternoon' && kid.tallerRouteId && (kid.tallerDias || []).map(Number).includes(hoy)) return kid.tallerRouteId;
+  const now = new Date();
+  const hoy = now.getDay();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  // Taller fijo: por día de la semana. Taller esporádico: solo en sus fechas exactas.
+  const tallerHoy = kid.tallerModo === 'esporadico'
+    ? (kid.tallerFechas || []).includes(iso)
+    : (kid.tallerDias || []).map(Number).includes(hoy);
+  if (shift === 'afternoon' && kid.tallerRouteId && tallerHoy) return kid.tallerRouteId;
   return kid.routeId || '';
 }
 

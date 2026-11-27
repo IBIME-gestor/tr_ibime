@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import { Sun, Sunset, History, Users, ChevronDown, ChevronRight, Clock, MapPin, Layers } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes, Students, Schools, Units } from '../../firebase/services';
+import { listCoveragesByDate, SHIFT_LABEL as COVER_LABEL } from '../../firebase/coverages';
 import {
   studentAppliesToday,
   loadRoster,
@@ -694,7 +695,27 @@ export default function RouteHome() {
           profile.role === 'nanny' ? listTripsByNanny(profile.staffId) : listTripsByDriver(profile.staffId),
         ]);
         if (cancelled) return;
-        setRoutesState(mine);
+        // Cobertura de un día: ¿cubro hoy la ruta de alguien? ¿cubren hoy la mía?
+        let visible = mine;
+        if (profile.role !== 'nanny') {
+          const covers = await listCoveragesByDate(todayString());
+          const extra = [];
+          for (const c of covers.filter((x) => x.driverId === profile.staffId && !mine.some((r) => r.id === x.routeId))) {
+            const r = await Routes.get(c.routeId);
+            if (r) extra.push({ ...r, _coverNote: `Hoy cubres esta ruta (${(COVER_LABEL[c.shift] || '').toLowerCase()}).` });
+          }
+          visible = mine
+            .filter((r) => !covers.some((c) => c.routeId === r.id && c.driverId !== profile.staffId && c.shift === 'both'))
+            .map((r) => {
+              const others = covers.filter((c) => c.routeId === r.id && c.driverId !== profile.staffId);
+              return others.length
+                ? { ...r, _coverNote: others.map((c) => `${COVER_LABEL[c.shift]}: lo cubre ${c.driverName || 'otro operador'}`).join(' · ') }
+                : r;
+            })
+            .concat(extra);
+        }
+        if (cancelled) return;
+        setRoutesState(visible);
         setSchoolsById(Object.fromEntries(schools.map((s) => [s.id, s])));
         setUnitsById(Object.fromEntries(units.map((u) => [u.id, u])));
         setAllTrips(trips);
@@ -766,8 +787,11 @@ export default function RouteHome() {
       {profile?.role === 'driver' && <GroupStartPanel routes={routes} now={now} navigate={navigate} />}
 
       {routes.map((route, i) => (
+        <div key={route.id} className="space-y-2">
+        {route._coverNote && (
+          <p className="rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-3 py-2">🔁 {route._coverNote}</p>
+        )}
         <RouteCard
-          key={route.id}
           route={route}
           now={now}
           navigate={navigate}
@@ -777,6 +801,7 @@ export default function RouteHome() {
           index={i}
           defaultOpen={routes.length === 1}
         />
+        </div>
       ))}
 
       <button

@@ -3,8 +3,9 @@ import { Search, Plus, ArrowUp, ArrowDown, Trash2, Printer, Pencil, Save, X, Ref
 import { useAuth } from '../../context/AuthContext';
 import Drawer from '../../components/Drawer';
 import { Students, Routes, Schools, Drivers, Units, PricingConcepts, RouteLists, FinanceRecords } from '../../firebase/services';
-import { tallerDatesFor } from '../../firebase/trips';
+import { tallerDatesFor, tallerDayApplies } from '../../firebase/trips';
 import { recordMonth, nextMonthRangeOf } from '../../utils/dates';
+import { syncStudentTaller } from '../../utils/tallerSync';
 
 export const SERVICE_OPTIONS = [
   { key: 'completo', label: 'Completo — entrada y salida' },
@@ -133,8 +134,27 @@ function buildDays(student, dates) {
   return { days, selectedCount };
 }
 
+/**
+ * Lista de una ruta NORMAL: los días en que el alumno va a taller su salida de las
+ * 17:30 se mueve al taller, así que se desmarca aquí (`tallerMoved` recuerda que
+ * fue por el taller, para poder devolverla si se quita o se cambia el taller).
+ * El cobro se calcula con los días SIN mover: el taller no cambia lo que paga.
+ */
+export function applyTallerToDays(student, days) {
+  const out = {};
+  Object.entries(days || {}).forEach(([date, d]) => {
+    const original = d?.tallerMoved ? { ...d, salida: true } : d;
+    const moved = tallerDayApplies(student, date) && original.salida;
+    const { tallerMoved: _drop, ...rest } = original;
+    out[date] = moved ? { ...rest, salida: false, tallerMoved: true } : rest;
+  });
+  return out;
+}
+
 export function buildStudentRow(student, dates, concepts, route) {
-  const { days, selectedCount } = buildDays(student, dates);
+  const { days: rawDays, selectedCount } = buildDays(student, dates);
+  // Cobro con los días originales; la lista muestra la salida movida al taller.
+  const days = route?.kind === 'taller' ? rawDays : applyTallerToDays(student, rawDays);
   let conceptKey = 'completo';
   if (student.tipoServicio === 'medio') conceptKey = student.medioServicio === 'salida' ? 'medio_salida' : 'medio_entrada';
   if (student.tipoServicio === 'diario') conceptKey = 'por_dia';
@@ -150,11 +170,11 @@ export function buildStudentRow(student, dates, concepts, route) {
     // Medio conserva siempre la cuota configurada para el servicio medio,
     // aunque se utilice solo un día de la semana o todos. Si algún día va redondo
     // (o usa la otra pierna), ese viaje adicional se suma a tarifa por día.
-    estimatedAmount = baseAmount + medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, days).extraLegs * perDayAmount;
+    estimatedAmount = baseAmount + medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, rawDays).extraLegs * perDayAmount;
   } else {
     // Diario cobra la tarifa diaria de la ruta por cada tramo marcado:
     // Entrada = 1, Salida = 1, Entrada + Salida = 2.
-    estimatedAmount = Object.values(days).reduce(
+    estimatedAmount = Object.values(rawDays).reduce(
       (sum, day) => sum + (day.entrada ? 1 : 0) + (day.salida ? 1 : 0), 0
     ) * baseAmount;
   }
@@ -175,7 +195,7 @@ export function buildStudentRow(student, dates, concepts, route) {
     baseAmount,
     perDayAmount,
     ...(student.tipoServicio === 'medio' ? (() => {
-      const { extraLegs } = medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, days);
+      const { extraLegs } = medioExtras({ medioServicio: student.medioServicio, diasSemana: student.diasSemana }, rawDays);
       return { extraLegs, extraAmount: Number((extraLegs * perDayAmount).toFixed(2)) };
     })() : {}),
     daysCount: selectedCount,
@@ -479,7 +499,11 @@ export default function RouteBuilder() {
       ? addForm.diasSemana.map(Number).filter((d) => d >= 1 && d <= 5)
       : (lookupStudent.tallerRouteId === route.id && lookupStudent.tallerDias?.length
         ? lookupStudent.tallerDias.map(Number) : [1, 2, 3, 4, 5]);
-    const data = { tallerRouteId: route.id, tallerDias: days };
+    // Un alumno de taller esporádico conserva sus fechas; solo el fijo se guarda por días.
+    const keepSporadic = lookupStudent.tallerRouteId === route.id && lookupStudent.tallerModo === 'esporadico';
+    const data = keepSporadic
+      ? { tallerRouteId: route.id }
+      : { tallerRouteId: route.id, tallerModo: 'fijo', tallerDias: days, tallerFechas: [] };
     setSaving(true);
     try {
       await Students.update(lookupStudent.id, data);
@@ -506,6 +530,8 @@ export default function RouteBuilder() {
           window.alert(`${lookupStudent.name} ya tiene registro en una ruta normal: su salida de las 17:30 se movió al taller y NO genera cobro extra, por eso no lleva fila en esta lista. Ya aparece en el módulo Talleres y en el viaje del operador de taller.`);
         }
       }
+      // También la lista de su ruta normal: su salida de esos días se mueve al taller.
+      try { await syncStudentTaller(refreshed); } catch (e) { console.error('syncStudentTaller', e); }
       resetAddFlow();
     } catch (err) {
       console.error(err);
@@ -907,9 +933,11 @@ export default function RouteBuilder() {
       `¿Quitarlo también del taller?\n\nAceptar: ${row.name} ya no aparecerá en el viaje de este taller.\nCancelar: solo se quita de esta lista de cobro.`
     );
     if (!alsoOperator) return;
-    const patch = { tallerRouteId: '', tallerDias: [] };
+    const patch = { tallerRouteId: '', tallerModo: 'fijo', tallerDias: [], tallerFechas: [] };
     await Students.update(student.id, patch);
     setAllStudents((prev) => prev.map((x) => (x.id === student.id ? { ...x, ...patch } : x)));
+    // Su salida normal vuelve a su lista de ruta.
+    try { await syncStudentTaller({ ...student, ...patch }); } catch (e) { console.error('syncStudentTaller', e); }
   }
 
   async function moveStudent(row) {
