@@ -164,6 +164,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Calendario escolar: días sin labores (todos o por nivel). Lo edita Dirección.
+    match /schoolCalendar/{date} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Cobertura de un viaje: otro operador toma una ruta solo ese día/turno.
+    match /tripCoverages/{id} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /routeLists/{id} {
       allow read: if isStaff();
       allow write: if isAdmin();
@@ -196,8 +208,10 @@ service cloud.firestore {
 
     match /routes/{id} {
       allow read: if isStaff();
+      // Cualquier operador puede guardar el orden de paradas / tiempos de una ruta, porque
+      // un operador que cubre la ruta por un día (ver tripCoverages) también cierra su recorrido.
       allow update: if isAdmin() ||
-        ((isDriver() && resource.data.driverId == myStaffId()) ||
+        (isDriver() ||
          (isNanny() && resource.data.nannyId == myStaffId())) &&
           request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['studentOrderMorning', 'studentOrderAfternoon',
