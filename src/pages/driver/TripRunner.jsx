@@ -3,12 +3,16 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { RefreshCw, Search, UserPlus, ListOrdered, CheckCircle2, Undo2 } from 'lucide-react';
+import { RefreshCw, Search, UserPlus, ListOrdered, CheckCircle2, Undo2, MapPin, Navigation, AlertTriangle, ChevronDown, CalendarX2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes as RoutesService, Students, Units } from '../../firebase/services';
 import {
   subscribeTodayTrip,
   subscribeTripById,
+  loadRoster,
+  rosterApplies,
+  inhabilInfo,
+  todayString,
   startTripGroup,
   completeTripGroup,
   startTrip,
@@ -55,7 +59,6 @@ import {
 } from '../../utils/tripOrder';
 import StopCard from '../../components/StopCard';
 import LoadingOverlay from '../../components/LoadingOverlay';
-import { cascadeStyle } from '../../utils/cascade';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -137,6 +140,43 @@ const SHIFT_CONFIG = {
   },
 };
 
+const CHIP = {
+  pending: ['Pendiente', 'bg-navy-50 text-navy-500'],
+  boarded: ['A bordo', 'bg-signal-yellow/30 text-navy-800'],
+  delivered: ['Completado', 'bg-go-light text-go'],
+  absent: ['No asistió', 'bg-wait-light text-navy-500'],
+};
+
+/** Renglón compacto de un alumno (una sola línea): reemplaza a las tarjetas grandes en listas largas. */
+function StopRow({ number, stop, routeLabel, onClick, action }) {
+  const [label, tone] = CHIP[stop.status] || CHIP.pending;
+  const body = (
+    <>
+      <span className="w-6 h-6 rounded-full bg-navy-800 text-white text-[11px] font-display font-bold flex items-center justify-center shrink-0">
+        {number || '–'}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-navy-900 truncate">{stop.name}</span>
+        <span className="block text-[11px] text-navy-400 truncate">
+          {routeLabel ? `${routeLabel} · ` : ''}Matrícula {stop.matricula}{stop.sporadic ? ' · Esporádico' : ''}
+        </span>
+      </span>
+    </>
+  );
+  return (
+    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${stop.status === 'delivered' ? 'border-go/30 bg-go-light/40' : 'border-navy-100 bg-white'}`}>
+      {onClick ? (
+        <button type="button" onClick={onClick} className="flex-1 min-w-0 flex items-center gap-2 text-left">{body}</button>
+      ) : (
+        <div className="flex-1 min-w-0 flex items-center gap-2">{body}</div>
+      )}
+      <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 shrink-0 ${tone}`}>{label}</span>
+      {action}
+      {onClick && <ChevronDown size={14} className="text-navy-300 shrink-0" />}
+    </div>
+  );
+}
+
 export default function TripRunner() {
   const { routeId, shift } = useParams();
   const [searchParams] = useSearchParams();
@@ -184,13 +224,18 @@ export default function TripRunner() {
   const [finishing, setFinishing] = useState(false);
 
   // Aviso de incidente (tráfico, accidente, retraso, otro)
-  const [alertOpen, setAlertOpen] = useState(false);
   const [alertType, setAlertType] = useState('traffic');
   const [alertMessage, setAlertMessage] = useState('');
   const [sendingAlert, setSendingAlert] = useState(false);
 
   const lastSentAtRef = useRef(0);
-  const [showMap, setShowMap] = useState(false);
+  // Un solo panel abierto a la vez (mapa, aviso o buscador): así la pantalla no se alarga.
+  const [panel, setPanel] = useState(null); // null | 'map' | 'alert' | 'search'
+  const [openStopId, setOpenStopId] = useState(null); // alumno con la tarjeta de acciones abierta
+  const [showServed, setShowServed] = useState(false); // lista de ya atendidos
+  const [showWaiting, setShowWaiting] = useState(false); // lista de alumnos en fases masivas
+  const [inhabil, setInhabil] = useState(null); // { reason } si hoy esta ruta no tiene alumnos que atender
+  const [rosterChecked, setRosterChecked] = useState(false);
   const [myLocation, setMyLocation] = useState(null);
   const [gpsError, setGpsError] = useState(false);
   const [signalGap, setSignalGap] = useState(null); // { minutes } cuando la pantalla estuvo apagada
@@ -213,6 +258,20 @@ export default function TripRunner() {
         const r = await RoutesService.get(routeId);
         if (cancelled) return;
         setRoute(r);
+
+        // Día inhábil: si el calendario escolar (o los «no irá» de la cobertura) dejó sin alumnos
+        // este turno, la ruta se bloquea: no se pide km inicial ni final.
+        if (groupParam.length < 2) {
+          try {
+            const date = todayString();
+            const roster = await loadRoster(r, date, r.driverId || '');
+            const n = roster.students.filter((st) => rosterApplies(st, date, shift, r, roster)).length;
+            if (!cancelled) setInhabil(inhabilInfo(roster, shift, n));
+          } catch (err) {
+            console.error('No se pudo revisar si la ruta es inhábil:', err);
+          }
+        }
+        if (!cancelled) setRosterChecked(true);
 
         // Destinos para el botón "Navegar" y teléfonos para "Llamar": primero
         // la última ubicación real capturada en un recorrido previo de esta
@@ -241,7 +300,7 @@ export default function TripRunner() {
         // recorrido…" para siempre, porque `route` nunca se llegaba a
         // asignar y no había forma de saber qué pasó.
         console.error('TripRunner init error:', err);
-        if (!cancelled) setLoadError(err.message || 'No se pudo cargar la ruta. Revisa tu conexión e intenta de nuevo.');
+        if (!cancelled) { setRosterChecked(true); setLoadError(err.message || 'No se pudo cargar la ruta. Revisa tu conexión e intenta de nuevo.'); }
       }
     }
     init();
@@ -498,7 +557,7 @@ export default function TripRunner() {
     // En salida combinada el aviso llega a los padres de todas las rutas (si alguna no se puede, se omite).
     await Promise.all(allTrips.map((t) => setTripAlert(t.id, alertType, alertMessage).catch(() => null)));
     setSendingAlert(false);
-    setAlertOpen(false);
+    setPanel(null);
     setAlertMessage('');
   }
 
@@ -841,8 +900,28 @@ export default function TripRunner() {
     );
   }
 
-  if (!tripLoaded || !route) {
+  if (!tripLoaded || !route || (!trip && !rosterChecked)) {
     return <LoadingOverlay show label="Preparando recorrido…" />;
+  }
+
+  // Ruta inhábil: no hay nada que iniciar, así que ni siquiera se muestra el kilometraje inicial.
+  if (!trip && inhabil && groupParam.length < 2) {
+    return (
+      <div className="card text-center mt-10 cascade-item">
+        <CalendarX2 size={34} className="mx-auto mb-2 text-navy-400" />
+        <p className="font-display font-semibold text-lg mb-1">Ruta inhábil</p>
+        <p className="text-navy-600 text-sm">
+          Hoy no tienes alumnos que realizar en esta ruta.
+        </p>
+        {inhabil.reason && <p className="text-navy-400 text-xs mt-1">Motivo: {inhabil.reason}</p>}
+        <p className="text-navy-400 text-xs mt-3">
+          {route.name} · {config.title}. No necesitas registrar kilometraje.
+        </p>
+        <button type="button" onClick={() => navigate('/chofer')} className="btn-admin-primary mx-auto mt-4">
+          Volver al inicio
+        </button>
+      </div>
+    );
   }
 
   // --------------------------------------------------------------
@@ -935,15 +1014,89 @@ export default function TripRunner() {
     ? stops.length > 0 && stops.every((s) => s.status !== 'pending')
     : pendingBoarding.length === 0 && stops.length > 0;
 
+  const showMap = panel === 'map';
+  const alertOpen = panel === 'alert';
+  const togglePanel = (name) => setPanel((cur) => (cur === name ? null : name));
+
+  // Fases del recorrido (mismas reglas de siempre, solo reorganizadas):
+  //  · ida: se recoge uno por uno (tarjetas) y al final «Llegamos al plantel» (masivo);
+  //  · vuelta: «Todos abordaron» (masivo) y luego se baja uno por uno (tarjetas).
+  const individualBoard = !config.boardedBulk && !boardingPhaseDone;
+  const individualDeliver = !config.deliveredBulk && boardingPhaseDone && !allResolved;
+  const bulkBoard = config.boardedBulk && !boardingPhaseDone;
+  const bulkDeliver = config.deliveredBulk && boardingPhaseDone && !allResolved;
+  const actionList = individualBoard
+    ? applyRecalcOrder(pendingBoarding)
+    : individualDeliver
+    ? applyRecalcOrder(boardedWaitingDelivery)
+    : [];
+  const actionLabel = individualBoard ? config.boardAction : config.deliverAction;
+  const onStopAction = individualBoard ? handleIndividualBoard : handleIndividualDeliver;
+  const effOpenId = actionList.some((st) => st.id === openStopId) ? openStopId : actionList[0]?.id;
+
+  // Ya atendidos (con su número real) y, en las fases masivas, los que faltan: renglones compactos.
+  const servedStops = orderedAll.filter(
+    (st) => st.status === 'delivered' || st.status === 'absent' || (shift === 'morning' && st.status === 'boarded')
+  );
+  const waitingStops = orderedAll.filter((st) => !servedStops.includes(st));
+  const deliveredCount = stops.filter((s) => s.status === 'delivered').length;
+  const absentCount = stops.filter((s) => s.status === 'absent').length;
+  const progress = stops.length ? Math.round(((deliveredCount + absentCount) / stops.length) * 100) : 0;
+
+  const removeBtn = (stop) =>
+    stop.status === 'pending' && !allResolved ? (
+      <button
+        type="button"
+        onClick={() => handleRemoveFromToday(stop)}
+        disabled={busy}
+        className="text-[11px] font-semibold text-stop underline underline-offset-2 shrink-0"
+      >
+        Quitar
+      </button>
+    ) : null;
+  const undoBtn = (stop) =>
+    stop.status !== 'pending' && trip.status === 'in_progress' ? (
+      <button
+        type="button"
+        onClick={() => handleUndo(stop)}
+        disabled={busy}
+        className="text-[11px] font-semibold text-navy-600 underline underline-offset-2 inline-flex items-center gap-1 shrink-0"
+      >
+        <Undo2 size={11} /> Deshacer
+      </button>
+    ) : null;
+
+  const toolBtn = (name, Icon, label, extra = '') => (
+    <button
+      type="button"
+      onClick={() => togglePanel(name)}
+      className={`flex flex-col items-center justify-center gap-0.5 rounded-xl border py-2 text-[11px] font-semibold ${
+        panel === name ? 'bg-navy-800 text-white border-navy-800' : 'bg-white text-navy-600 border-navy-100'
+      } ${extra}`}
+    >
+      <Icon size={16} /> {label}
+    </button>
+  );
+
   return (
-    <div className="space-y-4 pb-10">
+    <div className="space-y-3 pb-10">
       <LoadingOverlay show={busy} label="Guardando…" />
       <LoadingOverlay show={finishing} label="Cerrando recorrido…" />
+
+      {/* Encabezado compacto: turno, avance y barra de progreso */}
       <div className="cascade-item">
-        <p className="text-navy-400 text-sm">{config.title}</p>
-        <h1 className="text-xl font-display font-bold text-navy-900">
-          {stops.filter((s) => s.status === 'delivered').length} / {stops.length} completados
-        </h1>
+        <div className="flex items-end justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-navy-400 text-xs truncate">{config.title}{route?.name ? ` · ${route.name}` : ''}</p>
+            <h1 className="text-lg font-display font-bold text-navy-900 leading-tight">
+              {deliveredCount} / {stops.length} completados
+            </h1>
+          </div>
+          {absentCount > 0 && <span className="text-xs text-navy-400 shrink-0">{absentCount} no asistió</span>}
+        </div>
+        <div className="h-1.5 rounded-full bg-navy-100 overflow-hidden mt-1.5">
+          <div className="h-full rounded-full bg-go transition-all" style={{ width: `${progress}%` }} />
+        </div>
       </div>
 
       {trip.startedByRole === 'nanny' && (
@@ -980,49 +1133,38 @@ export default function TripRunner() {
               </button>
             </div>
           )}
-          <p className={`text-xs rounded-lg px-3 py-2 ${wakeLock.held ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
+          <p className={`text-[11px] rounded-lg px-2.5 py-1.5 ${wakeLock.held ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
             {wakeLock.held
-              ? '📍 Ubicación en vivo · la pantalla se mantiene encendida. No cambies de app.'
-              : wakeLock.supported
-              ? '📍 Mantén esta pantalla abierta y no la bloquees: si se apaga, se corta tu ubicación en vivo.'
-              : '📍 Mantén esta pantalla abierta y desactiva el bloqueo automático del teléfono: si se apaga, se corta tu ubicación en vivo.'}
-            {' '}Si abres Google Maps, regresa a esta pantalla.
+              ? '📍 Ubicación en vivo · no cambies de app.'
+              : '📍 Mantén esta pantalla abierta y sin bloquear: si se apaga, se corta tu ubicación en vivo.'}
           </p>
         </div>
       )}
 
-      {/* Mapa de la ruta: vista rápida adentro de la app + un botón para
-          abrir la ruta completa (todas las paradas que faltan, en orden)
-          en Google Maps, para navegación real con tráfico en vivo y
-          recálculo automático — eso Google ya lo hace muy bien, no hace
-          falta reinventarlo aquí. */}
-      <div className="flex gap-2 cascade-item">
-        <button
-          type="button"
-          onClick={() => setShowMap((v) => !v)}
-          className="btn-admin-ghost text-xs flex-1 justify-center"
-        >
-          {showMap ? 'Ocultar mapa' : '🗺️ Ver mapa de la ruta'}
-        </button>
+      {/* Barra de herramientas: un solo panel abierto a la vez para que la pantalla no se alargue. */}
+      <div className={`grid gap-2 cascade-item ${allResolved ? 'grid-cols-3' : 'grid-cols-4'}`}>
+        {toolBtn('map', MapPin, 'Mapa')}
         {fullRouteUrl ? (
           <a
             href={fullRouteUrl}
             target="_blank"
             rel="noreferrer"
-            className="btn-admin-ghost text-xs flex-1 justify-center text-center"
+            className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-navy-100 bg-white text-navy-600 py-2 text-[11px] font-semibold"
           >
-            🧭 Abrir ruta completa
+            <Navigation size={16} /> Ruta
           </a>
         ) : (
           <button
             type="button"
             disabled
             title="Aún no hay ubicaciones exactas capturadas para esta ruta"
-            className="btn-admin-ghost text-xs flex-1 justify-center opacity-40 cursor-not-allowed"
+            className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-navy-100 bg-white text-navy-600 py-2 text-[11px] font-semibold opacity-40"
           >
-            🧭 Ruta completa (sin ubicaciones aún)
+            <Navigation size={16} /> Ruta
           </button>
         )}
+        {toolBtn('alert', AlertTriangle, trip.alert ? 'Aviso activo' : 'Avisar', trip.alert ? 'border-signal-yellow' : '')}
+        {!allResolved && toolBtn('search', Search, 'Buscar')}
       </div>
 
       {showMap && (
@@ -1096,9 +1238,7 @@ export default function TripRunner() {
         </p>
       )}
 
-      {/* Aviso de incidente en ruta: lo ve el padre de familia en vivo en
-          /seguimiento. Disponible tanto para el operador como para la nanny. */}
-      {trip.alert ? (
+      {trip.alert && (
         <div className="rounded-xl border-2 border-signal-yellow bg-signal-yellow/15 p-3 flex items-start justify-between gap-3">
           <div>
             <p className="font-display font-semibold text-sm text-navy-800">
@@ -1113,15 +1253,7 @@ export default function TripRunner() {
             Quitar
           </button>
         </div>
-      ) : (
-        <button
-          onClick={() => setAlertOpen((v) => !v)}
-          className="text-sm px-3 py-2 rounded-xl border border-navy-100 text-navy-600"
-        >
-          ⚠️ Reportar tráfico, accidente o retraso
-        </button>
       )}
-
       {alertOpen && !trip.alert && (
         <form onSubmit={handleSendAlert} className="card space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -1147,7 +1279,7 @@ export default function TripRunner() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setAlertOpen(false)}
+              onClick={() => setPanel(null)}
               className="flex-1 py-2 rounded-xl border border-navy-100 text-sm"
             >
               Cancelar
@@ -1163,12 +1295,7 @@ export default function TripRunner() {
         </form>
       )}
 
-      {/* Buscar alumno por nombre, apellido o matrícula — útil el primer día o
-          para altas de último momento, en cualquier turno (ida o vuelta)
-          mientras el recorrido no esté totalmente resuelto. Quien no estaba
-          en la lista se agrega al recorrido y queda en el banco de alumnos
-          por asignar (ver Operación > Banco por asignar). */}
-      {!allResolved && (
+      {panel === 'search' && !allResolved && (
         <div className="card">
           <p className="font-medium text-sm text-navy-600 mb-2">
             ¿No aparece el alumno? Búscalo por nombre, apellido o matrícula
@@ -1270,8 +1397,12 @@ export default function TripRunner() {
         </div>
       )}
 
-      {/* Propuesta de orden: cómo se fue atendiendo el último recorrido.
-          Va ANTES de "Recalcular orden" (que reordena por cercanía). */}
+      {bankNotice && panel !== 'search' && (
+        <p className="text-sm rounded-lg bg-go-light text-go px-3 py-2 flex items-start gap-2">
+          <CheckCircle2 size={16} className="shrink-0 mt-0.5" /> {bankNotice}
+        </p>
+      )}
+
       {!allResolved && reference && remainingSorted.length > 1 && (
         proposalDiffers && !proposalDismissed ? (
           <div className="rounded-2xl border-2 border-signal-yellow bg-signal-yellow/15 p-4 cascade-item">
@@ -1326,69 +1457,17 @@ export default function TripRunner() {
               </button>
             </div>
           </div>
-        ) : (
-          !proposalDiffers && (
-            <p className="text-xs text-navy-500 flex items-start gap-1.5 cascade-item">
-              <CheckCircle2 size={14} className="text-go shrink-0 mt-px" />
-              La lista de hoy ya va en el orden en que los fuiste {actionVerb(shift)} el{' '}
-              {fmtLongDate(reference.trip.date)}.
-            </p>
-          )
-        )
+        ) : null
       )}
 
-      {/* Fase de abordaje */}
-      {!boardingPhaseDone && (
-        <div>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <p className="text-sm font-medium text-navy-600">{config.boardPhaseTitle}</p>
-            {!config.boardedBulk && pendingBoarding.length > 1 && (
-              <div className="flex items-center gap-3 shrink-0">
-                {recalcOrder && (
-                  <button onClick={() => setRecalcOrder(null)} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
-                    <Undo2 size={12} /> Orden de la lista
-                  </button>
-                )}
-                <button onClick={handleRecalculate} disabled={recalculating} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
-                  <RefreshCw size={12} className={recalculating ? 'animate-spin' : ''} /> Recalcular orden
-                </button>
-              </div>
-            )}
-          </div>
-          {config.boardedBulk ? (
-            <button onClick={handleBulkBoard} disabled={busy} className="btn-signal mb-4">
-              {config.bulkBoardLabel}
-            </button>
-          ) : (
-            applyRecalcOrder(pendingBoarding).map((stop, i) => (
-              <StopCard
-                routeLabel={routeLabelOf(stop)}
-                key={stop.id}
-                stop={stop}
-                number={doneCount + i + 1}
-                actionLabel={config.boardAction}
-                onAction={handleIndividualBoard}
-                onMarkAbsent={handleAbsent}
-                onArrive={handleArrive}
-                disabled={busy}
-                nav={navUrls(destinations[stop.studentId])}
-                phone={phones[stop.studentId]}
-                className="cascade-item"
-                style={cascadeStyle(i, 40)}
-              />
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Fase de entrega */}
-      {boardingPhaseDone && !allResolved && (
+      {/* Qué sigue: fase de abordaje / entrega */}
+      {(individualBoard || individualDeliver || bulkBoard || bulkDeliver) && (
         <div>
           <div className="flex items-center justify-between gap-2 mb-2">
             <p className="text-sm font-medium text-navy-600">
-              {config.deliverPhaseTitle || 'Ve marcando a cada alumno'}
+              {individualBoard || bulkBoard ? config.boardPhaseTitle : config.deliverPhaseTitle || 'Ve marcando a cada alumno'}
             </p>
-            {!config.deliveredBulk && boardedWaitingDelivery.length > 1 && (
+            {(individualBoard || individualDeliver) && actionList.length > 1 && (
               <div className="flex items-center gap-3 shrink-0">
                 {recalcOrder && (
                   <button onClick={() => setRecalcOrder(null)} className="flex items-center gap-1 text-xs font-medium text-navy-500 underline">
@@ -1401,70 +1480,100 @@ export default function TripRunner() {
               </div>
             )}
           </div>
-          {config.deliveredBulk ? (
-            <button onClick={handleBulkDeliver} disabled={busy} className="btn-signal mb-4">
+
+          {bulkBoard && (
+            <button onClick={handleBulkBoard} disabled={busy} className="btn-signal mb-2">
+              {config.bulkBoardLabel}
+            </button>
+          )}
+          {bulkDeliver && (
+            <button onClick={handleBulkDeliver} disabled={busy} className="btn-signal mb-2">
               {config.bulkDeliverLabel}
             </button>
-          ) : (
-            applyRecalcOrder(boardedWaitingDelivery).map((stop, i) => (
-              <StopCard
-                routeLabel={routeLabelOf(stop)}
-                key={stop.id}
-                stop={stop}
-                number={doneCount + i + 1}
-                actionLabel={config.deliverAction}
-                onAction={handleIndividualDeliver}
-                onMarkAbsent={handleAbsent}
-                onArrive={handleArrive}
-                disabled={busy}
-                nav={navUrls(destinations[stop.studentId])}
-                phone={phones[stop.studentId]}
-                className="cascade-item"
-                style={cascadeStyle(i, 40)}
-              />
-            ))
+          )}
+
+          {/* Fases individuales: la siguiente parada abierta con sus botones; las demás, en una línea. */}
+          {actionList.length > 0 && (
+            <div className="space-y-1.5">
+              {actionList.map((stop, i) =>
+                stop.id === effOpenId ? (
+                  <StopCard
+                    routeLabel={routeLabelOf(stop)}
+                    key={stop.id}
+                    stop={stop}
+                    number={doneCount + i + 1}
+                    actionLabel={actionLabel}
+                    onAction={onStopAction}
+                    onMarkAbsent={handleAbsent}
+                    onArrive={handleArrive}
+                    onRemove={stop.status === 'pending' && !allResolved ? handleRemoveFromToday : undefined}
+                    disabled={busy}
+                    nav={navUrls(destinations[stop.studentId])}
+                    phone={phones[stop.studentId]}
+                    className="cascade-item"
+                  />
+                ) : (
+                  <StopRow
+                    key={stop.id}
+                    number={doneCount + i + 1}
+                    stop={stop}
+                    routeLabel={routeLabelOf(stop)}
+                    onClick={() => setOpenStopId(stop.id)}
+                  />
+                )
+              )}
+            </div>
+          )}
+
+          {/* Fases masivas: la lista queda plegada para no alargar la pantalla. */}
+          {(bulkBoard || bulkDeliver) && waitingStops.length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => setShowWaiting((v) => !v)}
+                className="w-full flex items-center justify-between rounded-xl border border-navy-100 bg-white px-3 py-2 text-sm font-medium text-navy-600"
+              >
+                <span>Ver alumnos ({waitingStops.length})</span>
+                <ChevronDown size={14} className={`transition-transform ${showWaiting ? 'rotate-180' : ''}`} />
+              </button>
+              {showWaiting && (
+                <div className="space-y-1.5 mt-1.5">
+                  {waitingStops.map((stop, i) => (
+                    <StopRow key={stop.id} number={doneCount + i + 1} stop={stop} routeLabel={routeLabelOf(stop)} action={removeBtn(stop)} />
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
 
-      {/* Lista completa: primero los ya atendidos, en el orden real en que se
-          atendieron (el mismo número que lleva el mapa), luego los que faltan. */}
-      <div>
-        <p className="text-sm font-medium text-navy-600 mb-2 mt-4">Todos los alumnos</p>
-        {(() => {
-          let next = doneCount;
-          return orderedAll.map((stop, i) => {
-            let number;
-            if (stop.seq) number = stop.seq;
-            else if (stop.status === 'absent') number = false;
-            else {
-              next += 1;
-              number = next;
-            }
-            return (
-              <div key={stop.id} className="relative">
-                <StopCard routeLabel={routeLabelOf(stop)} stop={stop} number={number} disabled className="cascade-item" style={cascadeStyle(i, 15, 300)} />
-                {stop.status !== 'pending' && trip.status === 'in_progress' && (
-                  <button
-                    type="button"
-                    onClick={() => handleUndo(stop)}
-                    disabled={busy}
-                    className="ml-3 mb-3 text-xs font-semibold text-navy-600 underline underline-offset-2 inline-flex items-center gap-1"
-                  ><Undo2 size={12} /> Deshacer marcado</button>
-                )}
-                {stop.status === 'pending' && !allResolved && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFromToday(stop)}
-                    disabled={busy}
-                    className="ml-3 mb-3 text-xs font-semibold text-stop underline underline-offset-2"
-                  >Quitar de este recorrido</button>
-                )}
-              </div>
-            );
-          });
-        })()}
-      </div>
+      {/* Ya atendidos: plegado por defecto, en el orden real en que se atendieron (igual que el mapa). */}
+      {servedStops.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowServed((v) => !v)}
+            className="w-full flex items-center justify-between rounded-xl border border-navy-100 bg-white px-3 py-2 text-sm font-medium text-navy-600"
+          >
+            <span>Ya atendidos ({servedStops.length})</span>
+            <ChevronDown size={14} className={`transition-transform ${showServed ? 'rotate-180' : ''}`} />
+          </button>
+          {showServed && (
+            <div className="space-y-1.5 mt-1.5">
+              {servedStops.map((stop) => (
+                <StopRow
+                  key={stop.id}
+                  number={stop.status === 'absent' ? null : stop.seq}
+                  stop={stop}
+                  routeLabel={routeLabelOf(stop)}
+                  action={undoBtn(stop)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {allResolved && (isDriver || nannyLed) && (
         <form onSubmit={handleFinish} className="card space-y-3">

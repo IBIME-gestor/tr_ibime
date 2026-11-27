@@ -21,7 +21,7 @@ import { db } from './config';
 import { getOne } from './db';
 import { Routes, Students, RouteLists } from './services';
 import { getCalendarDay, studentAttends } from './schoolCalendar';
-import { getCoverageFor } from './coverages';
+import { getCoverageFor, getCoverageExclusions, excludedFromCoverages } from './coverages';
 import { optimizeStopOrder } from '../utils/routeOptimizer';
 import { actualSequence, buildSavedOrder, timeKeyFor, locKeyFor, tsMs, withActualOrder } from '../utils/tripOrder';
 
@@ -304,24 +304,49 @@ async function fetchStudentsByIds(ids) {
 /**
  * Alumnos de una ruta para una fecha. Ruta normal: sale de la lista del
  * periodo (si existe). Taller, o ruta sin lista del periodo: de los alumnos.
- * Devuelve { students, listRows (studentId → fila) | null, listId }.
+ * Devuelve { students, listRows (studentId → fila) | null, listId, calendarDay, excluded }.
+ *  · excluded = { morning:Set, afternoon:Set } alumnos que el admin marcó como «no irá»
+ *    en la cobertura de ese día. NO se quitan de `students`: usa rosterApplies() para filtrar.
+ * opts (opcionales, para pantallas de consulta del admin):
+ *  · calendarDay: regla del calendario a usar (null = día normal) en vez de leerla de Firestore.
+ *  · coverages: coberturas ya leídas de ese día, para no volver a consultarlas por ruta.
  */
-export async function loadRoster(route, date, driverId = '') {
+export async function loadRoster(route, date, driverId = '', opts = {}) {
   // Calendario escolar: los alumnos de niveles sin labores ese día ni aparecen en la lista.
-  const calendarDay = await getCalendarDay(date);
+  const calendarDay = opts.calendarDay !== undefined ? opts.calendarDay : await getCalendarDay(date);
+  const excluded = opts.coverages
+    ? excludedFromCoverages(opts.coverages.filter((c) => c.routeId === route.id))
+    : await getCoverageExclusions(route.id, date);
   const attending = (rows) => rows.filter((s) => studentAttends(s, calendarDay));
   if (route.kind === 'taller') {
-    return { students: attending(await Students.listByTallerRoute(route.id)), listRows: null, listId: '', calendarDay };
+    return { students: attending(await Students.listByTallerRoute(route.id)), listRows: null, listId: '', calendarDay, excluded };
   }
   const lists = await RouteLists.listByRoute(route.id);
   const list = pickListForDate(lists, date, driverId || route.driverId || '');
   if (!list) {
-    return { students: attending(await Students.listByRoute(route.id)), listRows: null, listId: '', calendarDay };
+    return { students: attending(await Students.listByRoute(route.id)), listRows: null, listId: '', calendarDay, excluded };
   }
   const listRows = {};
   (list.rows || []).forEach((r) => { if (r.studentId) listRows[r.studentId] = r; });
   const students = attending(await fetchStudentsByIds(Object.keys(listRows)));
-  return { students, listRows, listId: list.id, calendarDay };
+  return { students, listRows, listId: list.id, calendarDay, excluded };
+}
+
+/** ¿Le toca al alumno ese turno en esa fecha? Incluye lista, calendario escolar y los «no irá» de la cobertura. */
+export function rosterApplies(student, date, shift, route, roster) {
+  if (roster?.excluded?.[shift]?.has(student.id)) return false;
+  return studentAppliesToday(student, date, shift, route, roster?.listRows ?? null);
+}
+
+/**
+ * Ruta inhábil: ese turno quedó SIN alumnos por el calendario escolar (o porque todos
+ * fueron marcados como «no irá»). Devuelve null si la ruta sí tiene alumnos que atender.
+ */
+export function inhabilInfo(roster, shift, count) {
+  if (!roster || count > 0) return null;
+  if (roster.calendarDay) return { reason: roster.calendarDay.reason || '', calendar: true };
+  if (roster.excluded?.[shift]?.size) return { reason: '', calendar: false };
+  return null;
 }
 
 export function subscribeTodayTrip(routeId, shift, callback, onError) {
@@ -397,9 +422,12 @@ export async function startTrip(route, shift, driverId, kmInicial, startLocation
   const allStudents = roster.students;
   // Solo entran a la lista de hoy los alumnos que la lista del periodo marca
   // para este turno y esta fecha (o, sin lista, su servicio/calendario).
-  const students = allStudents.filter((s) => studentAppliesToday(s, date, shift, route, roster.listRows));
-  if (roster.calendarDay && students.length === 0) {
-    throw new Error(`Hoy no hay alumnos con labores en esta ruta${roster.calendarDay.reason ? ` (${roster.calendarDay.reason})` : ''}. Es día inhábil para sus niveles.`);
+  const students = allStudents.filter((s) => rosterApplies(s, date, shift, route, roster));
+  const inhabil = inhabilInfo(roster, shift, students.length);
+  if (inhabil) {
+    const err = new Error(`Ruta inhábil: hoy no tienes alumnos que realizar en esta ruta${inhabil.reason ? ` (${inhabil.reason})` : ''}.`);
+    err.code = 'INHABIL';
+    throw err;
   }
 
   // Validaciones de la unidad (odómetro y capacidad).
@@ -603,10 +631,15 @@ export async function startTripGroup(routes, shift, driverId, kmInicial, startLo
   const plans = [];
   for (const route of routes) {
     const roster = await loadRoster(route, date, driverId);
-    const students = roster.students.filter((s) => studentAppliesToday(s, date, shift, route, roster.listRows));
+    const students = roster.students.filter((s) => rosterApplies(s, date, shift, route, roster));
     plans.push({ route, roster, students });
   }
   const totalStudents = plans.reduce((n, p) => n + p.students.length, 0);
+  if (totalStudents === 0 && plans.some((p) => inhabilInfo(p.roster, shift, 0))) {
+    const err = new Error('Ruta inhábil: hoy no tienes alumnos que realizar en estas rutas.');
+    err.code = 'INHABIL';
+    throw err;
+  }
 
   let kmAlert = null;
   if (unitId) {

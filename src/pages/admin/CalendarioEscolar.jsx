@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarX2, Trash2 } from 'lucide-react';
-import { Students } from '../../firebase/services';
+import { CalendarX2, Trash2, Eye, ChevronDown, Sun, Sunset } from 'lucide-react';
+import { Students, Routes } from '../../firebase/services';
 import { useAuth } from '../../context/AuthContext';
 import {
   listCalendar, saveCalendarDay, removeCalendarDay, studentAttends, normLevel, MODE_LABEL,
 } from '../../firebase/schoolCalendar';
+import { listCoveragesByDate } from '../../firebase/coverages';
 import { todayString } from '../../firebase/trips';
+import { loadShiftRosters, applyExcluded, runPool, levelText } from '../../utils/rosterView';
 
 /**
  * Calendario escolar · días sin labores · solo admin
@@ -15,6 +17,8 @@ import { todayString } from '../../firebase/trips';
  *  · «Solo asisten algunos niveles»: la lista del operador sale solo con esos niveles
  *    (ej. mañana solo viene bachillerato).
  * Los niveles salen del campo «Nivel» de los alumnos.
+ *  · «Ver alumnos» (visor, solo informativo): muestra, ruta por ruta, quiénes SÍ irán en la ida y
+ *    en la vuelta con ese ajuste, y qué rutas quedan sin alumnos (ruta inhábil).
  */
 const addDays = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
 const weekday = (iso) => new Date(`${iso}T12:00:00`).getDay();
@@ -25,9 +29,112 @@ const MODES = [
   ['levels-only', 'Solo asisten algunos niveles', 'Los demás no asisten'],
 ];
 
+/**
+ * Visor informativo: alumnos que SÍ estarán en cada ruta (ida y vuelta) en `date` con la regla `rule`
+ * (el documento del calendario, o el ajuste que se está armando). No modifica nada.
+ */
+function RosterViewer({ date, rule, routes }) {
+  const [rows, setRows] = useState({}); // routeId -> { ida, vuelta }
+  const [done, setDone] = useState(0);
+  const [error, setError] = useState('');
+  const [openRoute, setOpenRoute] = useState('');
+  const [q, setQ] = useState('');
+  const ruleKey = `${rule.mode}|${(rule.levels || []).join(',')}`;
+  const allOff = rule.mode === 'all';
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows({}); setDone(0); setError(''); setOpenRoute('');
+    if (allOff || !routes.length) return undefined;
+    (async () => {
+      const coverages = await listCoveragesByDate(date);
+      await runPool(routes, 4, async (r) => {
+        try {
+          const x = await loadShiftRosters(r, date, { calendarDay: { mode: rule.mode, levels: rule.levels || [] }, coverages });
+          if (cancelled) return;
+          setRows((prev) => ({ ...prev, [r.id]: { ida: applyExcluded(x.ida, x.excluded.morning), vuelta: applyExcluded(x.vuelta, x.excluded.afternoon) } }));
+        } catch (e) {
+          console.error(e);
+          if (!cancelled) setError('Algunas rutas no se pudieron consultar.');
+        }
+        if (!cancelled) setDone((n) => n + 1);
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [date, ruleKey, routes.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (allOff) {
+    return <p className="rounded-lg bg-red-50 border border-red-200 text-red-800 text-xs px-3 py-2">Sin labores para todos: ninguna ruta sale ese día y los operadores verán «Ruta inhábil».</p>;
+  }
+
+  const loaded = routes.filter((r) => rows[r.id]);
+  const needle = q.trim().toLowerCase();
+  const shown = loaded
+    .filter((r) => !needle || r.name.toLowerCase().includes(needle) || [...rows[r.id].ida, ...rows[r.id].vuelta].some((s) => String(s.name).toLowerCase().includes(needle)))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'));
+  const empty = loaded.filter((r) => !rows[r.id].ida.length && !rows[r.id].vuelta.length).length;
+  const idaTotal = loaded.reduce((n, r) => n + rows[r.id].ida.length, 0);
+  const vueltaTotal = loaded.reduce((n, r) => n + rows[r.id].vuelta.length, 0);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-navy-500">
+        {done < routes.length ? `Consultando rutas… ${done}/${routes.length}` : (
+          <><b>{idaTotal}</b> alumnos en ida · <b>{vueltaTotal}</b> en vuelta · <b className={empty ? 'text-amber-700' : ''}>{empty}</b> ruta(s) sin alumnos (inhábiles). Solo informativo.</>
+        )}
+      </p>
+      {error && <p className="text-[11px] text-red-700">{error}</p>}
+      <input className="admin-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar ruta o alumno…" />
+      <ul className="max-h-80 overflow-auto rounded-lg border border-navy-100 bg-white divide-y divide-navy-100">
+        {shown.map((r) => {
+          const x = rows[r.id];
+          const none = !x.ida.length && !x.vuelta.length;
+          const open = openRoute === r.id || (needle && !none);
+          return (
+            <li key={r.id}>
+              <button type="button" onClick={() => setOpenRoute(openRoute === r.id ? '' : r.id)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-navy-50">
+                <span className="min-w-0 flex-1 text-sm font-medium text-navy-800 truncate">{r.name}{r.kind === 'taller' ? ' · Taller' : ''}</span>
+                {none ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 shrink-0">Ruta inhábil</span>
+                ) : (
+                  <span className="text-[11px] text-navy-500 shrink-0 inline-flex items-center gap-2">
+                    <span className="inline-flex items-center gap-0.5"><Sun size={11} />{x.ida.length}</span>
+                    <span className="inline-flex items-center gap-0.5"><Sunset size={11} />{x.vuelta.length}</span>
+                  </span>
+                )}
+                <ChevronDown size={14} className={`shrink-0 text-navy-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+              </button>
+              {open && (
+                <div className="grid sm:grid-cols-2 gap-3 px-3 pb-3 bg-navy-50/50">
+                  {[['Ida', x.ida], ['Vuelta', x.vuelta]].map(([label, list]) => (
+                    <div key={label}>
+                      <p className="text-[11px] font-bold text-navy-500 uppercase tracking-wide pt-2 pb-1">{label} · {list.length}</p>
+                      {list.length ? (
+                        <ul className="space-y-0.5">
+                          {list.map((s) => (
+                            <li key={s.id} className="text-xs text-navy-700 truncate">{s.name}{levelText(s) ? <span className="text-navy-400"> · {levelText(s)}</span> : null}</li>
+                          ))}
+                        </ul>
+                      ) : <p className="text-xs text-navy-400">Sin alumnos.</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+        {done >= routes.length && !shown.length && <li className="p-4 text-center text-sm text-navy-400">Sin resultados.</li>}
+      </ul>
+    </div>
+  );
+}
+
 export default function CalendarioEscolar() {
   const { profile } = useAuth();
   const [students, setStudents] = useState([]);
+  const [routes, setRoutes] = useState([]);
+  const [openDay, setOpenDay] = useState(''); // fecha cuyo visor está abierto
+  const [previewOpen, setPreviewOpen] = useState(false); // visor del ajuste que se está armando
   const [days, setDays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -43,8 +150,8 @@ export default function CalendarioEscolar() {
   async function load() {
     setLoading(true); setError('');
     try {
-      const [st, cal] = await Promise.all([Students.list(), listCalendar(addDays(todayString(), -7), addDays(todayString(), 365))]);
-      setStudents(st || []); setDays(cal || []);
+      const [st, cal, ro] = await Promise.all([Students.list(), listCalendar(addDays(todayString(), -7), addDays(todayString(), 365)), Routes.list()]);
+      setStudents(st || []); setDays(cal || []); setRoutes(ro || []);
     } catch (e) {
       console.error(e);
       setError(e?.message || 'No se pudo cargar el calendario. ¿Ya publicaste las reglas de Firestore nuevas?');
@@ -149,6 +256,13 @@ export default function CalendarioEscolar() {
           <p className="rounded-lg bg-navy-50 text-[11px] text-navy-600 px-3 py-2">
             {targetDates.length} día(s) hábil(es) en el rango. Con este ajuste asisten <b>{attendingNow}</b> de {students.length} alumnos.
           </p>
+          <button
+            type="button" onClick={() => setPreviewOpen((v) => !v)} disabled={!targetDates.length}
+            className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-navy-200 bg-white text-navy-700 text-xs font-bold h-9 hover:bg-navy-50 disabled:opacity-40"
+          >
+            <Eye size={14} /> {previewOpen ? 'Ocultar visor' : `Ver qué alumnos irían (${targetDates[0] ? fmt(targetDates[0]) : '—'})`}
+          </button>
+          {previewOpen && targetDates[0] && <RosterViewer date={targetDates[0]} rule={rule} routes={routes} />}
           <button type="button" className="btn-admin-primary" onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar ajuste'}</button>
           {msg && <p className="text-xs text-navy-600">{msg}</p>}
         </div>
@@ -159,14 +273,27 @@ export default function CalendarioEscolar() {
             {loading && <p className="p-4 text-sm text-navy-400">Cargando…</p>}
             {!loading && !days.length && <p className="p-6 text-center text-sm text-navy-400">No hay días con ajuste. Todos los días se consideran con labores.</p>}
             {days.map((d) => (
-              <div key={d.id} className="flex items-center gap-3 px-4 py-3">
-                <div className="w-24 shrink-0"><p className="text-sm font-semibold first-letter:uppercase">{fmt(d.date)}</p>{d.date < todayString() && <p className="text-[10px] text-navy-400">pasado</p>}</div>
-                <div className="min-w-0 flex-1">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${d.mode === 'all' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{MODE_LABEL[d.mode]}</span>
-                  {d.mode !== 'all' && <p className="text-xs text-navy-600 mt-0.5">{(d.levels || []).join(', ')}</p>}
-                  {d.reason && <p className="text-[11px] text-navy-400">{d.reason}</p>}
+              <div key={d.id}>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="w-24 shrink-0"><p className="text-sm font-semibold first-letter:uppercase">{fmt(d.date)}</p>{d.date < todayString() && <p className="text-[10px] text-navy-400">pasado</p>}</div>
+                  <div className="min-w-0 flex-1">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${d.mode === 'all' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{MODE_LABEL[d.mode]}</span>
+                    {d.mode !== 'all' && <p className="text-xs text-navy-600 mt-0.5">{(d.levels || []).join(', ')}</p>}
+                    {d.reason && <p className="text-[11px] text-navy-400">{d.reason}</p>}
+                  </div>
+                  <button
+                    type="button" onClick={() => setOpenDay(openDay === d.date ? '' : d.date)} aria-expanded={openDay === d.date}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold ${openDay === d.date ? 'bg-navy-700 text-white border-navy-700' : 'bg-white text-navy-700 border-navy-200 hover:bg-navy-50'}`}
+                  >
+                    <Eye size={14} /> Ver alumnos
+                  </button>
+                  <button type="button" className="link-danger shrink-0" onClick={() => remove(d)} aria-label="Quitar"><Trash2 size={15} /></button>
                 </div>
-                <button type="button" className="link-danger shrink-0" onClick={() => remove(d)} aria-label="Quitar"><Trash2 size={15} /></button>
+                {openDay === d.date && (
+                  <div className="border-t border-navy-100 bg-navy-50/60 px-4 py-3">
+                    <RosterViewer date={d.date} rule={d} routes={routes} />
+                  </div>
+                )}
               </div>
             ))}
           </div>

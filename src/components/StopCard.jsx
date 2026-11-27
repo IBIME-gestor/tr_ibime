@@ -39,6 +39,7 @@ export default function StopCard({
   onAction,
   onMarkAbsent,
   onArrive,
+  onRemove, // opcional: «Quitar» de este recorrido (solo si sigue pendiente)
   disabled,
   nav,
   phone,
@@ -62,10 +63,10 @@ export default function StopCard({
   const timeUp = secondsLeft === 0;
 
   return (
-    <div className={`rounded-2xl border-2 p-4 mb-3 ${STATUS_STYLES[stop.status] || STATUS_STYLES.pending} ${className}`} style={style}>
+    <div className={`rounded-2xl border-2 p-3 mb-2 ${STATUS_STYLES[stop.status] || STATUS_STYLES.pending} ${className}`} style={style}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="font-display font-semibold text-lg text-navy-900 truncate">
+          <p className="font-display font-semibold text-base text-navy-900 truncate">
             {shownNumber != null ? `${shownNumber}. ` : ''}
             {stop.name}
           </p>
@@ -74,10 +75,19 @@ export default function StopCard({
               {routeLabel}
             </span>
           )}
-          <p className="text-sm text-navy-400">
+          <p className="text-xs text-navy-400">
             Matrícula {stop.matricula} · {STATUS_LABEL[stop.status] || 'Pendiente'}{stop.sporadic ? ' · Esporádico' : ''}
           </p>
         </div>
+        {showActions && onRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(stop)}
+            className="text-[11px] font-semibold text-stop underline underline-offset-2 shrink-0 pt-1"
+          >
+            Quitar
+          </button>
+        )}
         {isDone && <span className="text-2xl shrink-0">✓</span>}
         {isAbsent && <span className="text-xs text-navy-400 shrink-0">—</span>}
       </div>
@@ -93,13 +103,13 @@ export default function StopCard({
       )}
 
       {showActions && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {nav?.maps && (
             <a
               href={nav.maps}
               target="_blank"
               rel="noreferrer"
-              className="text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[36px] flex items-center"
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[34px] flex items-center"
             >
               📍 Maps
             </a>
@@ -109,7 +119,7 @@ export default function StopCard({
               href={nav.waze}
               target="_blank"
               rel="noreferrer"
-              className="text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[36px] flex items-center"
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[34px] flex items-center"
             >
               🚗 Waze
             </a>
@@ -117,7 +127,7 @@ export default function StopCard({
           {phone && (
             <a
               href={`tel:${phone}`}
-              className="text-xs px-3 py-2 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[36px] flex items-center"
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-navy-100 text-navy-600 whitespace-nowrap min-h-[34px] flex items-center"
             >
               📞 Llamar
             </a>
@@ -125,7 +135,7 @@ export default function StopCard({
           {onArrive && secondsLeft == null && (
             <button
               onClick={() => onArrive(stop)}
-              className="text-xs px-3 py-2 rounded-xl border border-signal-amber text-signal-amber font-semibold whitespace-nowrap min-h-[36px] flex items-center"
+              className="text-xs px-2.5 py-1.5 rounded-xl border border-signal-amber text-signal-amber font-semibold whitespace-nowrap min-h-[36px] flex items-center"
             >
               📍 Llegué
             </button>
@@ -134,7 +144,7 @@ export default function StopCard({
           <div className="flex gap-2 ml-auto w-full sm:w-auto">
             <button
               onClick={() => onMarkAbsent(stop)}
-              className={`flex-1 sm:flex-none text-xs px-3 py-2 rounded-xl border min-h-[44px] transition-colors ${
+              className={`flex-1 sm:flex-none text-xs px-2.5 py-1.5 rounded-xl border min-h-[44px] transition-colors ${
                 timeUp ? 'border-stop bg-stop text-white font-semibold' : 'border-navy-100 text-navy-400'
               }`}
             >
@@ -142,7 +152,7 @@ export default function StopCard({
             </button>
             <button
               onClick={() => onAction(stop)}
-              className="flex-1 sm:flex-none px-4 py-3 rounded-xl bg-navy-800 text-white font-display font-semibold min-h-[44px] active:scale-[0.97] transition-transform"
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-navy-800 text-white font-display font-semibold min-h-[44px] active:scale-[0.97] transition-transform"
             >
               {actionLabel}
             </button>

@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Sun, Sunset, History, Users, ChevronDown, ChevronRight, Clock, MapPin, Layers } from 'lucide-react';
+import { Sun, Sunset, History, Users, ChevronDown, ChevronRight, Clock, MapPin, Layers, CalendarX2, Moon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Routes, Students, Schools, Units } from '../../firebase/services';
 import { listCoveragesByDate, SHIFT_LABEL as COVER_LABEL } from '../../firebase/coverages';
 import {
-  studentAppliesToday,
+  rosterApplies,
+  inhabilInfo,
+  DAY_ROLLOVER_HOUR,
   loadRoster,
   todayString,
   subscribeTodayTrip,
@@ -107,7 +109,7 @@ function RouteMiniMap({ markers, schoolLoc, schoolName }) {
  * presionar. Reemplaza a los botones planos "Recorrido de ida/vuelta"
  * de antes por algo que SÍ refleja el estado real del recorrido de hoy.
  */
-function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
+function ShiftCard({ shift, route, trip, stops, studentsCount, navigate, blocked = null, dayWord = 'hoy' }) {
   const Icon = shift === 'morning' ? Sun : Sunset;
   const title = shift === 'morning' ? 'Recorrido de ida' : 'Recorrido de vuelta';
   const subtitle = shift === 'morning' ? 'Matutino · domicilio → plantel' : 'Vespertino · plantel → domicilio';
@@ -125,6 +127,26 @@ function ShiftCard({ shift, route, trip, stops, studentsCount, navigate }) {
     active: { label: 'En curso', className: 'badge-amber' },
     done: { label: 'Completado', className: 'badge-go' },
   }[status];
+
+  // Día inhábil sin alumnos en este turno: no hay nada que iniciar (ni km inicial ni final).
+  if (blocked && status === 'idle') {
+    return (
+      <div className="w-full rounded-xl border-2 border-dashed border-navy-200 bg-navy-50 p-3.5">
+        <div className="flex items-start gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-navy-200 text-navy-500 flex items-center justify-center shrink-0">
+            <CalendarX2 size={17} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-display font-semibold text-navy-600 leading-tight">{title} · Ruta inhábil</p>
+            <p className="text-xs text-navy-500 mt-0.5">
+              {dayWord === 'mañana' ? 'Mañana' : 'Hoy'} no tienes alumnos que realizar en esta ruta.
+              {blocked.reason ? ` (${blocked.reason})` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   function handleClick() {
     if (status === 'done' && trip?.id) {
@@ -213,6 +235,9 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   const [everOpen, setEverOpen] = useState(defaultOpen); // el mapa y la lista se pintan hasta que se abre
   const [rosterAll, setRosterAll] = useState([]);
   const [listRows, setListRows] = useState(null); // filas de la lista del periodo (null = sin lista)
+  const [calendarDay, setCalendarDay] = useState(null); // ajuste del calendario escolar de ese día
+  const [excluded, setExcluded] = useState(null); // «no irá» de la cobertura de ese día
+  const [viewShift, setViewShift] = useState(null); // turno que el operador quiere ver (null = el que toca)
   const [rosterLoading, setRosterLoading] = useState(true);
   const [tripMorning, setTripMorning] = useState(null);
   const [tripAfternoon, setTripAfternoon] = useState(null);
@@ -227,14 +252,17 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   // «Hoy» cambia a las 19:30 (ya cuenta como el día siguiente): si la pantalla
   // queda abierta, se vuelve a leer la lista para la nueva fecha.
   const rosterDate = todayString();
+  useEffect(() => setViewShift(null), [rosterDate]); // al cambiar el día vuelve al turno que toca
   useEffect(() => {
     let cancelled = false;
     setRosterLoading(true);
     loadRoster(route, rosterDate, route.driverId)
-      .then(({ students: all, listRows: rows }) => {
+      .then(({ students: all, listRows: rows, calendarDay: cal, excluded: exc }) => {
         if (!cancelled) {
           setRosterAll(all);
           setListRows(rows);
+          setCalendarDay(cal || null);
+          setExcluded(exc || null);
           setRosterLoading(false);
         }
       })
@@ -249,8 +277,10 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   // Estado real del recorrido de HOY, en vivo — para que el botón diga
   // "Iniciar" / "Continuar" / "Ver resumen" según lo que ya pasó, no
   // solo un par de botones idénticos todo el día.
-  useEffect(() => subscribeTodayTrip(route.id, 'morning', setTripMorning), [route.id]);
-  useEffect(() => subscribeTodayTrip(route.id, 'afternoon', setTripAfternoon), [route.id]);
+  // Se vuelve a suscribir cuando cambia el día de operación (a las 19:30 ya es «mañana»), si no
+  // seguiría mostrando el recorrido ya terminado de hoy.
+  useEffect(() => subscribeTodayTrip(route.id, 'morning', setTripMorning), [route.id, rosterDate]);
+  useEffect(() => subscribeTodayTrip(route.id, 'afternoon', setTripAfternoon), [route.id, rosterDate]);
 
   useEffect(() => {
     if (!tripMorning) {
@@ -272,6 +302,9 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
 
   // Turno "activo" para la previsualización de abajo: el que ya está en
   // curso si hay uno, si no el que toca según la hora del día.
+  // Después de las 19:30 el «día» ya es mañana (ver todayString).
+  const afterRollover = now.getHours() + now.getMinutes() / 60 >= DAY_ROLLOVER_HOUR;
+  const dayWord = afterRollover ? 'mañana' : 'hoy';
   const activeShift =
     route.kind === 'taller'
       ? 'afternoon'
@@ -279,9 +312,10 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
       ? 'morning'
       : tripAfternoon?.status === 'in_progress'
       ? 'afternoon'
-      : now.getHours() < 13
-      ? 'morning'
+      : now.getHours() < 13 || afterRollover
+      ? 'morning' // pasadas las 19:30 ya toca preparar la ida de mañana, no la vuelta de hoy
       : 'afternoon';
+  const previewShift = route.kind === 'taller' ? 'afternoon' : viewShift || activeShift;
 
   // Estado general de la ruta, para el rótulo del encabezado:
   //  · No iniciada (blanco) · En ruta (verde) · Por finalizar (amarillo:
@@ -305,7 +339,7 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
   // vivo desde esta pantalla.
   useEffect(() => {
     let cancelled = false;
-    getReferenceTrip(route.id, activeShift)
+    getReferenceTrip(route.id, previewShift)
       .then((ref) => {
         if (!cancelled) setRefStops(ref?.stops || []);
       })
@@ -315,24 +349,30 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
     return () => {
       cancelled = true;
     };
-  }, [route.id, activeShift]);
+  }, [route.id, previewShift]);
 
-  const today = todayString();
+  const today = rosterDate;
+  const rosterInfo = useMemo(() => ({ listRows, calendarDay, excluded }), [listRows, calendarDay, excluded]);
   const morningStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'morning', route, listRows))
+        .filter((s) => rosterApplies(s, today, 'morning', route, rosterInfo))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today, route, listRows]
+    [rosterAll, today, route, rosterInfo]
   );
   const afternoonStudents = useMemo(
     () =>
       rosterAll
-        .filter((s) => studentAppliesToday(s, today, 'afternoon', route, listRows))
+        .filter((s) => rosterApplies(s, today, 'afternoon', route, rosterInfo))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [rosterAll, today, route, listRows]
+    [rosterAll, today, route, rosterInfo]
   );
-  const activeStudents = activeShift === 'morning' ? morningStudents : afternoonStudents;
+  const activeStudents = previewShift === 'morning' ? morningStudents : afternoonStudents;
+
+  // Ruta inhábil: el calendario escolar (o los «no irá» de la cobertura) dejó sin alumnos ese turno.
+  const blockedMorning = !rosterLoading && route.kind !== 'taller' ? inhabilInfo(rosterInfo, 'morning', morningStudents.length) : null;
+  const blockedAfternoon = !rosterLoading ? inhabilInfo(rosterInfo, 'afternoon', afternoonStudents.length) : null;
+  const previewBlocked = previewShift === 'morning' ? blockedMorning : blockedAfternoon;
 
   // Alumnos del turno activo, en el orden real del último recorrido
   // (si existe) en vez de solo alfabético — así la previsualización se
@@ -413,6 +453,15 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
         <div className="overflow-hidden min-h-0">
           {everOpen && (
             <div>
+      {afterRollover && (
+        <p className="mb-2.5 flex items-start gap-2 rounded-xl bg-navy-50 border border-navy-100 text-navy-700 text-xs px-3 py-2">
+          <Moon size={14} className="shrink-0 mt-0.5" />
+          <span>
+            Ya pasaron las 7:30 p. m.: esto es lo que te toca <b>mañana</b>
+            {' '}({new Date(`${rosterDate}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}), ida y vuelta.
+          </span>
+        </p>
+      )}
       <div className="space-y-2.5">
         {route.kind !== 'taller' && (
           <ShiftCard
@@ -422,6 +471,8 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
             stops={stopsMorning}
             studentsCount={morningStudents.length}
             navigate={navigate}
+            blocked={blockedMorning}
+            dayWord={dayWord}
           />
         )}
         <ShiftCard
@@ -431,13 +482,31 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
           stops={stopsAfternoon}
           studentsCount={afternoonStudents.length}
           navigate={navigate}
+          blocked={blockedAfternoon}
+          dayWord={dayWord}
         />
       </div>
 
       <div className="mt-4 pt-4 border-t border-navy-100">
+        {route.kind !== 'taller' && (
+          <div className="grid grid-cols-2 gap-2 mb-2.5">
+            {[['morning', 'Ida', Sun], ['afternoon', 'Vuelta', Sunset]].map(([k, label, Icon]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setViewShift(k)}
+                className={`flex items-center justify-center gap-1.5 rounded-xl border-2 py-1.5 text-sm font-semibold ${
+                  previewShift === k ? 'border-navy-800 bg-navy-800 text-white' : 'border-navy-100 text-navy-600'
+                }`}
+              >
+                <Icon size={14} /> {label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-2.5">
           <p className="text-xs font-semibold text-navy-400 uppercase tracking-wide">
-            Ruta de hoy · {activeShift === 'morning' ? 'ida' : 'vuelta'}
+            Ruta de {dayWord} · {previewShift === 'morning' ? 'ida' : 'vuelta'}
           </p>
           <span className="text-xs text-navy-400">
             {orderedActiveStudents.length} parada{orderedActiveStudents.length === 1 ? '' : 's'}
@@ -449,7 +518,11 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
         <div className="mt-3">
           {rosterLoading && <p className="text-sm text-navy-400 py-2">Cargando alumnos…</p>}
           {!rosterLoading && orderedActiveStudents.length === 0 && (
-            <p className="text-sm text-navy-400 py-2">Nadie tiene servicio en este turno hoy.</p>
+            <p className="text-sm text-navy-400 py-2">
+              {previewBlocked
+                ? `Ruta inhábil: ${dayWord} no tienes alumnos que realizar en esta ruta.`
+                : `Nadie tiene servicio en este turno ${dayWord}.`}
+            </p>
           )}
           {!rosterLoading &&
             visibleStops.map((s, idx) => {
@@ -558,7 +631,8 @@ function RouteCard({ route, now, navigate, schoolsById, unitsById, allTrips, ind
  */
 function GroupStartPanel({ routes, now, navigate }) {
   const eligible = useMemo(() => routes.filter((r) => r.kind !== 'taller'), [routes]);
-  const [shift, setShift] = useState(now.getHours() < 13 ? 'morning' : 'afternoon');
+  const rolloverDay = todayString();
+  const [shift, setShift] = useState(now.getHours() < 13 || now.getHours() + now.getMinutes() / 60 >= DAY_ROLLOVER_HOUR ? 'morning' : 'afternoon');
   const [tripsByRoute, setTripsByRoute] = useState({});
   const [picked, setPicked] = useState({}); // routeId -> false si la quitó; por omisión van todas
 
@@ -570,7 +644,7 @@ function GroupStartPanel({ routes, now, navigate }) {
     );
     return () => unsubs.forEach((u) => u && u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, shift]);
+  }, [key, shift, rolloverDay]);
 
   if (eligible.length < 2) return null;
 
@@ -673,6 +747,8 @@ export default function RouteHome() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [now, setNow] = useState(new Date());
+  // «Hoy» cambia a las 19:30: al cambiar, se vuelven a leer las coberturas del nuevo día.
+  const dayKey = todayString();
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -698,7 +774,7 @@ export default function RouteHome() {
         // Cobertura de un día: ¿cubro hoy la ruta de alguien? ¿cubren hoy la mía?
         let visible = mine;
         if (profile.role !== 'nanny') {
-          const covers = await listCoveragesByDate(todayString());
+          const covers = await listCoveragesByDate(dayKey);
           const extra = [];
           for (const c of covers.filter((x) => x.driverId === profile.staffId && !mine.some((r) => r.id === x.routeId))) {
             const r = await Routes.get(c.routeId);
@@ -734,7 +810,7 @@ export default function RouteHome() {
     return () => {
       cancelled = true;
     };
-  }, [profile]);
+  }, [profile, dayKey]);
 
   if (loading) return <LoadingOverlay show label="Cargando tu ruta…" />;
 
