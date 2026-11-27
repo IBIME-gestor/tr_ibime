@@ -64,6 +64,11 @@ export default function RoutesPage() {
   }
 
   const name = (list, id) => list.find((x) => x.id === id)?.name || '—';
+  // Las unidades no tienen «name»: se identifican por placas (y modelo).
+  const unitLabel = (id) => {
+    const u = units.find((x) => x.id === id);
+    return u ? `${u.plate || 'Sin placas'}${u.model ? ` · ${u.model}` : ''}` : 'Sin unidad';
+  };
   const driverName = (id) => drivers.find((d) => d.id === id)?.name || '—';
 
   return (
@@ -199,7 +204,7 @@ export default function RoutesPage() {
               <div>
                 <p className="font-display font-semibold text-navy-800">{r.name}{r.kind === 'taller' && <span className="ml-2 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Taller</span>}</p>
                 <p className="text-sm text-navy-400">
-                  {name(schools, r.schoolId)} · {driverName(r.driverId)} · {name(units, r.unitId)}
+                  {name(schools, r.schoolId)} · {driverName(r.driverId)} · {unitLabel(r.unitId)}
                 </p>
                 <p className="text-xs text-navy-400 mt-1">
                   Conceptos: {['completo', 'medio_entrada', 'medio_salida', 'por_dia'].map((k) => r.pricingConcepts?.[k] ? (concepts.find((c) => c.id === r.pricingConcepts[k])?.name || 'Concepto') : null).filter(Boolean).join(' · ') || 'sin configurar'}
